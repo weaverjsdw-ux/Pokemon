@@ -1,0 +1,48 @@
+# Copy this file to config.yaml (gitignored) and fill in your real values.
+#
+#   cp config.example.yaml config.yaml
+#
+# config.yaml is in .gitignore so your addresses and webhook URL never
+# get committed.
+
+locations:
+  home: "123 Main St, Springfield, IL 62701"
+  work: "456 Market St, Springfield, IL 62702"
+
+# Search radius around the driving route between home and work, in miles.
+# Stores whose nearest point on the route polyline is within this distance
+# are eligible for monitoring.
+route_radius_miles: 4
+
+routing:
+  # "osrm" (free, no key) or "google" (needs API key, more accurate)
+  engine: osrm
+  # Only used if engine == google. Leave blank to fall back to OSRM.
+  google_api_key: ""
+
+# Retailers to monitor. Disable any you don't care about to cut traffic.
+retailers:
+  target:        { enabled: true }
+  walmart:       { enabled: true }
+  bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
+  pokemoncenter: { enabled: true }                  # Online-only, no store filter
+  gamestop:      { enabled: true }
+  costco:        { enabled: false }                 # Online-only
+  samsclub:      { enabled: false }                 # Online-only
+
+# Poll interval (seconds) per retailer. Jitter is added automatically.
+# Don't crank this too low — these are public site APIs, be polite.
+poll_interval_seconds: 180
+
+# Discord webhook URL. See README for the 30-second setup walkthrough.
+# Leave blank for console-only output.
+discord_webhook: ""
+
+# Optional: ntfy.sh topic for free mobile push as a backup channel.
+# https://ntfy.sh — just pick a unique topic name and subscribe on your phone.
+ntfy_topic: ""
+
+# Which Pokémon TCG products to track. "all_sealed" is the default and
+# covers every SKU in data/products.yaml. You can override with an explicit
+# list of product keys (see data/products.yaml).
+products: all_sealed

@@ -1,0 +1,28 @@
+# Local config with addresses + webhooks. NEVER commit.
+config.yaml
+config.local.yaml
+.env
+.env.*
+!.env.example
+
+# Runtime state
+*.db
+*.sqlite
+*.sqlite3
+data/stores.cache.json
+data/*.cache.json
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.python-version
+*.egg-info/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store

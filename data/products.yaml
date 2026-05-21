@@ -1,0 +1,134 @@
+# Pokémon TCG sealed product catalog.
+#
+# Each product entry maps a friendly name -> per-retailer SKUs/identifiers.
+# The scanner queries each enabled retailer using the IDs listed here.
+#
+# Add new products as sets release. Common ID sources:
+#   - Target: "TCIN" — visible in the product URL or page source.
+#   - Walmart: numeric "itemId" — visible in product URL.
+#   - Best Buy: "SKU" — visible in product URL.
+#   - GameStop: "productId" — visible in product URL.
+#   - Pokémon Center: URL slug, e.g. "pokemon-tcg-scarlet-violet-..."
+#
+# Tip: search the product page HTML for "tcin", "itemId", or "sku" to grab
+# the exact ID without guessing.
+
+prismatic_evolutions_etb:
+  name: "Prismatic Evolutions Elite Trainer Box"
+  set: "Prismatic Evolutions"
+  type: "ETB"
+  target_tcin: "93954435"
+  walmart_item_id: "15433520586"
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+prismatic_evolutions_booster_bundle:
+  name: "Prismatic Evolutions Booster Bundle"
+  set: "Prismatic Evolutions"
+  type: "Booster Bundle"
+  target_tcin: "93954434"
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+prismatic_evolutions_surprise_box:
+  name: "Prismatic Evolutions Surprise Box"
+  set: "Prismatic Evolutions"
+  type: "Surprise Box"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+journey_together_etb:
+  name: "Journey Together Elite Trainer Box"
+  set: "Journey Together"
+  type: "ETB"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+journey_together_booster_bundle:
+  name: "Journey Together Booster Bundle"
+  set: "Journey Together"
+  type: "Booster Bundle"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+destined_rivals_etb:
+  name: "Destined Rivals Elite Trainer Box"
+  set: "Destined Rivals"
+  type: "ETB"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+surging_sparks_etb:
+  name: "Surging Sparks Elite Trainer Box"
+  set: "Surging Sparks"
+  type: "ETB"
+  target_tcin: "91553808"
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+surging_sparks_booster_bundle:
+  name: "Surging Sparks Booster Bundle"
+  set: "Surging Sparks"
+  type: "Booster Bundle"
+  target_tcin: "91553807"
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+scarlet_violet_151_etb:
+  name: "Scarlet & Violet 151 Elite Trainer Box"
+  set: "151"
+  type: "ETB"
+  target_tcin: "88897904"
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+scarlet_violet_151_booster_bundle:
+  name: "Scarlet & Violet 151 Booster Bundle"
+  set: "151"
+  type: "Booster Bundle"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+paldean_fates_etb:
+  name: "Paldean Fates Elite Trainer Box"
+  set: "Paldean Fates"
+  type: "ETB"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
+
+crown_zenith_etb:
+  name: "Crown Zenith Elite Trainer Box"
+  set: "Crown Zenith"
+  type: "ETB"
+  target_tcin: ""
+  walmart_item_id: ""
+  bestbuy_sku: ""
+  gamestop_pid: ""
+  pokemoncenter_slug: ""
