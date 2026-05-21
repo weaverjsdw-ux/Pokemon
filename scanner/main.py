@@ -131,6 +131,14 @@ def check_config(cfg: cfg_mod.Config) -> int:
     print(f"  routing engine: {cfg.routing_engine}")
     print(f"  poll_interval_seconds: {cfg.poll_interval_seconds}")
     print(f"  timezone: {cfg.timezone}")
+    print(f"  heartbeat: {'every ' + str(cfg.heartbeat_seconds) + 's' if cfg.heartbeat_seconds else 'disabled'}")
+    quiet = parse_quiet_hours(cfg.quiet_hours_raw, cfg.timezone)
+    if quiet.start is None or quiet.end is None:
+        print(f"  quiet_hours: disabled")
+    else:
+        print(f"  quiet_hours: {quiet.start.strftime('%H:%M')} - {quiet.end.strftime('%H:%M')} ({cfg.timezone})")
+    pri_tiers = [t for t, w in cfg.priority_channels.items() if w]
+    print(f"  priority_channels: {', '.join(pri_tiers) if pri_tiers else 'none (all tiers -> global webhook)'}")
     print(f"  discord_webhook: {'set' if cfg.discord_webhook else 'not set (console-only)'}")
     print(f"  ntfy_topic: {'set' if cfg.ntfy_topic else 'not set'}")
 
