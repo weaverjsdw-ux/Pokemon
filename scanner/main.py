@@ -4,6 +4,7 @@
   python -m scanner --once           # single pass, then exit
   python -m scanner --dry-run        # print plan (route + stores) without polling
   python -m scanner --check-config   # validate config + catalog, no network
+  python -m scanner --init           # interactive setup wizard -> config.yaml
 """
 from __future__ import annotations
 
@@ -157,10 +158,16 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="single pass then exit")
     parser.add_argument("--dry-run", action="store_true", help="print plan only, no stock checks")
     parser.add_argument("--check-config", action="store_true", help="validate config + catalog, no network")
+    parser.add_argument("--init", action="store_true", help="interactive setup wizard")
     parser.add_argument("--log-level", default="INFO", help="DEBUG / INFO / WARNING / ERROR")
     args = parser.parse_args()
 
     configure_logging(args.log_level)
+
+    if args.init:
+        from .setup_wizard import run as run_wizard
+        return run_wizard()
+
     cfg = cfg_mod.load()
 
     if args.check_config:
