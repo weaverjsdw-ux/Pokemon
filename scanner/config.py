@@ -64,6 +64,7 @@ class Config:
     pushover: dict
     email: dict
     outbound_webhooks: list[str]
+    community_signal: dict  # passed through to scanner.sources.*
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -137,6 +138,7 @@ def load() -> Config:
         pushover=dict(raw.get("pushover") or {}),
         email=dict(raw.get("email") or {}),
         outbound_webhooks=[str(u) for u in (raw.get("outbound_webhooks") or []) if str(u).strip()],
+        community_signal=dict(raw.get("community_signal") or {}),
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

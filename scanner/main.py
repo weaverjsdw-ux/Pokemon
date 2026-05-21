@@ -18,6 +18,7 @@ from datetime import datetime
 from . import config as cfg_mod
 from . import drop_windows as drop_windows_mod
 from . import filters as filters_mod
+from .sources.reddit import RedditSource
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
 from .heartbeat import Heartbeat
@@ -89,6 +90,43 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
         out[slug] = kept
         log.info("retailer=%s stores_in_corridor=%d", slug, len(kept))
     return out
+
+
+def _build_signal_sources(cfg: cfg_mod.Config) -> list:
+    """Construct any community-signal sources the user opted into."""
+    sources = []
+    cs = cfg.community_signal or {}
+    reddit_cfg = cs.get("reddit") or {}
+    if reddit_cfg.get("enabled"):
+        sources.append(RedditSource(
+            subs=reddit_cfg.get("subs"),
+            keywords=reddit_cfg.get("keywords"),
+            retailers=reddit_cfg.get("retailers"),
+            max_age_seconds=int(reddit_cfg.get("max_age_seconds", 3600)),
+        ))
+    return sources
+
+
+def community_signal_pass(sources: list, state: State, notifier: Notifier) -> int:
+    """Poll each community-signal source, dedupe, and forward as status
+    messages. Returns the number of signals surfaced."""
+    fired = 0
+    for src in sources:
+        try:
+            for hit in src.fetch():
+                if not state.signal_should_alert(hit.source, hit.external_id):
+                    continue
+                fields = [
+                    ("Source", f"{hit.source} · {hit.where}"),
+                    ("Author", hit.author),
+                    ("Matched", ", ".join(hit.matched_keywords)),
+                    ("Link", hit.url),
+                ]
+                notifier.send_status(f"COMMUNITY: {hit.title}", fields)
+                fired += 1
+        except Exception:
+            log.exception("source=%s fetch raised", getattr(src, "name", "?"))
+    return fired
 
 
 def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], state: State, notifier: Notifier) -> int:
@@ -241,13 +279,16 @@ def main() -> int:
 
     windows = drop_windows_mod.parse(cfg.drop_windows_raw)
     enabled_slugs = [s for s, r in cfg.retailers.items() if r.enabled]
+    signal_sources = _build_signal_sources(cfg)
 
     log.info(
-        "scanning interval=%ds (+jitter), drop_windows=%d. Ctrl-C to stop.",
-        cfg.poll_interval_seconds, len(windows),
+        "scanning interval=%ds (+jitter), drop_windows=%d, signal_sources=%d. Ctrl-C to stop.",
+        cfg.poll_interval_seconds, len(windows), len(signal_sources),
     )
     while True:
         fired = run_pass(cfg, stores_by_retailer, state, notifier)
+        if signal_sources:
+            fired += community_signal_pass(signal_sources, state, notifier)
         if heartbeat is not None:
             heartbeat.record_pass(fired)
             heartbeat.maybe_send(

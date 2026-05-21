@@ -76,6 +76,22 @@ class State:
         )
         self.db.commit()
 
+    def signal_should_alert(self, source: str, external_id: str) -> bool:
+        """First time we've seen this (source, external_id) -> True (and remember).
+        Subsequent passes -> False."""
+        row = self.db.execute(
+            "SELECT 1 FROM signal_seen WHERE source=? AND external_id=?",
+            (source, external_id),
+        ).fetchone()
+        if row is not None:
+            return False
+        self.db.execute(
+            "INSERT INTO signal_seen(source, external_id, ts) VALUES (?, ?, ?)",
+            (source, external_id, int(time.time())),
+        )
+        self.db.commit()
+        return True
+
     def record_hit(
         self,
         retailer: str,

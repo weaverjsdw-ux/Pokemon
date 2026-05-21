@@ -127,6 +127,20 @@ email:
 outbound_webhooks: []
   # - https://maker.ifttt.com/trigger/pokemon_alert/with/key/XXXXX
 
+# Community-signal sources. These poll places where humans report
+# restocks (Reddit, etc.) and surface matching posts to the same Discord
+# channel. Posts are deduplicated by source+post_id; you won't see the
+# same post twice across scan passes.
+community_signal:
+  reddit:
+    enabled: false
+    subs:    [PokemonTCG, PokeInvesting]
+    # Posts qualify when title or body contains BOTH a restock keyword
+    # AND a retailer name. Lists below override the built-in defaults.
+    # keywords: [restock, "in stock", drop]
+    # retailers: [target, walmart, "best buy", costco]
+    max_age_seconds: 3600   # skip posts older than this when first starting up
+
 # Price filters drop scalper-tier markup before the alert is sent. Combine
 # with per-product `max_price` and `msrp` fields in data/products.yaml.
 # - only_at_or_near_msrp: when true, suppress alerts whose listed price

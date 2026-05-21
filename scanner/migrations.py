@@ -89,10 +89,26 @@ def _v3_hit_log(db: sqlite3.Connection) -> None:
     )
 
 
+def _v4_signal_seen(db: sqlite3.Connection) -> None:
+    """Dedupe table for community-signal posts so we don't re-alert on
+    the same Reddit/Discord post across scan passes."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS signal_seen (
+            source TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            PRIMARY KEY (source, external_id)
+        )
+        """
+    )
+
+
 MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _v1_initial_schema),
     (2, _v2_price_history),
     (3, _v3_hit_log),
+    (4, _v4_signal_seen),
 ]
 
 
