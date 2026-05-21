@@ -222,6 +222,34 @@ def check_config(cfg: cfg_mod.Config) -> int:
     print(f"  discord_webhook: {'set' if cfg.discord_webhook else 'not set (console-only)'}")
     print(f"  ntfy_topic: {'set' if cfg.ntfy_topic else 'not set'}")
 
+    pf = filters_mod.parse_price_filter(cfg.price_filter_raw)
+    print(f"  price_filter: only_at_or_near_msrp={pf.only_at_or_near_msrp} multiplier={pf.msrp_multiplier}")
+
+    windows = drop_windows_mod.parse(cfg.drop_windows_raw)
+    if windows:
+        print(f"  drop_windows: {len(windows)} configured")
+        for w in windows:
+            days = "all" if len(w.days) == 7 else ",".join(
+                d for d in ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+                if {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}[d] in w.days
+            )
+            print(f"    - {'+'.join(w.retailers)} {days} {w.start.strftime('%H:%M')}-{w.end.strftime('%H:%M')} -> {w.poll_interval_seconds}s")
+    else:
+        print(f"  drop_windows: none (global cadence always applies)")
+
+    extra_channels = []
+    if (cfg.pushover.get("user_key") or "").strip() and (cfg.pushover.get("app_token") or "").strip():
+        extra_channels.append("pushover")
+    if (cfg.email.get("smtp_host") or "").strip() and cfg.email.get("to"):
+        extra_channels.append("email")
+    if cfg.outbound_webhooks:
+        extra_channels.append(f"outbound_webhooks×{len(cfg.outbound_webhooks)}")
+    print(f"  extra channels: {', '.join(extra_channels) if extra_channels else 'none'}")
+
+    cs = cfg.community_signal or {}
+    on = [name for name in ("reddit", "nitter") if (cs.get(name) or {}).get("enabled")]
+    print(f"  community_signal: {', '.join(on) if on else 'none'}")
+
     enabled = [s for s, r in cfg.retailers.items() if r.enabled]
     disabled = [s for s, r in cfg.retailers.items() if not r.enabled]
     print(f"\nretailers enabled ({len(enabled)}): {', '.join(enabled) or '(none)'}")
