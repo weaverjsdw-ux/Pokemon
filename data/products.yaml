@@ -27,6 +27,9 @@
 #   image_url: "https://..."                    (optional)
 #     - Shown as the embed thumbnail. The official Pokemon Center or
 #       publisher images work well.
+#   max_price: "$59.99"                         (optional)
+#     - Suppress alerts whose listed price exceeds this ceiling.
+#       Independent of the global price_filter.only_at_or_near_msrp.
 #
 # Any per-retailer ID field accepts either a single SKU string or a list
 # of strings — useful when the same product has multiple catalog IDs at

@@ -17,6 +17,7 @@ from datetime import datetime
 
 from . import config as cfg_mod
 from . import drop_windows as drop_windows_mod
+from . import filters as filters_mod
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
 from .heartbeat import Heartbeat
@@ -94,6 +95,7 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
     """One full scan pass across all enabled retailers. Returns alerts fired."""
     products = cfg_mod.selected_products(cfg)
     quiet = parse_quiet_hours(cfg.quiet_hours_raw, cfg.timezone)
+    price_filter = filters_mod.parse_price_filter(cfg.price_filter_raw)
     alerts_fired = 0
     for slug, RClass in RETAILER_REGISTRY.items():
         rcfg = cfg.retailers.get(slug)
@@ -107,8 +109,16 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                 product = products.get(result.product_key, {})
                 if not priority_gate(product, quiet):
                     continue
+                if not filters_mod.passes(product, result.price, price_filter):
+                    log.info(
+                        "retailer=%s product=%s suppressed by price filter (listed=%s msrp=%s)",
+                        slug, result.product_key, result.price or "?", product.get("msrp", "?"),
+                    )
+                    continue
                 if not state.should_alert(slug, store_id, result.product_key, result.status):
                     continue
+                state.record_price(slug, result.product_key, store_id,
+                                   _price_to_cents(result.price))
                 alert = StockAlert(
                     retailer=retailer.name,
                     product_name=result.product_name,
