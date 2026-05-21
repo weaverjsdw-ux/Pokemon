@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass
 
 import requests
+
+from .log import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -34,7 +37,7 @@ class Notifier:
         self.ntfy_topic = ntfy_topic.strip()
 
     def send(self, alert: StockAlert) -> None:
-        print(alert.line(), flush=True)
+        log.info("alert %s", alert.line().replace("\n", " | "))
         if self.discord_webhook:
             self._discord(alert)
         if self.ntfy_topic:
@@ -69,7 +72,7 @@ class Notifier:
                 timeout=10,
             )
         except requests.RequestException as exc:
-            print(f"  ! discord webhook failed: {exc}", file=sys.stderr)
+            log.warning("discord webhook failed: %s", exc)
 
     def _ntfy(self, alert: StockAlert) -> None:
         try:
@@ -84,4 +87,4 @@ class Notifier:
                 timeout=10,
             )
         except requests.RequestException as exc:
-            print(f"  ! ntfy failed: {exc}", file=sys.stderr)
+            log.warning("ntfy failed: %s", exc)

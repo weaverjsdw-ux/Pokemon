@@ -11,30 +11,31 @@ import argparse
 import random
 import sys
 import time
-import traceback
 
 from . import config as cfg_mod
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
+from .log import configure as configure_logging, get_logger
 from .notify import Notifier, StockAlert
 from .retailers import ALL as RETAILER_REGISTRY
 from .retailers.base import Store
 from .route import get_polyline
 from .state import State
 
+log = get_logger(__name__)
+
 
 def build_corridor(cfg: cfg_mod.Config):
-    print(f"Geocoding addresses...", flush=True)
+    log.info("geocoding addresses")
     home = geocode(cfg.home_address)
     work = geocode(cfg.work_address)
-    print(f"  home: {home}", flush=True)
-    print(f"  work: {work}", flush=True)
+    log.info("geocoded home=%s work=%s", home, work)
 
-    print(f"Computing route via {cfg.routing_engine}...", flush=True)
+    log.info("computing route engine=%s", cfg.routing_engine)
     forward = get_polyline(home, work, cfg.routing_engine, cfg.google_api_key)
     reverse = get_polyline(work, home, cfg.routing_engine, cfg.google_api_key)
     polyline = forward + reverse
-    print(f"  route polyline points: {len(polyline)}", flush=True)
+    log.info("route polyline points=%d", len(polyline))
     return home, work, polyline
 
 
@@ -55,7 +56,7 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
             try:
                 found = retailer.find_stores(center[0], center[1], cfg.route_radius_miles + 5)
             except Exception as exc:
-                print(f"  ! {slug} store search failed: {exc}", file=sys.stderr)
+                log.warning("retailer=%s store search failed: %s", slug, exc)
                 continue
             for s in found:
                 seen[s.store_id] = s
@@ -67,7 +68,7 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
                 kept.append(s)
         kept.sort(key=lambda x: x.distance_miles or 0.0)
         out[slug] = kept
-        print(f"  {slug}: {len(kept)} stores in corridor", flush=True)
+        log.info("retailer=%s stores_in_corridor=%d", slug, len(kept))
     return out
 
 
@@ -95,8 +96,7 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                 )
                 notifier.send(alert)
         except Exception:
-            print(f"  ! {slug} check raised:", file=sys.stderr)
-            traceback.print_exc()
+            log.exception("retailer=%s check raised", slug)
 
 
 def check_config(cfg: cfg_mod.Config) -> int:
@@ -138,8 +138,10 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="single pass then exit")
     parser.add_argument("--dry-run", action="store_true", help="print plan only, no stock checks")
     parser.add_argument("--check-config", action="store_true", help="validate config + catalog, no network")
+    parser.add_argument("--log-level", default="INFO", help="DEBUG / INFO / WARNING / ERROR")
     args = parser.parse_args()
 
+    configure_logging(args.log_level)
     cfg = cfg_mod.load()
 
     if args.check_config:
@@ -162,7 +164,7 @@ def main() -> int:
         run_pass(cfg, stores_by_retailer, state, notifier)
         return 0
 
-    print(f"\nScanning every {cfg.poll_interval_seconds}s (+jitter). Ctrl-C to stop.", flush=True)
+    log.info("scanning interval=%ds (+jitter). Ctrl-C to stop.", cfg.poll_interval_seconds)
     while True:
         run_pass(cfg, stores_by_retailer, state, notifier)
         jitter = random.uniform(0.8, 1.3)
