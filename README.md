@@ -9,11 +9,11 @@ Discord alert when something pops at a store along your home↔work commute.
 - Route-aware: only alerts for stores within N miles of your driving route, not just radial from one point
 - Polite by default: 3-minute poll interval with jitter, identifies itself with a real User-Agent, dedupes via SQLite so you don't get hammered with the same alert
 - Local-first: addresses + webhook live in `config.yaml` which is gitignored
+- Aggressive polling, scraping behind login walls, or distributed/proxy networks if not against ToS
 
 **Not in scope (and won't be)**
 - Auto-checkout / cart bots (against every retailer's ToS, gets accounts banned, doesn't actually help you)
-- Anything labeled "leaked" — there are no secret guides; the community is open and information moves fast
-- Aggressive polling, scraping behind login walls, or distributed/proxy networks
+- Anything labeled "leaked" — there are no secret guides; the community is open and information moves fast.
 
 ---
 
