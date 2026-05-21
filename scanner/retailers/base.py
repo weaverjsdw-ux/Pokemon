@@ -1,0 +1,44 @@
+"""Retailer adapter interface."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable
+
+
+@dataclass
+class Store:
+    retailer: str
+    store_id: str          # retailer-specific (e.g. Target store number)
+    name: str              # human-readable, "Target Springfield IL"
+    lat: float
+    lng: float
+    distance_miles: float | None = None  # filled in after route filter
+
+    def label(self) -> str:
+        return self.name
+
+
+@dataclass
+class StockResult:
+    store: Store | None    # None for online-only retailers
+    product_key: str
+    product_name: str
+    status: str            # "IN_STOCK" | "LIMITED" | "OUT" | "ONLINE_IN_STOCK" | "ONLINE_OUT"
+    url: str
+    price: str = ""
+
+
+class Retailer:
+    name: str = ""
+    online_only: bool = False
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.opts = kwargs
+
+    def find_stores(self, center_lat: float, center_lng: float, radius_miles: float) -> list[Store]:
+        """Return candidate stores near (lat, lng). Online-only retailers return []."""
+        return []
+
+    def check(self, products: dict[str, dict[str, Any]], stores: list[Store]) -> Iterable[StockResult]:
+        """Yield StockResult for each (product, store) combination this adapter handles."""
+        return []
