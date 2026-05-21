@@ -110,6 +110,7 @@ def check_config(cfg: cfg_mod.Config) -> int:
     print(f"  route_radius_miles: {cfg.route_radius_miles}")
     print(f"  routing engine: {cfg.routing_engine}")
     print(f"  poll_interval_seconds: {cfg.poll_interval_seconds}")
+    print(f"  timezone: {cfg.timezone}")
     print(f"  discord_webhook: {'set' if cfg.discord_webhook else 'not set (console-only)'}")
     print(f"  ntfy_topic: {'set' if cfg.ntfy_topic else 'not set'}")
 

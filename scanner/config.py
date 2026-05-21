@@ -2,15 +2,39 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.yaml"
 PRODUCTS_PATH = ROOT / "data" / "products.yaml"
+
+_ENV_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env(val: Any) -> Any:
+    """Recursively expand ${VAR} or ${VAR:-default} in string config values.
+
+    Lets users keep secrets out of config.yaml entirely:
+        discord_webhook: "${DISCORD_WEBHOOK}"
+        retailers:
+          bestbuy: { enabled: true, api_key: "${BESTBUY_KEY:-}" }
+    """
+    if isinstance(val, str):
+        def sub(match: re.Match[str]) -> str:
+            name, default = match.group(1), match.group(2)
+            return os.environ.get(name, default if default is not None else "")
+        return _ENV_RE.sub(sub, val)
+    if isinstance(val, dict):
+        return {k: _expand_env(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_expand_env(v) for v in val]
+    return val
 
 
 @dataclass
@@ -30,8 +54,23 @@ class Config:
     poll_interval_seconds: int
     discord_webhook: str
     ntfy_topic: str
+    timezone: str  # IANA name, e.g. "America/Chicago"
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def tzinfo(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
+
+def _validate_timezone(name: str) -> str:
+    try:
+        ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        raise SystemExit(
+            f"config.yaml: unknown timezone {name!r}. "
+            f"Use an IANA name like 'America/Chicago' or 'UTC'."
+        )
+    return name
 
 
 def load() -> Config:
@@ -44,6 +83,7 @@ def load() -> Config:
 
     with CONFIG_PATH.open() as f:
         raw = yaml.safe_load(f) or {}
+    raw = _expand_env(raw)
 
     locations = raw.get("locations") or {}
     home = (locations.get("home") or "").strip()
@@ -64,6 +104,8 @@ def load() -> Config:
     with PRODUCTS_PATH.open() as f:
         products = yaml.safe_load(f) or {}
 
+    tz = _validate_timezone(str(raw.get("timezone", "America/Chicago")))
+
     return Config(
         home_address=home,
         work_address=work,
@@ -74,6 +116,7 @@ def load() -> Config:
         poll_interval_seconds=int(raw.get("poll_interval_seconds", 180)),
         discord_webhook=str(raw.get("discord_webhook", "") or os.getenv("DISCORD_WEBHOOK", "")),
         ntfy_topic=str(raw.get("ntfy_topic", "") or os.getenv("NTFY_TOPIC", "")),
+        timezone=tz,
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

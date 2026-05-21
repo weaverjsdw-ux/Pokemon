@@ -91,3 +91,64 @@ def test_selected_products_invalid_filter_raises(monkeypatch, tmp_path):
     cfg = cfg_mod.load()
     with pytest.raises(SystemExit, match="invalid 'products'"):
         cfg_mod.selected_products(cfg)
+
+
+def test_env_var_interpolation(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("MY_HOOK", "https://discord.example/abc")
+    monkeypatch.setenv("BESTBUY_KEY", "k-123")
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\n"
+        "discord_webhook: \"${MY_HOOK}\"\n"
+        "retailers:\n"
+        "  bestbuy: { enabled: true, api_key: \"${BESTBUY_KEY}\" }\n",
+    )
+    _write(products_path, "{}\n")
+    cfg = cfg_mod.load()
+    assert cfg.discord_webhook == "https://discord.example/abc"
+    assert cfg.retailers["bestbuy"].api_key == "k-123"
+
+
+def test_env_var_default_when_unset(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.delenv("NOT_SET_VAR", raising=False)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\n"
+        "ntfy_topic: \"${NOT_SET_VAR:-fallback-topic}\"\n",
+    )
+    _write(products_path, "{}\n")
+    cfg = cfg_mod.load()
+    assert cfg.ntfy_topic == "fallback-topic"
+
+
+def test_timezone_default(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(cfg_path, "locations: { home: h, work: w }\n")
+    _write(products_path, "{}\n")
+    cfg = cfg_mod.load()
+    assert cfg.timezone == "America/Chicago"
+    assert str(cfg.tzinfo()) == "America/Chicago"
+
+
+def test_timezone_explicit(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\ntimezone: UTC\n",
+    )
+    _write(products_path, "{}\n")
+    cfg = cfg_mod.load()
+    assert cfg.timezone == "UTC"
+
+
+def test_timezone_invalid_raises(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\ntimezone: Mars/Olympus\n",
+    )
+    _write(products_path, "{}\n")
+    with pytest.raises(SystemExit, match="unknown timezone"):
+        cfg_mod.load()

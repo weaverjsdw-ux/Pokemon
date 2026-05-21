@@ -20,11 +20,18 @@ routing:
   # Only used if engine == google. Leave blank to fall back to OSRM.
   google_api_key: ""
 
+# Local time zone — IANA name. Used for quiet hours and (Phase 2) adaptive
+# polling around known drop windows. Examples: America/Chicago, America/New_York,
+# America/Los_Angeles, Europe/London, UTC.
+timezone: America/Chicago
+
 # Retailers to monitor. Disable any you don't care about to cut traffic.
+# Any string value here (and below) supports ${ENV_VAR} or ${ENV_VAR:-default}
+# substitution, so you can keep secrets out of this file entirely.
 retailers:
   target:        { enabled: true }
   walmart:       { enabled: true }
-  bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
+  bestbuy:       { enabled: false, api_key: "${BESTBUY_API_KEY:-}" }   # Free key: https://developer.bestbuy.com
   pokemoncenter: { enabled: true }                  # Online-only, no store filter
   gamestop:      { enabled: true }
   costco:        { enabled: false }                 # Online-only
@@ -35,7 +42,8 @@ retailers:
 poll_interval_seconds: 180
 
 # Discord webhook URL. See README for the 30-second setup walkthrough.
-# Leave blank for console-only output.
+# Leave blank for console-only output. Prefer env var so the secret stays
+# out of config.yaml entirely: discord_webhook: "${DISCORD_WEBHOOK}"
 discord_webhook: ""
 
 # Optional: ntfy.sh topic for free mobile push as a backup channel.
