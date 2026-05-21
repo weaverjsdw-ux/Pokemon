@@ -29,6 +29,17 @@ from .state import State
 log = get_logger(__name__)
 
 
+def _price_to_cents(price: str) -> int | None:
+    """Parse '$49.99' / '49.99' / '' -> integer cents or None."""
+    if not price:
+        return None
+    cleaned = price.lstrip("$").replace(",", "").strip()
+    try:
+        return int(round(float(cleaned) * 100))
+    except ValueError:
+        return None
+
+
 def build_corridor(cfg: cfg_mod.Config):
     log.info("geocoding addresses")
     home = geocode(cfg.home_address)
@@ -110,6 +121,15 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                 )
                 notifier.send(alert)
                 alerts_fired += 1
+                state.record_hit(
+                    retailer=slug,
+                    store_id=store_id,
+                    product_key=result.product_key,
+                    status=result.status,
+                    tier=alert.tier,
+                    url=result.url,
+                    price_cents=_price_to_cents(result.price),
+                )
         except RetailerDisabled as exc:
             log.warning("retailer=%s skipped: %s", slug, exc)
         except BudgetExceeded as exc:

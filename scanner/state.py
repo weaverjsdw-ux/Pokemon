@@ -24,22 +24,11 @@ BACKUP_DIR = Path(__file__).resolve().parent.parent / "data" / "backups"
 
 class State:
     def __init__(self, cooldown_seconds: int = 6 * 3600):
+        from . import migrations
         self.cooldown = cooldown_seconds
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(DB_PATH)
-        self.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS last_alert (
-                retailer TEXT NOT NULL,
-                store_id TEXT NOT NULL,
-                product_key TEXT NOT NULL,
-                status TEXT NOT NULL,
-                ts INTEGER NOT NULL,
-                PRIMARY KEY (retailer, store_id, product_key)
-            )
-            """
-        )
-        self.db.commit()
+        migrations.apply(self.db)
 
     def should_alert(
         self, retailer: str, store_id: str, product_key: str, status: str
@@ -67,6 +56,43 @@ class State:
             DO UPDATE SET status=excluded.status, ts=excluded.ts
             """,
             (retailer, store_id, product_key, status, ts),
+        )
+        self.db.commit()
+
+    def record_price(
+        self,
+        retailer: str,
+        product_key: str,
+        store_id: str,
+        price_cents: int | None,
+        ts: int | None = None,
+    ) -> None:
+        """Append a price observation. Used by the at-or-below-MSRP filter
+        and Phase 3 trend detection."""
+        self.db.execute(
+            "INSERT OR IGNORE INTO price_history(retailer, product_key, store_id, price_cents, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (retailer, product_key, store_id, price_cents, ts or int(time.time())),
+        )
+        self.db.commit()
+
+    def record_hit(
+        self,
+        retailer: str,
+        store_id: str,
+        product_key: str,
+        status: str,
+        tier: str,
+        url: str,
+        price_cents: int | None,
+        ts: int | None = None,
+    ) -> None:
+        """Append-only log of every alert we send. Powers analytics; not
+        consulted by the dedupe path."""
+        self.db.execute(
+            "INSERT INTO hit_log(retailer, store_id, product_key, status, tier, url, price_cents, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (retailer, store_id, product_key, status, tier, url, price_cents, ts or int(time.time())),
         )
         self.db.commit()
 
