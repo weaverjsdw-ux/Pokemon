@@ -22,6 +22,9 @@ class StockAlert:
     url: str
     price: str = ""
     tier: str = NICE_TO_HAVE
+    msrp: str = ""           # e.g. "$49.99" — surfaced for at-or-below-MSRP signal
+    cart_url: str = ""       # Direct add-to-cart deep link, when available
+    image_url: str = ""      # Product thumbnail URL
 
     def line(self) -> str:
         dist = f" ({self.distance_miles:.1f} mi)" if self.distance_miles is not None else ""
@@ -104,7 +107,7 @@ class Notifier:
         title = f"{alert.status}: {alert.product_name}"
         if alert.tier != NICE_TO_HAVE:
             title = f"[{alert.tier.upper()}] " + title
-        embed = {
+        embed: dict = {
             "title": title,
             "url": alert.url,
             "color": color,
@@ -118,7 +121,22 @@ class Notifier:
                 {"name": "Distance", "value": f"{alert.distance_miles:.1f} mi", "inline": True}
             )
         if alert.price:
-            embed["fields"].append({"name": "Price", "value": alert.price, "inline": True})
+            price_value = alert.price
+            if alert.msrp and alert.msrp != alert.price:
+                price_value = f"{alert.price} (MSRP {alert.msrp})"
+            embed["fields"].append({"name": "Price", "value": price_value, "inline": True})
+        elif alert.msrp:
+            embed["fields"].append({"name": "MSRP", "value": alert.msrp, "inline": True})
+        if alert.cart_url:
+            embed["fields"].append(
+                {
+                    "name": "Add to cart",
+                    "value": f"[Tap to add]({alert.cart_url})",
+                    "inline": False,
+                }
+            )
+        if alert.image_url:
+            embed["thumbnail"] = {"url": alert.image_url}
         try:
             requests.post(
                 webhook,

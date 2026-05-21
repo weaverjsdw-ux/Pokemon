@@ -103,6 +103,9 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                     url=result.url,
                     price=result.price,
                     tier=product_tier(product),
+                    msrp=str(product.get("msrp", "")),
+                    cart_url=result.cart_url,
+                    image_url=result.image_url or str(product.get("image_url", "")),
                 )
                 notifier.send(alert)
                 alerts_fired += 1

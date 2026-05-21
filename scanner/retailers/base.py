@@ -30,6 +30,8 @@ class StockResult:
     status: str            # "IN_STOCK" | "LIMITED" | "OUT" | "ONLINE_IN_STOCK" | "ONLINE_OUT"
     url: str
     price: str = ""
+    cart_url: str = ""     # Direct add-to-cart deep link when retailer supports it
+    image_url: str = ""    # Hero image, surfaced in Discord embed thumbnail
 
 
 class Retailer:

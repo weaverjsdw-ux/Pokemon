@@ -131,5 +131,9 @@ class Target(Retailer):
                 product_name=prod.get("name", key),
                 status=status,
                 url=url,
+                # Target's add-to-cart deep link. The fulfillment_test_mode flag
+                # is not required but keeps the flow on the standard checkout
+                # path. Documented at help.target.com (search "cart link").
+                cart_url=f"https://www.target.com/co-cart?addToCart={tcin}",
             )
         return None

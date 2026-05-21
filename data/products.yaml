@@ -21,6 +21,12 @@
 #     - Short-circuits the alert path entirely. Useful for "I already
 #       have it, stop pinging me" without removing the SKU from the
 #       catalog.
+#   msrp: "$49.99"                              (optional)
+#     - Surfaced next to the listed price in Discord embeds so you can
+#       eyeball scalper markup at a glance.
+#   image_url: "https://..."                    (optional)
+#     - Shown as the embed thumbnail. The official Pokemon Center or
+#       publisher images work well.
 
 prismatic_evolutions_etb:
   name: "Prismatic Evolutions Elite Trainer Box"
