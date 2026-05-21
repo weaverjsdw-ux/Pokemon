@@ -55,6 +55,7 @@ class Config:
     discord_webhook: str
     ntfy_topic: str
     timezone: str  # IANA name, e.g. "America/Chicago"
+    heartbeat_seconds: int  # 0 = disable
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -117,6 +118,7 @@ def load() -> Config:
         discord_webhook=str(raw.get("discord_webhook", "") or os.getenv("DISCORD_WEBHOOK", "")),
         ntfy_topic=str(raw.get("ntfy_topic", "") or os.getenv("NTFY_TOPIC", "")),
         timezone=tz,
+        heartbeat_seconds=int(raw.get("heartbeat_seconds", 6 * 3600)),
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

@@ -43,6 +43,46 @@ class Notifier:
         if self.ntfy_topic:
             self._ntfy(alert)
 
+    def send_status(self, title: str, fields: list[tuple[str, str]]) -> None:
+        """Push a non-alert status message (heartbeat, health warning, etc.)
+
+        Plain embed without the stock-status color coding; ntfy gets a
+        lower-priority tag so phones don't buzz."""
+        log.info("status %s | %s", title, " · ".join(f"{k}={v}" for k, v in fields))
+        if self.discord_webhook:
+            embed = {
+                "title": title,
+                "color": 0x95A5A6,
+                "fields": [
+                    {"name": k, "value": v, "inline": (len(v) < 40)}
+                    for k, v in fields
+                ],
+            }
+            try:
+                requests.post(
+                    self.discord_webhook,
+                    data=json.dumps({"embeds": [embed]}),
+                    headers={"Content-Type": "application/json"},
+                    timeout=10,
+                )
+            except requests.RequestException as exc:
+                log.warning("discord status failed: %s", exc)
+        if self.ntfy_topic:
+            body = "\n".join(f"{k}: {v}" for k, v in fields)
+            try:
+                requests.post(
+                    f"https://ntfy.sh/{self.ntfy_topic}",
+                    data=body.encode("utf-8"),
+                    headers={
+                        "Title": title,
+                        "Priority": "low",
+                        "Tags": "information_source",
+                    },
+                    timeout=10,
+                )
+            except requests.RequestException as exc:
+                log.warning("ntfy status failed: %s", exc)
+
     def _discord(self, alert: StockAlert) -> None:
         color = {
             "IN_STOCK": 0x2ECC71,

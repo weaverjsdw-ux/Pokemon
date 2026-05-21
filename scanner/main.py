@@ -15,7 +15,8 @@ import time
 from . import config as cfg_mod
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
-from .http import BudgetExceeded, RetailerDisabled
+from .heartbeat import Heartbeat
+from .http import BudgetExceeded, RetailerDisabled, default_client
 from .log import configure as configure_logging, get_logger
 from .notify import Notifier, StockAlert
 from .retailers import ALL as RETAILER_REGISTRY
@@ -73,8 +74,10 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
     return out
 
 
-def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], state: State, notifier: Notifier) -> None:
+def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], state: State, notifier: Notifier) -> int:
+    """One full scan pass across all enabled retailers. Returns alerts fired."""
     products = cfg_mod.selected_products(cfg)
+    alerts_fired = 0
     for slug, RClass in RETAILER_REGISTRY.items():
         rcfg = cfg.retailers.get(slug)
         if not rcfg or not rcfg.enabled:
@@ -96,12 +99,14 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                     price=result.price,
                 )
                 notifier.send(alert)
+                alerts_fired += 1
         except RetailerDisabled as exc:
             log.warning("retailer=%s skipped: %s", slug, exc)
         except BudgetExceeded as exc:
             log.warning("retailer=%s budget hit: %s", slug, exc)
         except Exception:
             log.exception("retailer=%s check raised", slug)
+    return alerts_fired
 
 
 def check_config(cfg: cfg_mod.Config) -> int:
@@ -164,6 +169,7 @@ def main() -> int:
 
     notifier = Notifier(cfg.discord_webhook, cfg.ntfy_topic)
     state = State()
+    heartbeat = Heartbeat(cfg.heartbeat_seconds) if cfg.heartbeat_seconds else None
 
     if args.once:
         run_pass(cfg, stores_by_retailer, state, notifier)
@@ -171,7 +177,14 @@ def main() -> int:
 
     log.info("scanning interval=%ds (+jitter). Ctrl-C to stop.", cfg.poll_interval_seconds)
     while True:
-        run_pass(cfg, stores_by_retailer, state, notifier)
+        fired = run_pass(cfg, stores_by_retailer, state, notifier)
+        if heartbeat is not None:
+            heartbeat.record_pass(fired)
+            heartbeat.maybe_send(
+                notifier.send_status,
+                default_client.health_snapshot(),
+                stores_by_retailer,
+            )
         jitter = random.uniform(0.8, 1.3)
         time.sleep(cfg.poll_interval_seconds * jitter)
 
