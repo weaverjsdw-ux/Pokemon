@@ -50,14 +50,23 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ### 2. Config
 
+Either run the wizard (recommended for first-time setup):
+
+```bash
+python -m scanner --init
+```
+
+…or copy the example and edit by hand:
+
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-Open `config.yaml` and fill in:
+Either way you'll end up with a `config.yaml` containing:
 - `locations.home` and `locations.work` — full addresses or zips work
 - `route_radius_miles` — default 4
-- `discord_webhook` — see walkthrough below
+- `timezone` — IANA name; controls quiet hours and (Phase 2) drop-window awareness
+- `discord_webhook` — see walkthrough below; any string field accepts `${ENV_VAR}` so you can keep secrets out of the file
 - Enable/disable retailers as you like
 
 `config.yaml` is in `.gitignore` so your addresses and webhook never get committed.
@@ -112,6 +121,17 @@ Or one pass and exit:
 ```bash
 python -m scanner --once
 ```
+
+### 6. Run in Docker (optional)
+
+If you'd rather not babysit a Python install or want the scanner to survive reboots:
+
+```bash
+docker compose up -d
+docker compose logs -f scanner
+```
+
+`compose.yaml` bind-mounts `config.yaml`, `data/`, and `logs/` from the host so state survives container rebuilds. Secrets can be passed via `.env` (`DISCORD_WEBHOOK=...`, `BESTBUY_API_KEY=...`) instead of being baked into the config.
 
 ---
 
