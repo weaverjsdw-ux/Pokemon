@@ -224,7 +224,14 @@ def main() -> int:
                 print(f"  {s.label()}  ({s.distance_miles:.2f} mi from route)")
         return 0
 
-    notifier = Notifier(cfg.discord_webhook, cfg.ntfy_topic, cfg.priority_channels)
+    notifier = Notifier(
+        cfg.discord_webhook,
+        cfg.ntfy_topic,
+        cfg.priority_channels,
+        pushover=cfg.pushover,
+        email=cfg.email,
+        outbound_webhooks=cfg.outbound_webhooks,
+    )
     state = State()
     heartbeat = Heartbeat(cfg.heartbeat_seconds) if cfg.heartbeat_seconds else None
 

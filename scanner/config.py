@@ -61,6 +61,9 @@ class Config:
     priority_channels: dict[str, str]  # tier -> webhook URL (empty = use global)
     drop_windows_raw: Any  # passed through to scanner.drop_windows.parse
     price_filter_raw: Any  # passed through to scanner.filters.parse_price_filter
+    pushover: dict
+    email: dict
+    outbound_webhooks: list[str]
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -131,6 +134,9 @@ def load() -> Config:
         },
         drop_windows_raw=raw.get("drop_windows") or [],
         price_filter_raw=raw.get("price_filter") or {},
+        pushover=dict(raw.get("pushover") or {}),
+        email=dict(raw.get("email") or {}),
+        outbound_webhooks=[str(u) for u in (raw.get("outbound_webhooks") or []) if str(u).strip()],
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

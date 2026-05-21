@@ -104,6 +104,29 @@ discord_webhook: ""
 # https://ntfy.sh — just pick a unique topic name and subscribe on your phone.
 ntfy_topic: ""
 
+# Optional: Pushover for native push with priority/sound. $5 one-time per
+# user for unlimited. Get user_key + app_token from pushover.net.
+pushover:
+  user_key:  ""
+  app_token: ""
+  priority:  0          # -2..2; 1 = bypass quiet hours on the phone
+  sound:     "magic"
+
+# Optional: email fallback over SMTP. Use an app password for Gmail.
+email:
+  smtp_host:     ""     # e.g. smtp.gmail.com
+  smtp_port:     587
+  smtp_starttls: true
+  smtp_user:     ""
+  smtp_password: "${SMTP_PASSWORD:-}"
+  from:          ""
+  to:            []     # ["you@example.com", "phone@vtext.com"]
+
+# Optional: arbitrary outbound webhooks that receive a JSON dump of each
+# StockAlert. Use with IFTTT/Zapier/your own automations.
+outbound_webhooks: []
+  # - https://maker.ifttt.com/trigger/pokemon_alert/with/key/XXXXX
+
 # Price filters drop scalper-tier markup before the alert is sent. Combine
 # with per-product `max_price` and `msrp` fields in data/products.yaml.
 # - only_at_or_near_msrp: when true, suppress alerts whose listed price

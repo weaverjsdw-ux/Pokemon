@@ -1,11 +1,14 @@
-"""Notification sinks: console, Discord webhook, ntfy.sh."""
+"""Notification sinks: console, Discord webhook, ntfy.sh, Pushover, email, custom webhooks."""
 from __future__ import annotations
 
+import dataclasses
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 
+from . import channels
 from .log import get_logger
 from .priority import NICE_TO_HAVE
 
@@ -43,12 +46,18 @@ class Notifier:
         discord_webhook: str = "",
         ntfy_topic: str = "",
         priority_channels: dict[str, str] | None = None,
+        pushover: dict | None = None,
+        email: dict | None = None,
+        outbound_webhooks: list[str] | None = None,
     ):
         self.discord_webhook = discord_webhook.strip()
         self.ntfy_topic = ntfy_topic.strip()
         self.priority_channels = {
             k: v.strip() for k, v in (priority_channels or {}).items() if v and v.strip()
         }
+        self.pushover = pushover or {}
+        self.email = email or {}
+        self.outbound_webhooks = [u for u in (outbound_webhooks or []) if u]
 
     def send(self, alert: StockAlert) -> None:
         log.info("alert %s", alert.line().replace("\n", " | "))
@@ -57,6 +66,21 @@ class Notifier:
             self._discord(alert, webhook)
         if self.ntfy_topic:
             self._ntfy(alert)
+        if self.pushover:
+            channels.send_pushover(
+                self.pushover,
+                title=f"{alert.retailer}: {alert.product_name}",
+                body=alert.line(),
+                url=alert.url,
+            )
+        if self.email:
+            channels.send_email(
+                self.email,
+                subject=f"[scanner] {alert.status}: {alert.product_name}",
+                body=alert.line(),
+            )
+        for url in self.outbound_webhooks:
+            channels.send_generic_webhook(url, dataclasses.asdict(alert))
 
     def send_status(self, title: str, fields: list[tuple[str, str]]) -> None:
         """Push a non-alert status message (heartbeat, health warning, etc.)
