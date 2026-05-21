@@ -5,6 +5,7 @@ from .bestbuy import BestBuy
 from .costco import Costco
 from .fivebelow import FiveBelow
 from .gamestop import GameStop
+from .lgs_crystalcommerce import LGSCrystalCommerce
 from .lgs_shopify import LGSShopify
 from .meijer import Meijer
 from .pokemoncenter import PokemonCenter
@@ -27,6 +28,7 @@ ALL = {
     "meijer": Meijer,
     "fivebelow": FiveBelow,
     "lgs_shopify": LGSShopify,
+    "lgs_crystalcommerce": LGSCrystalCommerce,
 }
 
 __all__ = ["Retailer", "Store", "StockResult", "ALL"]

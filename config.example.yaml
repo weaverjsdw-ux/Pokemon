@@ -51,6 +51,14 @@ retailers:
     #  - { name: "Bob's TCG",   domain: "bobs-tcg.myshopify.com" }
     #  - { name: "Card Castle", domain: "cardcastle.com" }
 
+  # Local game stores running on Crystal Commerce. Same shape as Shopify.
+  # Per-product paths go in data/products.yaml under
+  # lgs_crystalcommerce_paths (see comments there).
+  lgs_crystalcommerce:
+    enabled: false
+    stores: []
+    #  - { name: "City Cards", domain: "citycards.crystalcommerce.com" }
+
 # Poll interval (seconds) per retailer. Jitter is added automatically.
 # Don't crank this too low — these are public site APIs, be polite.
 poll_interval_seconds: 180
