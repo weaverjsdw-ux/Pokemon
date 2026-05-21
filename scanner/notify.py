@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import requests
 
 from .log import get_logger
+from .priority import NICE_TO_HAVE
 
 log = get_logger(__name__)
 
@@ -20,26 +21,37 @@ class StockAlert:
     status: str              # "IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"
     url: str
     price: str = ""
+    tier: str = NICE_TO_HAVE
 
     def line(self) -> str:
         dist = f" ({self.distance_miles:.1f} mi)" if self.distance_miles is not None else ""
         price = f" — {self.price}" if self.price else ""
+        tag = f" [{self.tier.upper()}]" if self.tier != NICE_TO_HAVE else ""
         return (
-            f"[{self.retailer}] {self.status}: {self.product_name}{price}\n"
+            f"[{self.retailer}]{tag} {self.status}: {self.product_name}{price}\n"
             f"   {self.store_label}{dist}\n"
             f"   {self.url}"
         )
 
 
 class Notifier:
-    def __init__(self, discord_webhook: str = "", ntfy_topic: str = ""):
+    def __init__(
+        self,
+        discord_webhook: str = "",
+        ntfy_topic: str = "",
+        priority_channels: dict[str, str] | None = None,
+    ):
         self.discord_webhook = discord_webhook.strip()
         self.ntfy_topic = ntfy_topic.strip()
+        self.priority_channels = {
+            k: v.strip() for k, v in (priority_channels or {}).items() if v and v.strip()
+        }
 
     def send(self, alert: StockAlert) -> None:
         log.info("alert %s", alert.line().replace("\n", " | "))
-        if self.discord_webhook:
-            self._discord(alert)
+        webhook = self.priority_channels.get(alert.tier) or self.discord_webhook
+        if webhook:
+            self._discord(alert, webhook)
         if self.ntfy_topic:
             self._ntfy(alert)
 
@@ -83,14 +95,17 @@ class Notifier:
             except requests.RequestException as exc:
                 log.warning("ntfy status failed: %s", exc)
 
-    def _discord(self, alert: StockAlert) -> None:
+    def _discord(self, alert: StockAlert, webhook: str) -> None:
         color = {
             "IN_STOCK": 0x2ECC71,
             "LIMITED": 0xF1C40F,
             "ONLINE_IN_STOCK": 0x3498DB,
         }.get(alert.status, 0x95A5A6)
+        title = f"{alert.status}: {alert.product_name}"
+        if alert.tier != NICE_TO_HAVE:
+            title = f"[{alert.tier.upper()}] " + title
         embed = {
-            "title": f"{alert.status}: {alert.product_name}",
+            "title": title,
             "url": alert.url,
             "color": color,
             "fields": [
@@ -106,7 +121,7 @@ class Notifier:
             embed["fields"].append({"name": "Price", "value": alert.price, "inline": True})
         try:
             requests.post(
-                self.discord_webhook,
+                webhook,
                 data=json.dumps({"embeds": [embed]}),
                 headers={"Content-Type": "application/json"},
                 timeout=10,

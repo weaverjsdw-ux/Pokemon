@@ -19,6 +19,7 @@ from .heartbeat import Heartbeat
 from .http import BudgetExceeded, RetailerDisabled, default_client
 from .log import configure as configure_logging, get_logger
 from .notify import Notifier, StockAlert
+from .priority import parse_quiet_hours, product_tier, should_alert as priority_gate
 from .retailers import ALL as RETAILER_REGISTRY
 from .retailers.base import Store
 from .route import get_polyline
@@ -77,6 +78,7 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
 def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], state: State, notifier: Notifier) -> int:
     """One full scan pass across all enabled retailers. Returns alerts fired."""
     products = cfg_mod.selected_products(cfg)
+    quiet = parse_quiet_hours(cfg.quiet_hours_raw, cfg.timezone)
     alerts_fired = 0
     for slug, RClass in RETAILER_REGISTRY.items():
         rcfg = cfg.retailers.get(slug)
@@ -87,6 +89,9 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
         try:
             for result in retailer.check(products, stores):
                 store_id = result.store.store_id if result.store else "_online_"
+                product = products.get(result.product_key, {})
+                if not priority_gate(product, quiet):
+                    continue
                 if not state.should_alert(slug, store_id, result.product_key, result.status):
                     continue
                 alert = StockAlert(
@@ -97,6 +102,7 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                     status=result.status,
                     url=result.url,
                     price=result.price,
+                    tier=product_tier(product),
                 )
                 notifier.send(alert)
                 alerts_fired += 1
@@ -167,7 +173,7 @@ def main() -> int:
                 print(f"  {s.label()}  ({s.distance_miles:.2f} mi from route)")
         return 0
 
-    notifier = Notifier(cfg.discord_webhook, cfg.ntfy_topic)
+    notifier = Notifier(cfg.discord_webhook, cfg.ntfy_topic, cfg.priority_channels)
     state = State()
     heartbeat = Heartbeat(cfg.heartbeat_seconds) if cfg.heartbeat_seconds else None
 

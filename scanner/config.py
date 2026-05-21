@@ -56,6 +56,8 @@ class Config:
     ntfy_topic: str
     timezone: str  # IANA name, e.g. "America/Chicago"
     heartbeat_seconds: int  # 0 = disable
+    quiet_hours_raw: Any  # passed through to scanner.priority.parse_quiet_hours
+    priority_channels: dict[str, str]  # tier -> webhook URL (empty = use global)
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -119,6 +121,10 @@ def load() -> Config:
         ntfy_topic=str(raw.get("ntfy_topic", "") or os.getenv("NTFY_TOPIC", "")),
         timezone=tz,
         heartbeat_seconds=int(raw.get("heartbeat_seconds", 6 * 3600)),
+        quiet_hours_raw=raw.get("quiet_hours") or {},
+        priority_channels={
+            k: str(v) for k, v in (raw.get("priority_channels") or {}).items()
+        },
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

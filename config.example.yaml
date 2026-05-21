@@ -47,6 +47,22 @@ poll_interval_seconds: 180
 # stopped working. Set to 0 to disable. 21600 = every 6 hours.
 heartbeat_seconds: 21600
 
+# Quiet hours suppress alerts for nice_to_have / fyi products. must_have
+# products always alert. Times are HH:MM in `timezone` above; leave blank
+# (or omit) to disable. Wrapping midnight is fine (start > end).
+quiet_hours:
+  start: "23:00"
+  end:   "07:00"
+
+# Optional: send each priority tier to a different Discord channel by
+# pasting that channel's webhook here. Empty values fall back to the
+# global discord_webhook above. Useful if you want must_have alerts
+# pinging a phone-pushable channel and fyi going to a #spam channel.
+priority_channels:
+  must_have:    ""
+  nice_to_have: ""
+  fyi:          ""
+
 # Discord webhook URL. See README for the 30-second setup walkthrough.
 # Leave blank for console-only output. Prefer env var so the secret stays
 # out of config.yaml entirely: discord_webhook: "${DISCORD_WEBHOOK}"
