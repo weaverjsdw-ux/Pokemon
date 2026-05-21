@@ -154,6 +154,14 @@ community_signal:
     # retailers: [target, walmart, "best buy", costco]
     max_age_seconds: 3600   # skip posts older than this when first starting up
 
+  # Twitter/X via Nitter (experimental — Twitter actively blocks Nitter
+  # instances). Find a working instance from nitter-instances.com.
+  nitter:
+    enabled: false
+    instance: ""            # e.g. https://nitter.privacydev.net
+    accounts: []            # e.g. [restockalert, pokemonrestock]
+    max_age_seconds: 3600
+
 # Price filters drop scalper-tier markup before the alert is sent. Combine
 # with per-product `max_price` and `msrp` fields in data/products.yaml.
 # - only_at_or_near_msrp: when true, suppress alerts whose listed price

@@ -18,6 +18,7 @@ from datetime import datetime
 from . import config as cfg_mod
 from . import drop_windows as drop_windows_mod
 from . import filters as filters_mod
+from .sources.nitter import NitterSource
 from .sources.reddit import RedditSource
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
@@ -103,6 +104,14 @@ def _build_signal_sources(cfg: cfg_mod.Config) -> list:
             keywords=reddit_cfg.get("keywords"),
             retailers=reddit_cfg.get("retailers"),
             max_age_seconds=int(reddit_cfg.get("max_age_seconds", 3600)),
+        ))
+    nitter_cfg = cs.get("nitter") or {}
+    if nitter_cfg.get("enabled"):
+        sources.append(NitterSource(
+            instance=str(nitter_cfg.get("instance") or ""),
+            accounts=list(nitter_cfg.get("accounts") or []),
+            keywords=nitter_cfg.get("keywords"),
+            max_age_seconds=int(nitter_cfg.get("max_age_seconds", 3600)),
         ))
     return sources
 

@@ -34,7 +34,8 @@ def test_recent_hits_renders_rows(db):
     assert "target" in html
     assert "pe_etb" in html
     assert "$49.99" in html
-    assert "30s ago" in html
+    # Allow drift between test's clock and dashboard's clock
+    assert any(f"{n}s ago" in html for n in (29, 30, 31, 32))
 
 
 def test_render_health_empty():
