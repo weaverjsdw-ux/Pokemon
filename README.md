@@ -21,12 +21,32 @@ Discord alert when something pops at a store along your home↔work commute.
 
 ### 1. Install
 
+**macOS / Linux (bash/zsh):**
+
 ```bash
-git clone <this repo>
+git clone https://github.com/weaverjsdw-ux/Pokemon.git
 cd Pokemon
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/weaverjsdw-ux/Pokemon.git
+cd Pokemon
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+If `python` isn't found, install it from python.org or `winget install -e --id Python.Python.3.12` (the Microsoft Store stub does not count). If `Activate.ps1` is blocked, run once:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+**Windows (cmd.exe):** same as PowerShell, but activate with `.venv\Scripts\activate.bat`.
 
 ### 2. Config
 
@@ -59,7 +79,13 @@ Discord notifications can be slow to fire on phones if the app is backgrounded. 
 
 ### 5. Run
 
-Dry run first — confirms geocoding, routing, and store discovery without polling stock:
+Sanity-check the install first (no network calls — confirms `config.yaml` parses and the product catalog loads):
+
+```bash
+python -m scanner --check-config
+```
+
+Then dry run — confirms geocoding, routing, and store discovery without polling stock:
 
 ```bash
 python -m scanner --dry-run

@@ -1,8 +1,9 @@
 """Scanner entry point.
 
-  python -m scanner               # run scan loop forever
-  python -m scanner --once        # single pass, then exit
-  python -m scanner --dry-run     # print plan (route + stores) without polling
+  python -m scanner                  # run scan loop forever
+  python -m scanner --once           # single pass, then exit
+  python -m scanner --dry-run        # print plan (route + stores) without polling
+  python -m scanner --check-config   # validate config + catalog, no network
 """
 from __future__ import annotations
 
@@ -98,13 +99,51 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
             traceback.print_exc()
 
 
+def check_config(cfg: cfg_mod.Config) -> int:
+    """Validate config + product catalog without making any network calls.
+
+    Useful as a first sanity check after install — confirms config.yaml parses,
+    addresses are set, retailers are wired, and the product catalog loads."""
+    print("config.yaml: OK")
+    print(f"  home:  {cfg.home_address}")
+    print(f"  work:  {cfg.work_address}")
+    print(f"  route_radius_miles: {cfg.route_radius_miles}")
+    print(f"  routing engine: {cfg.routing_engine}")
+    print(f"  poll_interval_seconds: {cfg.poll_interval_seconds}")
+    print(f"  discord_webhook: {'set' if cfg.discord_webhook else 'not set (console-only)'}")
+    print(f"  ntfy_topic: {'set' if cfg.ntfy_topic else 'not set'}")
+
+    enabled = [s for s, r in cfg.retailers.items() if r.enabled]
+    disabled = [s for s, r in cfg.retailers.items() if not r.enabled]
+    print(f"\nretailers enabled ({len(enabled)}): {', '.join(enabled) or '(none)'}")
+    print(f"retailers disabled ({len(disabled)}): {', '.join(disabled) or '(none)'}")
+
+    unknown = [s for s in cfg.retailers if s not in RETAILER_REGISTRY]
+    if unknown:
+        print(f"\n! config.yaml references unknown retailers: {', '.join(unknown)}")
+
+    selected = cfg_mod.selected_products(cfg)
+    print(f"\nproducts: {len(selected)} selected / {len(cfg.products)} in catalog")
+    filt = cfg.products_filter
+    if isinstance(filt, list):
+        missing = [k for k in filt if k not in cfg.products]
+        if missing:
+            print(f"! products filter lists keys not in catalog: {', '.join(missing)}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="single pass then exit")
     parser.add_argument("--dry-run", action="store_true", help="print plan only, no stock checks")
+    parser.add_argument("--check-config", action="store_true", help="validate config + catalog, no network")
     args = parser.parse_args()
 
     cfg = cfg_mod.load()
+
+    if args.check_config:
+        return check_config(cfg)
+
     home, work, polyline = build_corridor(cfg)
     stores_by_retailer = discover_stores(cfg, home, work, polyline)
 
