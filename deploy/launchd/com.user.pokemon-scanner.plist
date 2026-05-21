@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.pokemon-scanner</string>
+
+  <!-- Adjust to where you cloned the repo + your venv location. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/CHANGEME/Pokemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/CHANGEME/Pokemon/.venv/bin/python</string>
+    <string>-m</string>
+    <string>scanner</string>
+  </array>
+
+  <!-- Run at login + keep alive forever. KeepAlive restarts on crash; -->
+  <!-- ThrottleInterval caps the restart rate so a config bug doesn't  -->
+  <!-- burn the CPU.                                                   -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LOG_LEVEL</key>
+    <string>INFO</string>
+    <!-- Set secrets here, or load via a wrapper script that sources a   -->
+    <!-- .env file before exec'ing python.                               -->
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/CHANGEME/Pokemon/logs/launchd.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/CHANGEME/Pokemon/logs/launchd.stderr.log</string>
+</dict>
+</plist>
