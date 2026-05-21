@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Iterable
 
-from .base import Retailer, Store, StockResult
+from .base import Retailer, Store, StockResult, variant_ids
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -64,29 +64,35 @@ class GameStop(Retailer):
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
         for key, prod in products.items():
-            pid = (prod.get("gamestop_pid") or "").strip()
-            if not pid:
-                continue
-            url = f"https://www.gamestop.com/p/{pid}"
-            for store in stores:
-                resp = self.http_get(
-                    "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-InventorySearch",
-                    params={"pid": pid, "storeId": store.store_id},
-                    headers={"User-Agent": UA, "Accept": "application/json"},
-                )
-                if resp is None or resp.status_code != 200:
-                    continue
-                # GameStop returns HTML fragment with availability text; fall
-                # back to a regex on the response body.
-                text = resp.text or ""
-                if re.search(r"in[\s-]*stock", text, re.I) and not re.search(
-                    r"out[\s-]*of[\s-]*stock", text, re.I
-                ):
-                    yield StockResult(
-                        store=store,
-                        product_key=key,
-                        product_name=prod.get("name", key),
-                        status="IN_STOCK",
-                        url=url,
-                    )
-                time.sleep(0.4)
+            for pid in variant_ids(prod, "gamestop_pid"):
+                url = f"https://www.gamestop.com/p/{pid}"
+                for store in stores:
+                    result = self._check_one(pid, store, prod, key, url)
+                    if result is not None:
+                        yield result
+                    time.sleep(0.4)
+
+    def _check_one(
+        self, pid: str, store: Store, prod: dict[str, Any], key: str, url: str,
+    ) -> StockResult | None:
+        resp = self.http_get(
+            "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-InventorySearch",
+            params={"pid": pid, "storeId": store.store_id},
+            headers={"User-Agent": UA, "Accept": "application/json"},
+        )
+        if resp is None or resp.status_code != 200:
+            return None
+        # GameStop returns an HTML fragment whose availability is encoded in
+        # text; the regex check is intentionally permissive.
+        text = resp.text or ""
+        if re.search(r"in[\s-]*stock", text, re.I) and not re.search(
+            r"out[\s-]*of[\s-]*stock", text, re.I
+        ):
+            return StockResult(
+                store=store,
+                product_key=key,
+                product_name=prod.get("name", key),
+                status="IN_STOCK",
+                url=url,
+            )
+        return None

@@ -9,6 +9,28 @@ import requests
 from ..http import HTTPClient, default_client
 
 
+def variant_ids(product: dict[str, Any], field_name: str) -> list[str]:
+    """Return the list of SKU/ID variants for a product at one retailer.
+
+    Accepts either a single string (legacy) or a list of strings. Empties
+    and whitespace are dropped. Lets one product entry track multiple
+    variant SKUs at the same retailer — common when a set has alt-cover
+    ETBs or regional-exclusive packagings with distinct catalog IDs.
+
+        target_tcin: "12345"                     # one variant
+        target_tcin: ["12345", "67890"]          # multiple variants
+    """
+    raw = product.get(field_name)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        s = raw.strip()
+        return [s] if s else []
+    if isinstance(raw, list):
+        return [str(v).strip() for v in raw if str(v).strip()]
+    return []
+
+
 @dataclass
 class Store:
     retailer: str

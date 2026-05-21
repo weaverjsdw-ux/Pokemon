@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any, Iterable
 
-from .base import Retailer, Store, StockResult
+from .base import Retailer, Store, StockResult, variant_ids
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -68,14 +68,12 @@ class Walmart(Retailer):
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
         for key, prod in products.items():
-            item_id = (prod.get("walmart_item_id") or "").strip()
-            if not item_id:
-                continue
-            url = f"https://www.walmart.com/ip/{item_id}"
-            online = self._check_online(item_id, url, prod, key)
-            if online is not None:
-                yield online
-            time.sleep(0.6)
+            for item_id in variant_ids(prod, "walmart_item_id"):
+                url = f"https://www.walmart.com/ip/{item_id}"
+                online = self._check_online(item_id, url, prod, key)
+                if online is not None:
+                    yield online
+                time.sleep(0.6)
 
     def _check_online(
         self, item_id: str, url: str, prod: dict[str, Any], key: str

@@ -27,6 +27,12 @@
 #   image_url: "https://..."                    (optional)
 #     - Shown as the embed thumbnail. The official Pokemon Center or
 #       publisher images work well.
+#
+# Any per-retailer ID field accepts either a single SKU string or a list
+# of strings — useful when the same product has multiple catalog IDs at
+# one retailer (alt-cover ETBs, regional variants, etc.):
+#
+#   target_tcin: ["93954435", "93954436"]
 
 prismatic_evolutions_etb:
   name: "Prismatic Evolutions Elite Trainer Box"

@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Iterable
 
-from .base import Retailer, Store, StockResult
+from .base import Retailer, Store, StockResult, variant_ids
 
 REDSKY_KEY = os.getenv("TARGET_API_KEY", "9f36aeafbe60771e321a7cc95a78140772ab3e96")
 UA = (
@@ -71,15 +71,13 @@ class Target(Retailer):
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
         for key, prod in products.items():
-            tcin = (prod.get("target_tcin") or "").strip()
-            if not tcin:
-                continue
-            url = f"https://www.target.com/p/A-{tcin}"
-            for store in stores:
-                result = self._check_one(tcin, store, prod, key, url)
-                if result is not None:
-                    yield result
-                time.sleep(0.4)  # be polite
+            for tcin in variant_ids(prod, "target_tcin"):
+                url = f"https://www.target.com/p/A-{tcin}"
+                for store in stores:
+                    result = self._check_one(tcin, store, prod, key, url)
+                    if result is not None:
+                        yield result
+                    time.sleep(0.4)  # be polite
 
     def _check_one(
         self,
