@@ -10,8 +10,6 @@ import os
 import time
 from typing import Any, Iterable
 
-import requests
-
 from .base import Retailer, Store, StockResult
 
 REDSKY_KEY = os.getenv("TARGET_API_KEY", "9f36aeafbe60771e321a7cc95a78140772ab3e96")
@@ -23,9 +21,10 @@ UA = (
 
 class Target(Retailer):
     name = "Target"
+    slug = "target"
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
-        resp = requests.get(
+        resp = self.http_get(
             "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1",
             params={
                 "key": REDSKY_KEY,
@@ -35,15 +34,18 @@ class Target(Retailer):
                 "longitude": lng,
             },
             headers={"User-Agent": UA, "Accept": "application/json"},
-            timeout=15,
         )
-        resp.raise_for_status()
-        stores_raw = (
-            resp.json()
-            .get("data", {})
-            .get("nearby_stores", {})
-            .get("stores", [])
-        )
+        if resp is None or resp.status_code != 200:
+            return []
+        try:
+            stores_raw = (
+                resp.json()
+                .get("data", {})
+                .get("nearby_stores", {})
+                .get("stores", [])
+            )
+        except ValueError:
+            return []
         out: list[Store] = []
         for s in stores_raw:
             geo = s.get("geographic_specifications") or {}
@@ -87,27 +89,26 @@ class Target(Retailer):
         key: str,
         url: str,
     ) -> StockResult | None:
+        resp = self.http_get(
+            "https://redsky.target.com/redsky_aggregations/v1/web/product_fulfillment_v1",
+            params={
+                "key": REDSKY_KEY,
+                "tcin": tcin,
+                "store_id": store.store_id,
+                "pricing_store_id": store.store_id,
+                "latitude": store.lat,
+                "longitude": store.lng,
+                "has_pricing_store_id": "true",
+                "channel": "WEB",
+                "page": f"/p/A-{tcin}",
+            },
+            headers={"User-Agent": UA, "Accept": "application/json"},
+        )
+        if resp is None or resp.status_code != 200:
+            return None
         try:
-            resp = requests.get(
-                "https://redsky.target.com/redsky_aggregations/v1/web/product_fulfillment_v1",
-                params={
-                    "key": REDSKY_KEY,
-                    "tcin": tcin,
-                    "store_id": store.store_id,
-                    "pricing_store_id": store.store_id,
-                    "latitude": store.lat,
-                    "longitude": store.lng,
-                    "has_pricing_store_id": "true",
-                    "channel": "WEB",
-                    "page": f"/p/A-{tcin}",
-                },
-                headers={"User-Agent": UA, "Accept": "application/json"},
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                return None
             data = resp.json().get("data", {}).get("product", {}).get("fulfillment", {})
-        except (requests.RequestException, ValueError):
+        except ValueError:
             return None
 
         store_options = data.get("store_options") or []

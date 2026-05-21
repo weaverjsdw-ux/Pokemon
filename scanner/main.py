@@ -15,6 +15,7 @@ import time
 from . import config as cfg_mod
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
+from .http import BudgetExceeded, RetailerDisabled
 from .log import configure as configure_logging, get_logger
 from .notify import Notifier, StockAlert
 from .retailers import ALL as RETAILER_REGISTRY
@@ -95,6 +96,10 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
                     price=result.price,
                 )
                 notifier.send(alert)
+        except RetailerDisabled as exc:
+            log.warning("retailer=%s skipped: %s", slug, exc)
+        except BudgetExceeded as exc:
+            log.warning("retailer=%s budget hit: %s", slug, exc)
         except Exception:
             log.exception("retailer=%s check raised", slug)
 

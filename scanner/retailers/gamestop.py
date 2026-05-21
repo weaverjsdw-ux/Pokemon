@@ -10,8 +10,6 @@ import re
 import time
 from typing import Any, Iterable
 
-import requests
-
 from .base import Retailer, Store, StockResult
 
 UA = (
@@ -22,24 +20,24 @@ UA = (
 
 class GameStop(Retailer):
     name = "GameStop"
+    slug = "gamestop"
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
+        resp = self.http_get(
+            "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-FindStores",
+            params={
+                "latitude": lat,
+                "longitude": lng,
+                "radius": int(radius_miles) + 5,
+                "showMap": "false",
+            },
+            headers={"User-Agent": UA, "Accept": "application/json"},
+        )
+        if resp is None or resp.status_code != 200:
+            return []
         try:
-            resp = requests.get(
-                "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-FindStores",
-                params={
-                    "latitude": lat,
-                    "longitude": lng,
-                    "radius": int(radius_miles) + 5,
-                    "showMap": "false",
-                },
-                headers={"User-Agent": UA, "Accept": "application/json"},
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                return []
             data = resp.json()
-        except (requests.RequestException, ValueError):
+        except ValueError:
             return []
         out: list[Store] = []
         for s in data.get("stores") or []:
@@ -71,16 +69,12 @@ class GameStop(Retailer):
                 continue
             url = f"https://www.gamestop.com/p/{pid}"
             for store in stores:
-                try:
-                    resp = requests.get(
-                        "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-InventorySearch",
-                        params={"pid": pid, "storeId": store.store_id},
-                        headers={"User-Agent": UA, "Accept": "application/json"},
-                        timeout=15,
-                    )
-                except requests.RequestException:
-                    continue
-                if resp.status_code != 200:
+                resp = self.http_get(
+                    "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-InventorySearch",
+                    params={"pid": pid, "storeId": store.store_id},
+                    headers={"User-Agent": UA, "Accept": "application/json"},
+                )
+                if resp is None or resp.status_code != 200:
                     continue
                 # GameStop returns HTML fragment with availability text; fall
                 # back to a regex on the response body.

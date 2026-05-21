@@ -8,8 +8,6 @@ from __future__ import annotations
 import time
 from typing import Any, Iterable
 
-import requests
-
 from .base import Retailer, StockResult, Store
 
 UA = (
@@ -20,6 +18,7 @@ UA = (
 
 class PokemonCenter(Retailer):
     name = "Pokemon Center"
+    slug = "pokemoncenter"
     online_only = True
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
@@ -33,15 +32,11 @@ class PokemonCenter(Retailer):
             if not slug:
                 continue
             url = f"https://www.pokemoncenter.com/product/{slug}"
-            try:
-                resp = requests.get(
-                    f"https://www.pokemoncenter.com/products/{slug}.js",
-                    headers={"User-Agent": UA, "Accept": "application/json"},
-                    timeout=15,
-                )
-            except requests.RequestException:
-                continue
-            if resp.status_code != 200:
+            resp = self.http_get(
+                f"https://www.pokemoncenter.com/products/{slug}.js",
+                headers={"User-Agent": UA, "Accept": "application/json"},
+            )
+            if resp is None or resp.status_code != 200:
                 continue
             try:
                 data = resp.json()
