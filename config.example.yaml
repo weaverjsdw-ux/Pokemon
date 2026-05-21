@@ -41,6 +41,29 @@ retailers:
 # Don't crank this too low — these are public site APIs, be polite.
 poll_interval_seconds: 180
 
+# Drop windows override the global cadence during known restock periods.
+# Each window names one or more retailers, the weekdays it applies on, a
+# HH:MM start/end in your local timezone, and the faster cadence to use
+# while active. Multiple windows may apply at once; the smallest interval
+# wins. Outside every window, the global poll_interval_seconds is used.
+# Comment out the whole list to disable.
+drop_windows:
+  - retailers: [target]
+    days: [tue, fri]
+    start: "06:00"
+    end:   "10:00"
+    poll_interval_seconds: 60
+  - retailers: [walmart]
+    days: [wed]
+    start: "06:00"
+    end:   "10:00"
+    poll_interval_seconds: 60
+  - retailers: [pokemoncenter]
+    days: [mon, tue, wed, thu, fri]
+    start: "13:00"
+    end:   "13:30"
+    poll_interval_seconds: 30
+
 # Heartbeat: every N seconds the scanner posts a status summary
 # (uptime, passes, alerts fired, per-retailer health) to your Discord
 # channel + ntfy. Lets you confirm at a glance that nothing has silently

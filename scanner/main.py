@@ -13,7 +13,10 @@ import random
 import sys
 import time
 
+from datetime import datetime
+
 from . import config as cfg_mod
+from . import drop_windows as drop_windows_mod
 from .geo import distance_to_polyline_miles
 from .geocode import geocode
 from .heartbeat import Heartbeat
@@ -219,7 +222,13 @@ def main() -> int:
         run_pass(cfg, stores_by_retailer, state, notifier)
         return 0
 
-    log.info("scanning interval=%ds (+jitter). Ctrl-C to stop.", cfg.poll_interval_seconds)
+    windows = drop_windows_mod.parse(cfg.drop_windows_raw)
+    enabled_slugs = [s for s, r in cfg.retailers.items() if r.enabled]
+
+    log.info(
+        "scanning interval=%ds (+jitter), drop_windows=%d. Ctrl-C to stop.",
+        cfg.poll_interval_seconds, len(windows),
+    )
     while True:
         fired = run_pass(cfg, stores_by_retailer, state, notifier)
         if heartbeat is not None:
@@ -230,8 +239,14 @@ def main() -> int:
                 stores_by_retailer,
             )
         state.maybe_backup()
+        now = datetime.now(cfg.tzinfo())
+        interval, tags = drop_windows_mod.effective_interval(
+            windows, enabled_slugs, cfg.poll_interval_seconds, now=now,
+        )
+        if tags:
+            log.info("drop-window active (%s) — interval=%ds", ",".join(tags), interval)
         jitter = random.uniform(0.8, 1.3)
-        time.sleep(cfg.poll_interval_seconds * jitter)
+        time.sleep(interval * jitter)
 
 
 if __name__ == "__main__":

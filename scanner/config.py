@@ -58,6 +58,7 @@ class Config:
     heartbeat_seconds: int  # 0 = disable
     quiet_hours_raw: Any  # passed through to scanner.priority.parse_quiet_hours
     priority_channels: dict[str, str]  # tier -> webhook URL (empty = use global)
+    drop_windows_raw: Any  # passed through to scanner.drop_windows.parse
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -125,6 +126,7 @@ def load() -> Config:
         priority_channels={
             k: str(v) for k, v in (raw.get("priority_channels") or {}).items()
         },
+        drop_windows_raw=raw.get("drop_windows") or [],
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )
