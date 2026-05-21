@@ -122,7 +122,17 @@ Or one pass and exit:
 python -m scanner --once
 ```
 
-### 6. Run in Docker (optional)
+### 6. Dashboard (optional)
+
+A small read-only web view at `http://127.0.0.1:8765/` that shows recent
+alerts, per-retailer health, and the configured product catalog. Stdlib
+only — no extra dependencies. Run it alongside the scanner:
+
+```bash
+python -m scanner.dashboard
+```
+
+### 7. Run in Docker (optional)
 
 If you'd rather not babysit a Python install or want the scanner to survive reboots:
 
