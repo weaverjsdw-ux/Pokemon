@@ -201,6 +201,7 @@ def main() -> int:
                 default_client.health_snapshot(),
                 stores_by_retailer,
             )
+        state.maybe_backup()
         jitter = random.uniform(0.8, 1.3)
         time.sleep(cfg.poll_interval_seconds * jitter)
 

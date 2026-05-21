@@ -1,14 +1,25 @@
 """SQLite-backed dedupe.
 
 Suppresses repeat alerts for the same (retailer, store, product) until
-either the status changes or `cooldown_seconds` elapses."""
+either the status changes or `cooldown_seconds` elapses.
+
+Backups: SQLite's online backup API copies the DB to data/backups/ on a
+configurable cadence. Default is daily; the most recent N copies are
+kept and older ones are pruned. Backups happen in-process before the
+scan loop sleeps, so they always reflect a quiesced state."""
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import time
 from pathlib import Path
 
+from .log import get_logger
+
+log = get_logger(__name__)
+
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "state.db"
+BACKUP_DIR = Path(__file__).resolve().parent.parent / "data" / "backups"
 
 
 class State:
@@ -58,3 +69,63 @@ class State:
             (retailer, store_id, product_key, status, ts),
         )
         self.db.commit()
+
+    def maybe_backup(
+        self,
+        *,
+        interval_seconds: int = 24 * 3600,
+        keep: int = 7,
+        backup_dir: Path | None = None,
+    ) -> Path | None:
+        """If at least `interval_seconds` has elapsed since the most recent
+        backup, write a fresh one and prune to the last `keep` copies.
+        Returns the new backup path, or None if a backup wasn't due.
+
+        Uses SQLite's online backup API so the running scanner doesn't
+        need to pause."""
+        bdir = backup_dir or BACKUP_DIR
+        bdir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(bdir.glob("state-*.db"))
+        now = time.time()
+        if existing and interval_seconds > 0:
+            most_recent = existing[-1].stat().st_mtime
+            if now - most_recent < interval_seconds:
+                return None
+        path = bdir / f"state-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(now))}.db"
+        try:
+            with sqlite3.connect(path) as dst:
+                self.db.backup(dst)
+        except sqlite3.Error as exc:
+            log.warning("state backup failed: %s", exc)
+            # Drop the partial file so the next attempt isn't gated by it.
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
+        log.info("state backup written: %s", path.name)
+        # Prune oldest, keeping `keep`. Re-glob since `path` is new.
+        kept = sorted(bdir.glob("state-*.db"))
+        for old in kept[:-keep]:
+            try:
+                old.unlink()
+                log.debug("pruned old state backup: %s", old.name)
+            except OSError as exc:
+                log.warning("could not prune %s: %s", old.name, exc)
+        return path
+
+
+def restore_latest(target: Path | None = None, *, backup_dir: Path | None = None) -> Path:
+    """Replace state.db with the most recent backup. Returns the source path.
+
+    Manual operation — not used in the normal loop. Useful when the live
+    DB is corrupted or a recent change to dedupe logic produced bad
+    state and you want a known-good baseline."""
+    bdir = backup_dir or BACKUP_DIR
+    tgt = target or DB_PATH
+    backups = sorted(bdir.glob("state-*.db"))
+    if not backups:
+        raise FileNotFoundError(f"No backups found in {bdir}")
+    src = backups[-1]
+    shutil.copy2(src, tgt)
+    return src
