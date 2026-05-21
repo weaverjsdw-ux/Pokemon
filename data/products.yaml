@@ -30,6 +30,12 @@
 #   max_price: "$59.99"                         (optional)
 #     - Suppress alerts whose listed price exceeds this ceiling.
 #       Independent of the global price_filter.only_at_or_near_msrp.
+#   lgs_shopify_slugs: {domain: slug}            (optional)
+#     - Map of Shopify-store domain -> per-store product slug. Used by
+#       the generic LGS-Shopify adapter. Example:
+#         lgs_shopify_slugs:
+#           "bobs-tcg.myshopify.com": "prismatic-evolutions-etb"
+#           "cardcastle.com":         "prismatic-elite-trainer-box"
 #
 # Any per-retailer ID field accepts either a single SKU string or a list
 # of strings — useful when the same product has multiple catalog IDs at

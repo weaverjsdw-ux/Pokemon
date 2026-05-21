@@ -66,7 +66,7 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
         rcfg = cfg.retailers.get(slug)
         if not rcfg or not rcfg.enabled:
             continue
-        retailer = RClass(api_key=rcfg.api_key)
+        retailer = RClass(api_key=rcfg.api_key, **rcfg.extra)
         if retailer.online_only:
             out[slug] = []
             continue
@@ -101,7 +101,7 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
         rcfg = cfg.retailers.get(slug)
         if not rcfg or not rcfg.enabled:
             continue
-        retailer = RClass(api_key=rcfg.api_key)
+        retailer = RClass(api_key=rcfg.api_key, **rcfg.extra)
         stores = stores_by_retailer.get(slug, [])
         try:
             for result in retailer.check(products, stores):

@@ -37,6 +37,15 @@ retailers:
   costco:        { enabled: false }                 # Online-only
   samsclub:      { enabled: false }                 # Online-only
 
+  # Local game stores running on Shopify. Add the domains (or *.myshopify.com)
+  # of stores you actually follow. Per-product Shopify slugs go in
+  # data/products.yaml under lgs_shopify_slugs (see comments there).
+  lgs_shopify:
+    enabled: false
+    stores: []
+    #  - { name: "Bob's TCG",   domain: "bobs-tcg.myshopify.com" }
+    #  - { name: "Card Castle", domain: "cardcastle.com" }
+
 # Poll interval (seconds) per retailer. Jitter is added automatically.
 # Don't crank this too low — these are public site APIs, be polite.
 poll_interval_seconds: 180

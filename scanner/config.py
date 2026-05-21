@@ -41,6 +41,7 @@ def _expand_env(val: Any) -> Any:
 class RetailerCfg:
     enabled: bool = False
     api_key: str = ""
+    extra: dict[str, Any] = field(default_factory=dict)  # adapter-specific options
 
 
 @dataclass
@@ -102,6 +103,7 @@ def load() -> Config:
         name: RetailerCfg(
             enabled=bool(cfg.get("enabled", False)),
             api_key=str(cfg.get("api_key", "")),
+            extra={k: v for k, v in cfg.items() if k not in ("enabled", "api_key")},
         )
         for name, cfg in retailers_raw.items()
     }

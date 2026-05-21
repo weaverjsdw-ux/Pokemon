@@ -2,6 +2,7 @@ from .base import Retailer, Store, StockResult
 from .bestbuy import BestBuy
 from .costco import Costco
 from .gamestop import GameStop
+from .lgs_shopify import LGSShopify
 from .pokemoncenter import PokemonCenter
 from .samsclub import SamsClub
 from .target import Target
@@ -15,6 +16,7 @@ ALL = {
     "gamestop": GameStop,
     "costco": Costco,
     "samsclub": SamsClub,
+    "lgs_shopify": LGSShopify,
 }
 
 __all__ = ["Retailer", "Store", "StockResult", "ALL"]
