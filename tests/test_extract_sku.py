@@ -28,6 +28,34 @@ from scanner.tools.extract_sku import extract, main
             "https://www.pokemoncenter.com/product/some-set-elite-trainer-box",
             ("pokemoncenter_slug", "some-set-elite-trainer-box"),
         ),
+        (
+            "https://www.costco.com/.product.4000123.html",
+            ("costco_item_id", "4000123"),
+        ),
+        (
+            "https://www.samsclub.com/p/pokemon-etb/980080",
+            ("samsclub_product_id", "980080"),
+        ),
+        (
+            "https://www.amazon.com/dp/B0CABCDEFG",
+            ("amazon_asin", "B0CABCDEFG"),
+        ),
+        (
+            "https://www.tcgplayer.com/product/495432/pokemon-prismatic-evolutions-etb",
+            ("tcgplayer_product_id", "495432"),
+        ),
+        (
+            "https://www.barnesandnoble.com/w/pokemon-tcg-prismatic-etb/1141234567",
+            ("barnesnoble_id", "1141234567"),
+        ),
+        (
+            "https://www.meijer.com/shopping/product/prismatic-etb/82800012345.html",
+            ("meijer_product_id", "82800012345"),
+        ),
+        (
+            "https://www.fivebelow.com/p/pokemon-tcg-prismatic-evolutions-blister",
+            ("fivebelow_product_id", "pokemon-tcg-prismatic-evolutions-blister"),
+        ),
     ],
 )
 def test_extract_known_retailers(url, expected):

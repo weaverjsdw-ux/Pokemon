@@ -34,8 +34,13 @@ retailers:
   bestbuy:       { enabled: false, api_key: "${BESTBUY_API_KEY:-}" }   # Free key: https://developer.bestbuy.com
   pokemoncenter: { enabled: true }                  # Online-only, no store filter
   gamestop:      { enabled: true }
-  costco:        { enabled: false }                 # Online-only
-  samsclub:      { enabled: false }                 # Online-only
+  costco:        { enabled: false }                 # Online-only; check ToS
+  samsclub:      { enabled: false }                 # Online-only; check ToS
+  amazon:        { enabled: false }                 # Soft signal; aggressive anti-bot
+  tcgplayer:     { enabled: false }                 # Marketplace; Direct preferred
+  barnesnoble:   { enabled: false }                 # Online-only
+  meijer:        { enabled: false }                 # Online-only (Midwest)
+  fivebelow:     { enabled: false }                 # Online-only; volatile
 
   # Local game stores running on Shopify. Add the domains (or *.myshopify.com)
   # of stores you actually follow. Per-product Shopify slugs go in

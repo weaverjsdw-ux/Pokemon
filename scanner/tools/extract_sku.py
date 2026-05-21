@@ -16,11 +16,18 @@ from urllib.parse import urlparse
 
 # Each entry: (host substring, field name in products.yaml, regex to pull the ID)
 _PATTERNS = [
-    ("target.com",        "target_tcin",        re.compile(r"/A-(\d+)")),
-    ("walmart.com",       "walmart_item_id",    re.compile(r"/ip/[^/]*/?(\d+)")),
-    ("bestbuy.com",       "bestbuy_sku",        re.compile(r"/(\d+)\.p")),
-    ("gamestop.com",      "gamestop_pid",       re.compile(r"/p/([^/?#]+)")),
-    ("pokemoncenter.com", "pokemoncenter_slug", re.compile(r"/product/([^/?#]+)")),
+    ("target.com",         "target_tcin",          re.compile(r"/A-(\d+)")),
+    ("walmart.com",        "walmart_item_id",      re.compile(r"/ip/[^/]*/?(\d+)")),
+    ("bestbuy.com",        "bestbuy_sku",          re.compile(r"/(\d+)\.p")),
+    ("gamestop.com",       "gamestop_pid",         re.compile(r"/p/([^/?#]+)")),
+    ("pokemoncenter.com",  "pokemoncenter_slug",   re.compile(r"/product/([^/?#]+)")),
+    ("costco.com",         "costco_item_id",       re.compile(r"\.product\.(\d+)\.html")),
+    ("samsclub.com",       "samsclub_product_id",  re.compile(r"/p/[^/]+/(\d+)")),
+    ("amazon.com",         "amazon_asin",          re.compile(r"/dp/([A-Z0-9]{10})")),
+    ("tcgplayer.com",      "tcgplayer_product_id", re.compile(r"/product/(\d+)")),
+    ("barnesandnoble.com", "barnesnoble_id",       re.compile(r"/w/[^/]+/(\d+)")),
+    ("meijer.com",         "meijer_product_id",    re.compile(r"/product/[^/]+/(\d+)\.html")),
+    ("fivebelow.com",      "fivebelow_product_id", re.compile(r"/p/([^/?#]+)")),
 ]
 
 
