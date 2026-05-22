@@ -227,6 +227,9 @@ def check_config(cfg: cfg_mod.Config) -> int:
     print(f"  priority_channels: {', '.join(pri_tiers) if pri_tiers else 'none (all tiers -> global webhook)'}")
     print(f"  discord_webhook: {'set' if cfg.discord_webhook else 'not set (console-only)'}")
     print(f"  ntfy_topic: {'set' if cfg.ntfy_topic else 'not set'}")
+    print(f"  operator_email: {cfg.operator_email or 'not set (recommended for ToS)'}")
+    dash_token = (cfg.dashboard or {}).get("token", "")
+    print(f"  dashboard.token: {'set' if dash_token else 'open (localhost only)'}")
 
     pf = filters_mod.parse_price_filter(cfg.price_filter_raw)
     print(f"  price_filter: only_at_or_near_msrp={pf.only_at_or_near_msrp} multiplier={pf.msrp_multiplier}")
