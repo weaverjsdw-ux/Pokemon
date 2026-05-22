@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from . import analytics
 from . import config as cfg_mod
 from . import state as state_mod
 from .http import default_client
@@ -168,6 +169,68 @@ def _render_products(cfg, db: sqlite3.Connection) -> str:
     return "".join(out)
 
 
+def _render_drop_pattern_suggestions(db: sqlite3.Connection, tz: str) -> str:
+    suggestions = analytics.suggest_drop_windows(db, tz=tz)
+    if not suggestions:
+        return ("<p class=sub>Not enough alert history yet to suggest drop "
+                "windows. Come back after a week or two of running.</p>")
+    by_retailer: dict[str, list] = {}
+    for s in suggestions:
+        by_retailer.setdefault(s.retailer, []).append(s)
+    out = ["<p class=sub>Detected from hit_log over the last 30 days. "
+           "Promote into <code>drop_windows:</code> in config.yaml.</p>",
+           "<pre style='background:#000;padding:12px;border-radius:6px;overflow:auto'>"]
+    for retailer, windows in by_retailer.items():
+        out.append(f"# {retailer}")
+        # Group consecutive days with identical hours
+        for w in windows:
+            day = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][w.weekday]
+            out.append(
+                f"- retailers: [{retailer}]\n"
+                f"  days:      [{day}]\n"
+                f"  start:     '{w.start_hour:02d}:00'\n"
+                f"  end:       '{w.end_hour:02d}:00'\n"
+                f"  poll_interval_seconds: 60   # samples: {w.sample_count}\n"
+            )
+    out.append("</pre>")
+    return "".join(out)
+
+
+def _render_per_store(db: sqlite3.Connection) -> str:
+    stats = analytics.per_store_hit_rate(db, limit=20)
+    if not stats:
+        return "<p class=sub>No store-level history yet.</p>"
+    out = ["<table><tr><th>Retailer</th><th>Store</th><th>Hits (90d)</th>",
+           "<th>Bought</th><th>Last hit</th></tr>"]
+    now = time.time()
+    for s in stats:
+        out.append(
+            f"<tr><td>{html.escape(s.retailer)}</td>"
+            f"<td>{html.escape(s.store_id)}</td>"
+            f"<td>{s.hits}</td><td>{s.bought}</td>"
+            f"<td>{_ago(now - s.last_hit_ts)}</td></tr>"
+        )
+    out.append("</table>")
+    return "".join(out)
+
+
+def _render_feedback_quality(db: sqlite3.Connection) -> str:
+    q = analytics.feedback_quality(db)
+    if not q:
+        return "<p class=sub>No alerts in the last 30 days.</p>"
+    out = ["<table><tr><th>Retailer</th><th>Alerts (30d)</th>",
+           "<th>Bought</th><th>False</th><th>Buy rate</th></tr>"]
+    for retailer, s in sorted(q.items(), key=lambda kv: -kv[1]["alerts"]):
+        rate = f"{s['ratio'] * 100:.0f}%" if s["alerts"] else "—"
+        out.append(
+            f"<tr><td>{html.escape(retailer)}</td>"
+            f"<td>{s['alerts']}</td><td>{s['bought']}</td>"
+            f"<td>{s['false']}</td><td>{rate}</td></tr>"
+        )
+    out.append("</table>")
+    return "".join(out)
+
+
 def _ago(seconds: float) -> str:
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -236,10 +299,16 @@ class _Handler(BaseHTTPRequestHandler):
             db = sqlite3.connect(DB_PATH)
             recent = _render_recent_hits(db)
             products = _render_products(self.cfg, db)
+            store_stats = _render_per_store(db)
+            quality = _render_feedback_quality(db)
+            suggestions = _render_drop_pattern_suggestions(db, self.cfg.timezone)
             db.close()
         except sqlite3.Error as exc:
             recent = f"<p class=err>DB error: {html.escape(str(exc))}</p>"
             products = ""
+            store_stats = ""
+            quality = ""
+            suggestions = ""
 
         health = _render_health(default_client.health_snapshot())
         body = (
@@ -247,6 +316,9 @@ class _Handler(BaseHTTPRequestHandler):
             + flash +
             "<h2>Per-retailer health</h2>" + health +
             "<h2>Recent alerts</h2>" + recent +
+            "<h2>Per-retailer alert quality (30d)</h2>" + quality +
+            "<h2>Top stores (90d)</h2>" + store_stats +
+            "<h2>Suggested drop windows</h2>" + suggestions +
             "<h2>Tracked products</h2>" + products
         )
         page = _page("Pokémon Scanner", body)
