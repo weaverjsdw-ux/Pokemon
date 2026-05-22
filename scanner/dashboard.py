@@ -40,13 +40,15 @@ from .state import DB_PATH
 log = get_logger(__name__)
 
 
-def _page(title: str, body: str) -> bytes:
+def _page(title: str, body: str, *, autorefresh: bool = True) -> bytes:
     css = """
     body { font: 14px/1.5 -apple-system, system-ui, sans-serif; background: #111; color: #eee;
-           margin: 0; padding: 24px; }
+           margin: 0; padding: 24px; max-width: 1200px; }
     h1 { font-size: 22px; margin: 0 0 6px; }
     h2 { font-size: 16px; margin: 28px 0 8px; color: #9cf; border-bottom: 1px solid #333; padding-bottom: 4px; }
     .sub { color: #888; font-size: 12px; margin-bottom: 16px; }
+    nav { margin: 0 0 16px; }
+    nav a { margin-right: 16px; }
     table { width: 100%; border-collapse: collapse; margin-top: 4px; }
     th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #222; vertical-align: top; }
     th { color: #9cf; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
@@ -60,21 +62,43 @@ def _page(title: str, body: str) -> bytes:
     .pill.muted { background: #1e1b4b; color: #c4b5fd; }
     code { font-family: ui-monospace, SF Mono, Menlo, monospace; color: #aaa; }
     a { color: #9cf; }
-    button { background: #2563eb; color: white; border: 0; padding: 4px 10px; border-radius: 4px;
-             cursor: pointer; font-size: 12px; margin-right: 4px; }
+    button { background: #2563eb; color: white; border: 0; padding: 8px 12px; border-radius: 4px;
+             cursor: pointer; font-size: 13px; margin-right: 4px; }
     button.danger { background: #7f1d1d; }
     button.ghost { background: #333; color: #ccc; }
     form { display: inline; }
     .ok-flash  { background: #052e16; color: #4ade80; padding: 6px 12px; border-radius: 4px; margin: 8px 0; }
     .err-flash { background: #450a0a; color: #f87171; padding: 6px 12px; border-radius: 4px; margin: 8px 0; }
+    /* Mobile: switch tables into card layout under 600px wide */
+    @media (max-width: 600px) {
+        body { padding: 12px; }
+        table, thead, tbody, tr, td { display: block; width: 100%; }
+        th { display: none; }
+        tr { background: #1a1a1a; margin-bottom: 12px; padding: 8px; border-radius: 6px;
+             border-bottom: 0; }
+        td { padding: 4px 0; border: 0; }
+        td::before { content: attr(data-label) ": "; color: #9cf; font-size: 11px;
+                     text-transform: uppercase; letter-spacing: .04em; display: block; }
+        button { padding: 10px 14px; font-size: 14px; }
+    }
     """
+    refresh = '<meta http-equiv=refresh content=30>' if autorefresh else ''
+    nav = (
+        '<nav>'
+        '<a href="/">Dashboard</a>'
+        '<a href="/log">Full audit log</a>'
+        '<a href="/healthz">Health JSON</a>'
+        '</nav>'
+    )
     return (
         "<!doctype html><html><head>"
-        "<meta http-equiv=refresh content=30>"
+        + refresh +
+        '<meta name=viewport content="width=device-width, initial-scale=1">'
         f"<title>{html.escape(title)}</title>"
         f"<style>{css}</style>"
         "</head><body>"
         f"<h1>{html.escape(title)}</h1>"
+        f"{nav}"
         f"{body}"
         "</body></html>"
     ).encode("utf-8")
@@ -107,12 +131,57 @@ def _render_recent_hits(db: sqlite3.Connection, limit: int = 40) -> str:
             f'<button class=ghost>False alert</button></form>'
         )
         out.append(
-            f"<tr><td>{age}</td><td>{html.escape(retailer)}</td>"
-            f"<td>{html.escape(store_id)}</td><td><code>{html.escape(product_key)}</code></td>"
-            f"<td>{html.escape(status)}</td><td>{html.escape(tier)}</td>"
-            f"<td>{price}</td><td>{link} {actions}</td></tr>"
+            f'<tr><td data-label=When>{age}</td>'
+            f'<td data-label=Retailer>{html.escape(retailer)}</td>'
+            f'<td data-label=Store>{html.escape(store_id)}</td>'
+            f'<td data-label=Product><code>{html.escape(product_key)}</code></td>'
+            f'<td data-label=Status>{html.escape(status)}</td>'
+            f'<td data-label=Tier>{html.escape(tier)}</td>'
+            f'<td data-label=Price>{price}</td>'
+            f'<td data-label=Action>{link} {actions}</td></tr>'
         )
     out.append("</table>")
+    return "".join(out)
+
+
+def _render_audit_log(db: sqlite3.Connection, *, page: int, page_size: int = 50) -> str:
+    """Full hit_log paginated. Distinct from _render_recent_hits which
+    is the trimmed dashboard view."""
+    offset = max(0, (page - 1) * page_size)
+    rows = db.execute(
+        "SELECT id, retailer, store_id, product_key, status, tier, url, "
+        "price_cents, ts FROM hit_log ORDER BY ts DESC LIMIT ? OFFSET ?",
+        (page_size, offset),
+    ).fetchall()
+    total = db.execute("SELECT COUNT(*) FROM hit_log").fetchone()[0]
+    if not rows:
+        return f"<p class=sub>No alerts on page {page}. Total in log: {total}.</p>"
+    out = [f"<p class=sub>Showing {len(rows)} of {total}. Page {page}.</p>",
+           "<table><tr><th>When</th><th>Retailer</th><th>Store</th><th>Product</th>",
+           "<th>Status</th><th>Tier</th><th>Price</th><th>Link</th></tr>"]
+    now = time.time()
+    for hit_id, retailer, store_id, product_key, status, tier, url, price_cents, ts in rows:
+        price = f"${price_cents/100:.2f}" if price_cents is not None else "—"
+        link = f'<a href="{html.escape(url or "")}" target=_blank>open</a>' if url else ""
+        out.append(
+            f'<tr><td data-label=When>{_ago(now - ts)}</td>'
+            f'<td data-label=Retailer>{html.escape(retailer)}</td>'
+            f'<td data-label=Store>{html.escape(store_id)}</td>'
+            f'<td data-label=Product><code>{html.escape(product_key)}</code></td>'
+            f'<td data-label=Status>{html.escape(status)}</td>'
+            f'<td data-label=Tier>{html.escape(tier)}</td>'
+            f'<td data-label=Price>{price}</td>'
+            f'<td data-label=Link>{link}</td></tr>'
+        )
+    out.append("</table>")
+    pages = (total + page_size - 1) // page_size
+    nav = []
+    if page > 1:
+        nav.append(f'<a href="/log?page={page-1}">← Newer</a>')
+    if page < pages:
+        nav.append(f'<a href="/log?page={page+1}">Older →</a>')
+    if nav:
+        out.append("<p>" + "  ·  ".join(nav) + "</p>")
     return "".join(out)
 
 
@@ -252,15 +321,23 @@ class _Handler(BaseHTTPRequestHandler):
     # --- routing ---
 
     def do_GET(self) -> None:
-        if self.path == "/" or self.path.startswith("/?"):
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
             flash = ""
-            qs = parse_qs(urlparse(self.path).query)
+            qs = parse_qs(parsed.query)
             if "ok" in qs:
                 flash = f'<div class=ok-flash>{html.escape(qs["ok"][0])}</div>'
             elif "err" in qs:
                 flash = f'<div class=err-flash>{html.escape(qs["err"][0])}</div>'
             return self._render_index(flash)
-        if self.path == "/healthz":
+        if parsed.path == "/log":
+            qs = parse_qs(parsed.query)
+            try:
+                page = max(1, int(qs.get("page", ["1"])[0]))
+            except ValueError:
+                page = 1
+            return self._render_log(page)
+        if parsed.path == "/healthz":
             return self._json({"ok": True})
         self.send_response(404)
         self.end_headers()
@@ -327,6 +404,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(page)))
         self.end_headers()
         self.wfile.write(page)
+
+    def _render_log(self, page: int) -> None:
+        try:
+            db = sqlite3.connect(DB_PATH)
+            body_html = _render_audit_log(db, page=page)
+            db.close()
+        except sqlite3.Error as exc:
+            body_html = f"<p class=err>DB error: {html.escape(str(exc))}</p>"
+        page_bytes = _page("Audit log", body_html, autorefresh=False)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page_bytes)))
+        self.end_headers()
+        self.wfile.write(page_bytes)
 
     # --- actions ---
 
