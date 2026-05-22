@@ -20,27 +20,175 @@ routing:
   # Only used if engine == google. Leave blank to fall back to OSRM.
   google_api_key: ""
 
+# Local time zone — IANA name. Used for quiet hours and (Phase 2) adaptive
+# polling around known drop windows. Examples: America/Chicago, America/New_York,
+# America/Los_Angeles, Europe/London, UTC.
+timezone: America/Chicago
+
 # Retailers to monitor. Disable any you don't care about to cut traffic.
+# Any string value here (and below) supports ${ENV_VAR} or ${ENV_VAR:-default}
+# substitution, so you can keep secrets out of this file entirely.
 retailers:
   target:        { enabled: true }
   walmart:       { enabled: true }
-  bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
-  pokemoncenter: { enabled: true }                  # Online-only, no store filter
+  bestbuy:       { enabled: false, api_key: "${BESTBUY_API_KEY:-}" }   # Free key: https://developer.bestbuy.com
+  # Pokémon Center supports multiple regions. Default polls only US.
+  # Add UK, Canada, etc. by uncommenting the regions list.
+  pokemoncenter:
+    enabled: true
+    # regions:
+    #   - { code: us, base: "https://www.pokemoncenter.com",        currency: "$"  }
+    #   - { code: gb, base: "https://www.pokemoncenter.com/en-gb",  currency: "£"  }
+    #   - { code: ca, base: "https://www.pokemoncenter.com/en-ca",  currency: "C$" }
   gamestop:      { enabled: true }
-  costco:        { enabled: false }                 # Online-only
-  samsclub:      { enabled: false }                 # Online-only
+  costco:        { enabled: false }                 # Online-only; check ToS
+  samsclub:      { enabled: false }                 # Online-only; check ToS
+  amazon:        { enabled: false }                 # Soft signal; aggressive anti-bot
+  tcgplayer:     { enabled: false }                 # Marketplace; Direct preferred
+  barnesnoble:   { enabled: false }                 # Online-only
+  meijer:        { enabled: false }                 # Online-only (Midwest)
+  fivebelow:     { enabled: false }                 # Online-only; volatile
+
+  # Local game stores running on Shopify. Add the domains (or *.myshopify.com)
+  # of stores you actually follow. Per-product Shopify slugs go in
+  # data/products.yaml under lgs_shopify_slugs (see comments there).
+  lgs_shopify:
+    enabled: false
+    stores: []
+    #  - { name: "Bob's TCG",   domain: "bobs-tcg.myshopify.com" }
+    #  - { name: "Card Castle", domain: "cardcastle.com" }
+
+  # Local game stores running on Crystal Commerce. Same shape as Shopify.
+  # Per-product paths go in data/products.yaml under
+  # lgs_crystalcommerce_paths (see comments there).
+  lgs_crystalcommerce:
+    enabled: false
+    stores: []
+    #  - { name: "City Cards", domain: "citycards.crystalcommerce.com" }
 
 # Poll interval (seconds) per retailer. Jitter is added automatically.
 # Don't crank this too low — these are public site APIs, be polite.
 poll_interval_seconds: 180
 
+# Drop windows override the global cadence during known restock periods.
+# Each window names one or more retailers, the weekdays it applies on, a
+# HH:MM start/end in your local timezone, and the faster cadence to use
+# while active. Multiple windows may apply at once; the smallest interval
+# wins. Outside every window, the global poll_interval_seconds is used.
+# Comment out the whole list to disable.
+drop_windows:
+  - retailers: [target]
+    days: [tue, fri]
+    start: "06:00"
+    end:   "10:00"
+    poll_interval_seconds: 60
+  - retailers: [walmart]
+    days: [wed]
+    start: "06:00"
+    end:   "10:00"
+    poll_interval_seconds: 60
+  - retailers: [pokemoncenter]
+    days: [mon, tue, wed, thu, fri]
+    start: "13:00"
+    end:   "13:30"
+    poll_interval_seconds: 30
+
+# Heartbeat: every N seconds the scanner posts a status summary
+# (uptime, passes, alerts fired, per-retailer health) to your Discord
+# channel + ntfy. Lets you confirm at a glance that nothing has silently
+# stopped working. Set to 0 to disable. 21600 = every 6 hours.
+heartbeat_seconds: 21600
+
+# Quiet hours suppress alerts for nice_to_have / fyi products. must_have
+# products always alert. Times are HH:MM in `timezone` above; leave blank
+# (or omit) to disable. Wrapping midnight is fine (start > end).
+quiet_hours:
+  start: "23:00"
+  end:   "07:00"
+
+# Optional: send each priority tier to a different Discord channel by
+# pasting that channel's webhook here. Empty values fall back to the
+# global discord_webhook above. Useful if you want must_have alerts
+# pinging a phone-pushable channel and fyi going to a #spam channel.
+priority_channels:
+  must_have:    ""
+  nice_to_have: ""
+  fyi:          ""
+
 # Discord webhook URL. See README for the 30-second setup walkthrough.
-# Leave blank for console-only output.
+# Leave blank for console-only output. Prefer env var so the secret stays
+# out of config.yaml entirely: discord_webhook: "${DISCORD_WEBHOOK}"
 discord_webhook: ""
 
 # Optional: ntfy.sh topic for free mobile push as a backup channel.
 # https://ntfy.sh — just pick a unique topic name and subscribe on your phone.
 ntfy_topic: ""
+
+# Optional: Pushover for native push with priority/sound. $5 one-time per
+# user for unlimited. Get user_key + app_token from pushover.net.
+pushover:
+  user_key:  ""
+  app_token: ""
+  priority:  0          # -2..2; 1 = bypass quiet hours on the phone
+  sound:     "magic"
+
+# Optional: email fallback over SMTP. Use an app password for Gmail.
+email:
+  smtp_host:     ""     # e.g. smtp.gmail.com
+  smtp_port:     587
+  smtp_starttls: true
+  smtp_user:     ""
+  smtp_password: "${SMTP_PASSWORD:-}"
+  from:          ""
+  to:            []     # ["you@example.com", "phone@vtext.com"]
+
+# Optional: arbitrary outbound webhooks that receive a JSON dump of each
+# StockAlert. Use with IFTTT/Zapier/your own automations.
+outbound_webhooks: []
+  # - https://maker.ifttt.com/trigger/pokemon_alert/with/key/XXXXX
+
+# Community-signal sources. These poll places where humans report
+# restocks (Reddit, etc.) and surface matching posts to the same Discord
+# channel. Posts are deduplicated by source+post_id; you won't see the
+# same post twice across scan passes.
+community_signal:
+  reddit:
+    enabled: false
+    subs:    [PokemonTCG, PokeInvesting]
+    # Posts qualify when title or body contains BOTH a restock keyword
+    # AND a retailer name. Lists below override the built-in defaults.
+    # keywords: [restock, "in stock", drop]
+    # retailers: [target, walmart, "best buy", costco]
+    max_age_seconds: 3600   # skip posts older than this when first starting up
+
+  # Twitter/X via Nitter (experimental — Twitter actively blocks Nitter
+  # instances). Find a working instance from nitter-instances.com.
+  nitter:
+    enabled: false
+    instance: ""            # e.g. https://nitter.privacydev.net
+    accounts: []            # e.g. [restockalert, pokemonrestock]
+    max_age_seconds: 3600
+
+# Price filters drop scalper-tier markup before the alert is sent. Combine
+# with per-product `max_price` and `msrp` fields in data/products.yaml.
+# - only_at_or_near_msrp: when true, suppress alerts whose listed price
+#   exceeds msrp * msrp_multiplier. Defaults below allow up to 10% over.
+# - Unparseable prices abstain (better to alert than miss).
+price_filter:
+  only_at_or_near_msrp: false
+  msrp_multiplier: 1.10
+
+# Per RFC 2616 §14.22, public scrapers identify their operator. If you set
+# this, the scanner sends a "From: <email>" header on every retailer
+# request so an admin can reach you. Strongly recommended.
+operator_email: ""
+
+# Interactive dashboard (run via `python -m scanner.dashboard`). Only
+# the token matters here — bind address/port are CLI flags on the
+# dashboard process. Leave token blank for localhost-only use; set it
+# if you bind to a public interface and want write endpoints gated.
+dashboard:
+  token: "${DASHBOARD_TOKEN:-}"
 
 # Which Pokémon TCG products to track. "all_sealed" is the default and
 # covers every SKU in data/products.yaml. You can override with an explicit

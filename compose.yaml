@@ -1,0 +1,16 @@
+services:
+  scanner:
+    build: .
+    image: pokemon-scanner:local
+    container_name: pokemon-scanner
+    restart: unless-stopped
+    environment:
+      # Override these in a .env file or your shell rather than editing here.
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
+      - NTFY_TOPIC=${NTFY_TOPIC:-}
+      - BESTBUY_API_KEY=${BESTBUY_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./logs:/app/logs

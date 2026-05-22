@@ -1,11 +1,18 @@
-"""Notification sinks: console, Discord webhook, ntfy.sh."""
+"""Notification sinks: console, Discord webhook, ntfy.sh, Pushover, email, custom webhooks."""
 from __future__ import annotations
 
+import dataclasses
 import json
-import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import requests
+
+from . import channels
+from .log import get_logger
+from .priority import NICE_TO_HAVE
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -17,37 +24,115 @@ class StockAlert:
     status: str              # "IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"
     url: str
     price: str = ""
+    tier: str = NICE_TO_HAVE
+    msrp: str = ""           # e.g. "$49.99" — surfaced for at-or-below-MSRP signal
+    cart_url: str = ""       # Direct add-to-cart deep link, when available
+    image_url: str = ""      # Product thumbnail URL
 
     def line(self) -> str:
         dist = f" ({self.distance_miles:.1f} mi)" if self.distance_miles is not None else ""
         price = f" — {self.price}" if self.price else ""
+        tag = f" [{self.tier.upper()}]" if self.tier != NICE_TO_HAVE else ""
         return (
-            f"[{self.retailer}] {self.status}: {self.product_name}{price}\n"
+            f"[{self.retailer}]{tag} {self.status}: {self.product_name}{price}\n"
             f"   {self.store_label}{dist}\n"
             f"   {self.url}"
         )
 
 
 class Notifier:
-    def __init__(self, discord_webhook: str = "", ntfy_topic: str = ""):
+    def __init__(
+        self,
+        discord_webhook: str = "",
+        ntfy_topic: str = "",
+        priority_channels: dict[str, str] | None = None,
+        pushover: dict | None = None,
+        email: dict | None = None,
+        outbound_webhooks: list[str] | None = None,
+    ):
         self.discord_webhook = discord_webhook.strip()
         self.ntfy_topic = ntfy_topic.strip()
+        self.priority_channels = {
+            k: v.strip() for k, v in (priority_channels or {}).items() if v and v.strip()
+        }
+        self.pushover = pushover or {}
+        self.email = email or {}
+        self.outbound_webhooks = [u for u in (outbound_webhooks or []) if u]
 
     def send(self, alert: StockAlert) -> None:
-        print(alert.line(), flush=True)
-        if self.discord_webhook:
-            self._discord(alert)
+        log.info("alert %s", alert.line().replace("\n", " | "))
+        webhook = self.priority_channels.get(alert.tier) or self.discord_webhook
+        if webhook:
+            self._discord(alert, webhook)
         if self.ntfy_topic:
             self._ntfy(alert)
+        if self.pushover:
+            channels.send_pushover(
+                self.pushover,
+                title=f"{alert.retailer}: {alert.product_name}",
+                body=alert.line(),
+                url=alert.url,
+            )
+        if self.email:
+            channels.send_email(
+                self.email,
+                subject=f"[scanner] {alert.status}: {alert.product_name}",
+                body=alert.line(),
+            )
+        for url in self.outbound_webhooks:
+            channels.send_generic_webhook(url, dataclasses.asdict(alert))
 
-    def _discord(self, alert: StockAlert) -> None:
+    def send_status(self, title: str, fields: list[tuple[str, str]]) -> None:
+        """Push a non-alert status message (heartbeat, health warning, etc.)
+
+        Plain embed without the stock-status color coding; ntfy gets a
+        lower-priority tag so phones don't buzz."""
+        log.info("status %s | %s", title, " · ".join(f"{k}={v}" for k, v in fields))
+        if self.discord_webhook:
+            embed = {
+                "title": title,
+                "color": 0x95A5A6,
+                "fields": [
+                    {"name": k, "value": v, "inline": (len(v) < 40)}
+                    for k, v in fields
+                ],
+            }
+            try:
+                requests.post(
+                    self.discord_webhook,
+                    data=json.dumps({"embeds": [embed]}),
+                    headers={"Content-Type": "application/json"},
+                    timeout=10,
+                )
+            except requests.RequestException as exc:
+                log.warning("discord status failed: %s", exc)
+        if self.ntfy_topic:
+            body = "\n".join(f"{k}: {v}" for k, v in fields)
+            try:
+                requests.post(
+                    f"https://ntfy.sh/{self.ntfy_topic}",
+                    data=body.encode("utf-8"),
+                    headers={
+                        "Title": title,
+                        "Priority": "low",
+                        "Tags": "information_source",
+                    },
+                    timeout=10,
+                )
+            except requests.RequestException as exc:
+                log.warning("ntfy status failed: %s", exc)
+
+    def _discord(self, alert: StockAlert, webhook: str) -> None:
         color = {
             "IN_STOCK": 0x2ECC71,
             "LIMITED": 0xF1C40F,
             "ONLINE_IN_STOCK": 0x3498DB,
         }.get(alert.status, 0x95A5A6)
-        embed = {
-            "title": f"{alert.status}: {alert.product_name}",
+        title = f"{alert.status}: {alert.product_name}"
+        if alert.tier != NICE_TO_HAVE:
+            title = f"[{alert.tier.upper()}] " + title
+        embed: dict = {
+            "title": title,
             "url": alert.url,
             "color": color,
             "fields": [
@@ -60,16 +145,31 @@ class Notifier:
                 {"name": "Distance", "value": f"{alert.distance_miles:.1f} mi", "inline": True}
             )
         if alert.price:
-            embed["fields"].append({"name": "Price", "value": alert.price, "inline": True})
+            price_value = alert.price
+            if alert.msrp and alert.msrp != alert.price:
+                price_value = f"{alert.price} (MSRP {alert.msrp})"
+            embed["fields"].append({"name": "Price", "value": price_value, "inline": True})
+        elif alert.msrp:
+            embed["fields"].append({"name": "MSRP", "value": alert.msrp, "inline": True})
+        if alert.cart_url:
+            embed["fields"].append(
+                {
+                    "name": "Add to cart",
+                    "value": f"[Tap to add]({alert.cart_url})",
+                    "inline": False,
+                }
+            )
+        if alert.image_url:
+            embed["thumbnail"] = {"url": alert.image_url}
         try:
             requests.post(
-                self.discord_webhook,
+                webhook,
                 data=json.dumps({"embeds": [embed]}),
                 headers={"Content-Type": "application/json"},
                 timeout=10,
             )
         except requests.RequestException as exc:
-            print(f"  ! discord webhook failed: {exc}", file=sys.stderr)
+            log.warning("discord webhook failed: %s", exc)
 
     def _ntfy(self, alert: StockAlert) -> None:
         try:
@@ -84,4 +184,4 @@ class Notifier:
                 timeout=10,
             )
         except requests.RequestException as exc:
-            print(f"  ! ntfy failed: {exc}", file=sys.stderr)
+            log.warning("ntfy failed: %s", exc)

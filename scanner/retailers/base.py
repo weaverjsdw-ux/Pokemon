@@ -4,6 +4,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import requests
+
+from ..http import HTTPClient, default_client
+
+
+def variant_ids(product: dict[str, Any], field_name: str) -> list[str]:
+    """Return the list of SKU/ID variants for a product at one retailer.
+
+    Accepts either a single string (legacy) or a list of strings. Empties
+    and whitespace are dropped. Lets one product entry track multiple
+    variant SKUs at the same retailer — common when a set has alt-cover
+    ETBs or regional-exclusive packagings with distinct catalog IDs.
+
+        target_tcin: "12345"                     # one variant
+        target_tcin: ["12345", "67890"]          # multiple variants
+    """
+    raw = product.get(field_name)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        s = raw.strip()
+        return [s] if s else []
+    if isinstance(raw, list):
+        return [str(v).strip() for v in raw if str(v).strip()]
+    return []
+
 
 @dataclass
 class Store:
@@ -26,14 +52,18 @@ class StockResult:
     status: str            # "IN_STOCK" | "LIMITED" | "OUT" | "ONLINE_IN_STOCK" | "ONLINE_OUT"
     url: str
     price: str = ""
+    cart_url: str = ""     # Direct add-to-cart deep link when retailer supports it
+    image_url: str = ""    # Hero image, surfaced in Discord embed thumbnail
 
 
 class Retailer:
     name: str = ""
+    slug: str = ""           # short stable id used for health/budget tracking
     online_only: bool = False
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, http: HTTPClient | None = None, **kwargs: Any) -> None:
         self.opts = kwargs
+        self.http = http or default_client
 
     def find_stores(self, center_lat: float, center_lng: float, radius_miles: float) -> list[Store]:
         """Return candidate stores near (lat, lng). Online-only retailers return []."""
@@ -42,3 +72,49 @@ class Retailer:
     def check(self, products: dict[str, dict[str, Any]], stores: list[Store]) -> Iterable[StockResult]:
         """Yield StockResult for each (product, store) combination this adapter handles."""
         return []
+
+    def detect_block(self, resp) -> bool:
+        """Inspect a response for captcha / Cloudflare challenge / shadow-ban
+        markers. Returns True if blocked (and marks a logical failure on
+        the shared HTTP client so the health tracker counts it)."""
+        from ..detection import detect_block as _detect
+        from ..log import get_logger
+        if resp is None:
+            return False
+        try:
+            body = resp.text or ""
+        except Exception:
+            body = ""
+        result = _detect(self.slug or self.name.lower(), body, resp.status_code)
+        if result.blocked:
+            get_logger(__name__).warning(
+                "retailer=%s appears blocked: %s",
+                self.slug or self.name.lower(), result.reason,
+            )
+            try:
+                self.http._mark_failure(self.slug or self.name.lower())  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+        return result.blocked
+
+    def http_get(
+        self, url: str, *, params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None, timeout: float = 15.0,
+    ) -> requests.Response | None:
+        """Shared GET that returns None on terminal failure.
+
+        Bubbles BudgetExceeded / RetailerDisabled so the outer loop can log
+        the throttle clearly; swallows ordinary RequestException after retries
+        so adapters can keep their "missing data == skip product" semantics.
+        """
+        try:
+            return self.http.request(
+                self.slug or self.name.lower(),
+                "GET",
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+            )
+        except requests.RequestException:
+            return None

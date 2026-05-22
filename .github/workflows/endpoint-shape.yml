@@ -1,0 +1,36 @@
+name: Endpoint shape check
+
+# Nightly + manual: probe each retailer endpoint with a known SKU and
+# verify the response JSON still contains the fields the parser depends
+# on. Doesn't assert availability — just shape. If a retailer changes
+# their JSON keys, this fails before the user's first silent miss.
+
+on:
+  schedule:
+    - cron: "17 8 * * *"   # 08:17 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run shape probe
+        env:
+          # Best Buy probe is skipped automatically if no key is configured.
+          BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+        run: python -m scanner.tools.probe_endpoints
+      - name: Notify on failure
+        if: failure() && env.SHAPE_FAIL_WEBHOOK != ''
+        env:
+          SHAPE_FAIL_WEBHOOK: ${{ secrets.SHAPE_FAIL_WEBHOOK }}
+        run: |
+          curl -fsS -X POST -H "Content-Type: application/json" \
+            -d '{"content":"Endpoint shape probe failed on '"$GITHUB_REPOSITORY"' — a retailer likely changed their JSON. See workflow run: '"$GITHUB_SERVER_URL"'/'"$GITHUB_REPOSITORY"'/actions/runs/'"$GITHUB_RUN_ID"'"}' \
+            "$SHAPE_FAIL_WEBHOOK"

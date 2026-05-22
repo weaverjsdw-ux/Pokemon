@@ -3,7 +3,7 @@ to the base interface. No network."""
 from __future__ import annotations
 
 from scanner.retailers import ALL
-from scanner.retailers.base import Retailer
+from scanner.retailers.base import Retailer, variant_ids
 
 
 def test_registry_is_non_empty():
@@ -25,3 +25,27 @@ def test_retailer_can_be_instantiated_without_args():
         r = cls()
         assert hasattr(r, "find_stores")
         assert hasattr(r, "check")
+
+
+def test_variant_ids_string():
+    assert variant_ids({"target_tcin": "12345"}, "target_tcin") == ["12345"]
+
+
+def test_variant_ids_list():
+    assert variant_ids({"target_tcin": ["12345", "67890"]}, "target_tcin") == ["12345", "67890"]
+
+
+def test_variant_ids_blank_and_missing():
+    assert variant_ids({}, "target_tcin") == []
+    assert variant_ids({"target_tcin": ""}, "target_tcin") == []
+    assert variant_ids({"target_tcin": None}, "target_tcin") == []
+    assert variant_ids({"target_tcin": ["", "  ", "x"]}, "target_tcin") == ["x"]
+
+
+def test_variant_ids_strips_whitespace():
+    assert variant_ids({"target_tcin": ["  12345  "]}, "target_tcin") == ["12345"]
+
+
+def test_variant_ids_coerces_ints():
+    # YAML may load numeric SKUs as ints
+    assert variant_ids({"walmart_item_id": [123, "456"]}, "walmart_item_id") == ["123", "456"]

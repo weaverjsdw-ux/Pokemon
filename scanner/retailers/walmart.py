@@ -11,35 +11,30 @@ import re
 import time
 from typing import Any, Iterable
 
-import requests
+from .base import Retailer, Store, StockResult, variant_ids
 
-from .base import Retailer, Store, StockResult
-
-UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+from ..useragents import UA
 
 
 class Walmart(Retailer):
     name = "Walmart"
+    slug = "walmart"
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
+        resp = self.http_get(
+            "https://www.walmart.com/store/finder/electrode/api/stores",
+            params={"singleLineAddr": f"{lat},{lng}", "distance": int(radius_miles) + 5},
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/json",
+                "Referer": "https://www.walmart.com/store/finder",
+            },
+        )
+        if resp is None or resp.status_code != 200:
+            return []
         try:
-            resp = requests.get(
-                "https://www.walmart.com/store/finder/electrode/api/stores",
-                params={"singleLineAddr": f"{lat},{lng}", "distance": int(radius_miles) + 5},
-                headers={
-                    "User-Agent": UA,
-                    "Accept": "application/json",
-                    "Referer": "https://www.walmart.com/store/finder",
-                },
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                return []
             payload = resp.json()
-        except (requests.RequestException, ValueError):
+        except ValueError:
             return []
 
         stores_raw = payload.get("payload", {}).get("storesData", {}).get("stores", [])
@@ -70,14 +65,12 @@ class Walmart(Retailer):
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
         for key, prod in products.items():
-            item_id = (prod.get("walmart_item_id") or "").strip()
-            if not item_id:
-                continue
-            url = f"https://www.walmart.com/ip/{item_id}"
-            online = self._check_online(item_id, url, prod, key)
-            if online is not None:
-                yield online
-            time.sleep(0.6)
+            for item_id in variant_ids(prod, "walmart_item_id"):
+                url = f"https://www.walmart.com/ip/{item_id}"
+                online = self._check_online(item_id, url, prod, key)
+                if online is not None:
+                    yield online
+                time.sleep(0.6)
 
     def _check_online(
         self, item_id: str, url: str, prod: dict[str, Any], key: str
@@ -86,19 +79,16 @@ class Walmart(Retailer):
         to determine online availability. Store-level pickup status is in the
         same blob; we surface online as the primary signal because Walmart's
         store inventory feed is unreliable."""
-        try:
-            resp = requests.get(
-                url,
-                headers={
-                    "User-Agent": UA,
-                    "Accept": "text/html",
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-                timeout=20,
-            )
-        except requests.RequestException:
-            return None
-        if resp.status_code != 200:
+        resp = self.http_get(
+            url,
+            headers={
+                "User-Agent": UA,
+                "Accept": "text/html",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=20,
+        )
+        if resp is None or resp.status_code != 200:
             return None
         m = re.search(
             r'"availabilityStatus"\s*:\s*"(IN_STOCK|OUT_OF_STOCK|LIMITED_STOCK)"',

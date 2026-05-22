@@ -1,0 +1,37 @@
+[Unit]
+Description=Pokemon TCG restock scanner
+Documentation=https://github.com/weaverjsdw-ux/Pokemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust to wherever you cloned the repo
+WorkingDirectory=/opt/pokemon-scanner
+ExecStart=/opt/pokemon-scanner/.venv/bin/python -m scanner
+Restart=on-failure
+RestartSec=30
+# Cap the restart loop so a config-bug crash doesn't burn CPU forever
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+# Hardening — restrict what the scanner can touch on the host
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/pokemon-scanner/data /opt/pokemon-scanner/logs
+
+# Secrets via env file instead of baking them into config.yaml
+EnvironmentFile=-/opt/pokemon-scanner/.env
+
+# Run as a dedicated unprivileged user
+User=scanner
+Group=scanner
+
+# Logs to journald — view with `journalctl -u pokemon-scanner -f`
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,36 @@
 #
 # Tip: search the product page HTML for "tcin", "itemId", or "sku" to grab
 # the exact ID without guessing.
+#
+# Optional per-product fields:
+#   priority: must_have | nice_to_have | fyi   (default: nice_to_have)
+#     - must_have bypasses quiet hours; routes to the must_have channel
+#       if priority_channels is configured.
+#   mute: true                                  (default: false)
+#     - Short-circuits the alert path entirely. Useful for "I already
+#       have it, stop pinging me" without removing the SKU from the
+#       catalog.
+#   msrp: "$49.99"                              (optional)
+#     - Surfaced next to the listed price in Discord embeds so you can
+#       eyeball scalper markup at a glance.
+#   image_url: "https://..."                    (optional)
+#     - Shown as the embed thumbnail. The official Pokemon Center or
+#       publisher images work well.
+#   max_price: "$59.99"                         (optional)
+#     - Suppress alerts whose listed price exceeds this ceiling.
+#       Independent of the global price_filter.only_at_or_near_msrp.
+#   lgs_shopify_slugs: {domain: slug}            (optional)
+#     - Map of Shopify-store domain -> per-store product slug. Used by
+#       the generic LGS-Shopify adapter. Example:
+#         lgs_shopify_slugs:
+#           "bobs-tcg.myshopify.com": "prismatic-evolutions-etb"
+#           "cardcastle.com":         "prismatic-elite-trainer-box"
+#
+# Any per-retailer ID field accepts either a single SKU string or a list
+# of strings — useful when the same product has multiple catalog IDs at
+# one retailer (alt-cover ETBs, regional variants, etc.):
+#
+#   target_tcin: ["93954435", "93954436"]
 
 prismatic_evolutions_etb:
   name: "Prismatic Evolutions Elite Trainer Box"

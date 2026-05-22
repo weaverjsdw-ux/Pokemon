@@ -1,0 +1,54 @@
+# Fly.io deployment for the Pokémon TCG scanner.
+#
+# Quickstart from the repo root:
+#   curl -L https://fly.io/install.sh | sh
+#   fly launch --copy-config --no-deploy
+#   fly secrets set DISCORD_WEBHOOK="https://..." BESTBUY_API_KEY="..."
+#   fly volumes create scanner_data --size 1
+#   fly deploy
+#
+# The scanner mounts a 1 GB volume at /data to persist state.db, the
+# alert dedupe history, and SQLite backups across restarts and deploys.
+
+app = "pokemon-scanner"     # change to your own; must be unique on Fly
+primary_region = "ord"      # change to your nearest region
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Override the default data dir so it lives on the persistent volume
+  POKEMON_DATA_DIR = "/data"
+
+[[mounts]]
+  source = "scanner_data"
+  destination = "/data"
+
+[[services]]
+  # The scanner doesn't need an inbound HTTP port for its core loop;
+  # this exposes the dashboard if you also run `python -m scanner.dashboard`
+  # in the same machine (see the [processes] block).
+  internal_port = 8765
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[processes]
+  scanner   = "python -m scanner"
+  dashboard = "python -m scanner.dashboard --host 0.0.0.0 --port 8765"
+
+[deploy]
+  release_command = "python -c 'from scanner.config import load; load()'"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
