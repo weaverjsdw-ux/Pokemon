@@ -36,6 +36,29 @@ def test_all_variants_unavailable_yields_nothing():
     assert results == []
 
 
+def test_multi_region_polls_each_region():
+    client = Replay({
+        ("GET", "https://www.pokemoncenter.com/products/x.js"):
+            json_resp({"variants": [{"available": True}], "price": 4999}),
+        ("GET", "https://www.pokemoncenter.com/en-gb/products/x.js"):
+            json_resp({"variants": [{"available": True}], "price": 3999}),
+    })
+    pc = PokemonCenter(
+        http=client,
+        regions=[
+            {"code": "us", "base": "https://www.pokemoncenter.com", "currency": "$"},
+            {"code": "gb", "base": "https://www.pokemoncenter.com/en-gb", "currency": "£"},
+        ],
+    )
+    results = list(pc.check({"k": {"pokemoncenter_slug": "x"}}, []))
+    assert len(results) == 2
+    currencies = {r.price[:1] for r in results}
+    assert "$" in currencies
+    assert "£" in currencies
+    # Non-US region gets tagged in the name
+    assert any("[GB]" in r.product_name for r in results)
+
+
 def test_multiple_variant_slugs_are_polled():
     client = Replay({
         ("GET", "https://www.pokemoncenter.com/products/a.js"):

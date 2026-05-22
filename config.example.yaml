@@ -32,7 +32,14 @@ retailers:
   target:        { enabled: true }
   walmart:       { enabled: true }
   bestbuy:       { enabled: false, api_key: "${BESTBUY_API_KEY:-}" }   # Free key: https://developer.bestbuy.com
-  pokemoncenter: { enabled: true }                  # Online-only, no store filter
+  # Pokémon Center supports multiple regions. Default polls only US.
+  # Add UK, Canada, etc. by uncommenting the regions list.
+  pokemoncenter:
+    enabled: true
+    # regions:
+    #   - { code: us, base: "https://www.pokemoncenter.com",        currency: "$"  }
+    #   - { code: gb, base: "https://www.pokemoncenter.com/en-gb",  currency: "£"  }
+    #   - { code: ca, base: "https://www.pokemoncenter.com/en-ca",  currency: "C$" }
   gamestop:      { enabled: true }
   costco:        { enabled: false }                 # Online-only; check ToS
   samsclub:      { enabled: false }                 # Online-only; check ToS
