@@ -48,6 +48,8 @@ class _Health:
     fails: int = 0
     disabled_until: float = 0.0
     request_times: deque[float] = field(default_factory=deque)
+    # (timestamp, response_ms) tuples for the last hour; powers anomaly_factor
+    response_samples: deque = field(default_factory=deque)
 
 
 class HTTPClient:
@@ -84,13 +86,42 @@ class HTTPClient:
         now = time.time()
         out: dict[str, dict[str, Any]] = {}
         for name, h in self._health.items():
+            recent_resp = _trim_response_samples(h.response_samples, now, 3600)
             out[name] = {
                 "fails": h.fails,
                 "disabled": h.disabled_until > now,
                 "disabled_for": max(0, int(h.disabled_until - now)),
                 "requests_last_hour": _count_recent(h.request_times, now, 3600),
+                "p50_ms": _percentile(recent_resp, 50),
+                "p95_ms": _percentile(recent_resp, 95),
             }
         return out
+
+    def anomaly_factor(self, retailer: str) -> float:
+        """Return a multiplier in [0.25, 1.0] for the scan interval.
+
+        Below 1.0 means 'poll faster'. Computed from the ratio of recent
+        (last 5 min) median response time to longer-term (last 1 hour)
+        median. Elevated latency on public site endpoints often correlates
+        with imminent drops because retailer load spikes. Cap at 0.25 so
+        even a 10x spike doesn't drive the cadence past a reasonable floor."""
+        h = self._health.get(retailer)
+        if h is None or len(h.response_samples) < 10:
+            return 1.0
+        now = time.time()
+        recent = [ms for ts, ms in h.response_samples if ts >= now - 300]
+        hour = [ms for ts, ms in h.response_samples if ts >= now - 3600]
+        if len(recent) < 3 or len(hour) < 10:
+            return 1.0
+        recent_med = _percentile(recent, 50)
+        hour_med = _percentile(hour, 50)
+        if not hour_med:
+            return 1.0
+        ratio = recent_med / hour_med
+        if ratio < 1.5:
+            return 1.0
+        # 1.5x -> 0.66; 3x -> 0.33; 10x -> 0.25 (clamped)
+        return max(0.25, 1.0 / ratio)
 
     def request(
         self,
@@ -133,8 +164,11 @@ class HTTPClient:
             kwargs["headers"].setdefault("From", self.operator_email)
         for attempt in range(max_attempts):
             try:
-                h.request_times.append(time.time())
+                started = time.time()
+                h.request_times.append(started)
                 resp = self.session.request(method, url, timeout=timeout, **kwargs)
+                elapsed_ms = (time.time() - started) * 1000.0
+                h.response_samples.append((started, elapsed_ms))
                 if 500 <= resp.status_code < 600:
                     raise requests.HTTPError(
                         f"{resp.status_code} {resp.reason}", response=resp
@@ -184,6 +218,22 @@ def _count_recent(times: deque[float], now: float, window_seconds: int) -> int:
     while times and times[0] < cutoff:
         times.popleft()
     return len(times)
+
+
+def _trim_response_samples(samples: deque, now: float, window_seconds: int) -> list[float]:
+    """Drop samples older than the window; return the trimmed ms values."""
+    cutoff = now - window_seconds
+    while samples and samples[0][0] < cutoff:
+        samples.popleft()
+    return [ms for _, ms in samples]
+
+
+def _percentile(values, p: int) -> float:
+    if not values:
+        return 0.0
+    s = sorted(values)
+    k = max(0, min(len(s) - 1, int(len(s) * p / 100)))
+    return s[k]
 
 
 # Process-wide default client. Adapters use this; tests can inject their own.

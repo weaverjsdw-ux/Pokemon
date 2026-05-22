@@ -369,6 +369,27 @@ def main() -> int:
         )
         if tags:
             log.info("drop-window active (%s) — interval=%ds", ",".join(tags), interval)
+
+        # Anomaly-based boost: if any enabled retailer's latency is
+        # elevated (often a leading indicator of a drop), shrink the
+        # interval. Take the lowest factor across retailers.
+        factor = 1.0
+        anomaly_tags = []
+        for slug in enabled_slugs:
+            f = default_client.anomaly_factor(slug)
+            if f < factor:
+                factor = f
+                anomaly_tags = [slug]
+            elif f == factor and f < 1.0:
+                anomaly_tags.append(slug)
+        if factor < 1.0:
+            boosted = max(15, int(interval * factor))
+            log.info(
+                "latency anomaly on %s (factor=%.2f) — interval %d -> %d",
+                ",".join(anomaly_tags), factor, interval, boosted,
+            )
+            interval = boosted
+
         jitter = random.uniform(0.8, 1.3)
         time.sleep(interval * jitter)
 
