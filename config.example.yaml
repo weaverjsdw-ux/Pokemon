@@ -171,6 +171,13 @@ price_filter:
   only_at_or_near_msrp: false
   msrp_multiplier: 1.10
 
+# Interactive dashboard (run via `python -m scanner.dashboard`). Only
+# the token matters here — bind address/port are CLI flags on the
+# dashboard process. Leave token blank for localhost-only use; set it
+# if you bind to a public interface and want write endpoints gated.
+dashboard:
+  token: "${DASHBOARD_TOKEN:-}"
+
 # Which Pokémon TCG products to track. "all_sealed" is the default and
 # covers every SKU in data/products.yaml. You can override with an explicit
 # list of product keys (see data/products.yaml).

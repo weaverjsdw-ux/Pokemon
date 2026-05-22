@@ -104,11 +104,56 @@ def _v4_signal_seen(db: sqlite3.Connection) -> None:
     )
 
 
+def _v5_feedback(db: sqlite3.Connection) -> None:
+    """User feedback against fired alerts: 'bought it', 'false alert',
+    'too slow' — fuels the per-store ranker in Phase 3 analytics."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hit_id INTEGER,                -- references hit_log.id; NULL = manual
+            verdict TEXT NOT NULL,         -- bought | missed | false | too_slow
+            note TEXT,
+            ts INTEGER NOT NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS suppressed_drop (
+            retailer TEXT NOT NULL,
+            product_key TEXT NOT NULL,
+            store_id TEXT NOT NULL,
+            until_ts INTEGER NOT NULL,
+            reason TEXT,
+            PRIMARY KEY (retailer, product_key, store_id)
+        )
+        """
+    )
+
+
+def _v6_runtime_mute(db: sqlite3.Connection) -> None:
+    """Per-product mute toggle that lives outside products.yaml so it can
+    be flipped from the dashboard without editing files. products.yaml's
+    `mute: true` still wins; this only flips between mute states."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runtime_mute (
+            product_key TEXT PRIMARY KEY,
+            muted INTEGER NOT NULL DEFAULT 0,
+            ts INTEGER NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _v1_initial_schema),
     (2, _v2_price_history),
     (3, _v3_hit_log),
     (4, _v4_signal_seen),
+    (5, _v5_feedback),
+    (6, _v6_runtime_mute),
 ]
 
 

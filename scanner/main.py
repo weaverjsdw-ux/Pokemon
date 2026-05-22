@@ -30,6 +30,7 @@ from .priority import parse_quiet_hours, product_tier, should_alert as priority_
 from .retailers import ALL as RETAILER_REGISTRY
 from .retailers.base import Store
 from .route import get_polyline
+from . import state as state_mod
 from .state import State
 
 log = get_logger(__name__)
@@ -154,6 +155,10 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
             for result in retailer.check(products, stores):
                 store_id = result.store.store_id if result.store else "_online_"
                 product = products.get(result.product_key, {})
+                if state_mod.is_runtime_muted(state.db, result.product_key):
+                    continue
+                if state_mod.is_suppressed(state.db, slug, result.product_key, store_id):
+                    continue
                 if not priority_gate(product, quiet):
                     continue
                 if not filters_mod.passes(product, result.price, price_filter):

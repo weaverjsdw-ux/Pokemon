@@ -157,6 +157,81 @@ class State:
         return path
 
 
+def is_runtime_muted(db: sqlite3.Connection, product_key: str) -> bool:
+    """True if the dashboard has muted this product. Independent of
+    products.yaml's static `mute: true`."""
+    row = db.execute(
+        "SELECT muted FROM runtime_mute WHERE product_key=?", (product_key,)
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def set_runtime_mute(db: sqlite3.Connection, product_key: str, muted: bool) -> None:
+    db.execute(
+        "INSERT INTO runtime_mute(product_key, muted, ts) VALUES (?, ?, ?) "
+        "ON CONFLICT(product_key) DO UPDATE SET muted=excluded.muted, ts=excluded.ts",
+        (product_key, 1 if muted else 0, int(time.time())),
+    )
+    db.commit()
+
+
+def suppress_drop(
+    db: sqlite3.Connection,
+    retailer: str,
+    product_key: str,
+    store_id: str,
+    *,
+    duration_seconds: int = 6 * 3600,
+    reason: str = "",
+) -> int:
+    """Mark a specific (retailer, product, store) as 'I'm not interested
+    in any more alerts about this drop' — typically because the user just
+    bought it. Default 6h suppression covers the rest of a drop window."""
+    until = int(time.time()) + duration_seconds
+    db.execute(
+        "INSERT OR REPLACE INTO suppressed_drop(retailer, product_key, store_id, until_ts, reason) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (retailer, product_key, store_id, until, reason),
+    )
+    db.commit()
+    return until
+
+
+def is_suppressed(
+    db: sqlite3.Connection,
+    retailer: str,
+    product_key: str,
+    store_id: str,
+) -> bool:
+    row = db.execute(
+        "SELECT until_ts FROM suppressed_drop "
+        "WHERE retailer=? AND product_key=? AND store_id=?",
+        (retailer, product_key, store_id),
+    ).fetchone()
+    if not row:
+        return False
+    return int(row[0]) > int(time.time())
+
+
+def record_feedback(
+    db: sqlite3.Connection,
+    *,
+    hit_id: int | None,
+    verdict: str,
+    note: str = "",
+) -> None:
+    """Record a per-alert verdict. Verdicts:
+        bought    - 'got it, stop pinging me about this drop'
+        missed    - 'gone by the time I got there / sold out'
+        false     - 'no actual stock, alert was wrong'
+        too_slow  - 'alert came after the drop ended'"""
+    db.execute(
+        "INSERT INTO feedback(hit_id, verdict, note, ts) VALUES (?, ?, ?, ?)",
+        (hit_id, verdict, note, int(time.time())),
+    )
+    db.commit()
+
+
 def restore_latest(target: Path | None = None, *, backup_dir: Path | None = None) -> Path:
     """Replace state.db with the most recent backup. Returns the source path.
 

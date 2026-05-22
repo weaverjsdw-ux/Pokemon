@@ -1,27 +1,37 @@
-"""Read-only dashboard. Stdlib only — no FastAPI, no extra install.
+"""Interactive dashboard. Stdlib only — no FastAPI, no extra install.
 
 Launch with:
 
     python -m scanner.dashboard
 
 then open http://127.0.0.1:8765/ in a browser. Shows recent hits from
-hit_log, per-retailer health, and the configured product catalog.
+hit_log, per-retailer health, and the configured product catalog. POST
+endpoints let you:
 
-Intentionally read-only: no editing config or muting products from the
-browser. That's a Phase 3 add. The point is at-a-glance "is this thing
-working and what has it caught lately." HTML is rendered server-side
-and refreshes every 30s via a meta tag — no JS, no build step."""
+    - mute / unmute a product without editing products.yaml
+    - mark "I bought it" on a recent alert (suppresses further alerts
+      for that retailer+product+store for 6h, records 'bought' feedback)
+    - mark an alert as false/too-slow/missed for the analytics ranker
+
+Listens on 127.0.0.1 by default. If you bind externally (--host 0.0.0.0),
+set `dashboard.token` in config.yaml; write endpoints require an
+`X-Dashboard-Token` header matching that value. Read endpoints stay open
+since nothing on them is sensitive (no addresses, no webhooks).
+"""
 from __future__ import annotations
 
 import argparse
 import html
+import json
 import sqlite3
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from . import config as cfg_mod
+from . import state as state_mod
 from .http import default_client
 from .log import configure as configure_logging, get_logger
 from .state import DB_PATH
@@ -46,8 +56,16 @@ def _page(title: str, body: str) -> bytes:
     .pill    { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
     .pill.ok  { background: #052e16; color: #4ade80; }
     .pill.err { background: #450a0a; color: #f87171; }
+    .pill.muted { background: #1e1b4b; color: #c4b5fd; }
     code { font-family: ui-monospace, SF Mono, Menlo, monospace; color: #aaa; }
     a { color: #9cf; }
+    button { background: #2563eb; color: white; border: 0; padding: 4px 10px; border-radius: 4px;
+             cursor: pointer; font-size: 12px; margin-right: 4px; }
+    button.danger { background: #7f1d1d; }
+    button.ghost { background: #333; color: #ccc; }
+    form { display: inline; }
+    .ok-flash  { background: #052e16; color: #4ade80; padding: 6px 12px; border-radius: 4px; margin: 8px 0; }
+    .err-flash { background: #450a0a; color: #f87171; padding: 6px 12px; border-radius: 4px; margin: 8px 0; }
     """
     return (
         "<!doctype html><html><head>"
@@ -63,24 +81,35 @@ def _page(title: str, body: str) -> bytes:
 
 def _render_recent_hits(db: sqlite3.Connection, limit: int = 40) -> str:
     rows = db.execute(
-        "SELECT retailer, store_id, product_key, status, tier, url, price_cents, ts "
+        "SELECT id, retailer, store_id, product_key, status, tier, url, price_cents, ts "
         "FROM hit_log ORDER BY ts DESC LIMIT ?",
         (limit,),
     ).fetchall()
     if not rows:
         return "<p class=sub>No alerts logged yet.</p>"
     out = ["<table><tr><th>When</th><th>Retailer</th><th>Store</th><th>Product</th>",
-           "<th>Status</th><th>Tier</th><th>Price</th><th></th></tr>"]
+           "<th>Status</th><th>Tier</th><th>Price</th><th>Action</th></tr>"]
     now = time.time()
-    for retailer, store_id, product_key, status, tier, url, price_cents, ts in rows:
+    for hit_id, retailer, store_id, product_key, status, tier, url, price_cents, ts in rows:
         age = _ago(now - ts)
         price = f"${price_cents/100:.2f}" if price_cents is not None else "—"
         link = f'<a href="{html.escape(url or "")}" target=_blank rel=noopener>open</a>' if url else ""
+        actions = (
+            f'<form method=post action=/actions/bought>'
+            f'<input type=hidden name=hit_id value="{hit_id}">'
+            f'<input type=hidden name=retailer value="{html.escape(retailer)}">'
+            f'<input type=hidden name=product_key value="{html.escape(product_key)}">'
+            f'<input type=hidden name=store_id value="{html.escape(store_id)}">'
+            f'<button>Bought it</button></form>'
+            f'<form method=post action=/actions/false>'
+            f'<input type=hidden name=hit_id value="{hit_id}">'
+            f'<button class=ghost>False alert</button></form>'
+        )
         out.append(
             f"<tr><td>{age}</td><td>{html.escape(retailer)}</td>"
             f"<td>{html.escape(store_id)}</td><td><code>{html.escape(product_key)}</code></td>"
             f"<td>{html.escape(status)}</td><td>{html.escape(tier)}</td>"
-            f"<td>{price}</td><td>{link}</td></tr>"
+            f"<td>{price}</td><td>{link} {actions}</td></tr>"
         )
     out.append("</table>")
     return "".join(out)
@@ -101,20 +130,39 @@ def _render_health(snapshot: dict[str, dict[str, Any]]) -> str:
     return "".join(out)
 
 
-def _render_products(cfg) -> str:
+def _render_products(cfg, db: sqlite3.Connection) -> str:
     selected = cfg_mod.selected_products(cfg)
     if not selected:
         return "<p class=sub>No products selected.</p>"
-    out = ["<table><tr><th>Key</th><th>Name</th><th>Set</th><th>Type</th><th>Tier</th><th>Muted</th></tr>"]
+    out = ["<table><tr><th>Key</th><th>Name</th><th>Set</th><th>Type</th><th>Tier</th>",
+           "<th>Mute</th><th>Action</th></tr>"]
     for key, prod in sorted(selected.items()):
         tier = prod.get("priority", "nice_to_have")
-        muted = "yes" if prod.get("mute") else ""
+        static_mute = bool(prod.get("mute"))
+        runtime_mute = state_mod.is_runtime_muted(db, key)
+        if static_mute:
+            mute_pill = '<span class="pill muted">file</span>'
+            action = '<span class=sub>edit products.yaml</span>'
+        elif runtime_mute:
+            mute_pill = '<span class="pill muted">dashboard</span>'
+            action = (
+                f'<form method=post action=/actions/unmute>'
+                f'<input type=hidden name=product_key value="{html.escape(key)}">'
+                f'<button class=ghost>Unmute</button></form>'
+            )
+        else:
+            mute_pill = ""
+            action = (
+                f'<form method=post action=/actions/mute>'
+                f'<input type=hidden name=product_key value="{html.escape(key)}">'
+                f'<button class=danger>Mute</button></form>'
+            )
         out.append(
             f"<tr><td><code>{html.escape(key)}</code></td>"
             f"<td>{html.escape(str(prod.get('name', '')))}</td>"
             f"<td>{html.escape(str(prod.get('set', '')))}</td>"
             f"<td>{html.escape(str(prod.get('type', '')))}</td>"
-            f"<td>{html.escape(tier)}</td><td>{muted}</td></tr>"
+            f"<td>{html.escape(tier)}</td><td>{mute_pill}</td><td>{action}</td></tr>"
         )
     out.append("</table>")
     return "".join(out)
@@ -132,28 +180,71 @@ def _ago(seconds: float) -> str:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    cfg: Any = None  # filled by main()
+    cfg: Any = None
+    token: str = ""
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log.debug("HTTP %s - %s", self.address_string(), fmt % args)
 
+    # --- routing ---
+
     def do_GET(self) -> None:
-        if self.path != "/":
-            self.send_response(404)
-            self.end_headers()
+        if self.path == "/" or self.path.startswith("/?"):
+            flash = ""
+            qs = parse_qs(urlparse(self.path).query)
+            if "ok" in qs:
+                flash = f'<div class=ok-flash>{html.escape(qs["ok"][0])}</div>'
+            elif "err" in qs:
+                flash = f'<div class=err-flash>{html.escape(qs["err"][0])}</div>'
+            return self._render_index(flash)
+        if self.path == "/healthz":
+            return self._json({"ok": True})
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self) -> None:
+        if not self._authorized():
+            self._redirect("/?err=Forbidden")
             return
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length).decode("utf-8") if length else ""
+        form = {k: v[0] for k, v in parse_qs(body).items()}
+        path = urlparse(self.path).path
+        try:
+            if path == "/actions/mute":
+                self._action_mute(form, muted=True)
+            elif path == "/actions/unmute":
+                self._action_mute(form, muted=False)
+            elif path == "/actions/bought":
+                self._action_bought(form)
+            elif path == "/actions/false":
+                self._action_feedback(form, verdict="false")
+            elif path == "/actions/missed":
+                self._action_feedback(form, verdict="missed")
+            elif path == "/actions/too_slow":
+                self._action_feedback(form, verdict="too_slow")
+            else:
+                self._redirect("/?err=Unknown%20action")
+        except Exception as exc:
+            log.exception("dashboard action failed: %s", path)
+            self._redirect(f"/?err={html.escape(str(exc))}")
+
+    # --- pages ---
+
+    def _render_index(self, flash: str = "") -> None:
         try:
             db = sqlite3.connect(DB_PATH)
             recent = _render_recent_hits(db)
+            products = _render_products(self.cfg, db)
             db.close()
         except sqlite3.Error as exc:
             recent = f"<p class=err>DB error: {html.escape(str(exc))}</p>"
+            products = ""
 
         health = _render_health(default_client.health_snapshot())
-        products = _render_products(self.cfg)
-
         body = (
-            "<p class=sub>Read-only — refreshes every 30s.</p>"
+            "<p class=sub>Click 'Mute' to silence a product. Click 'Bought it' on a recent alert to suppress further alerts for the same retailer+product+store for 6h.</p>"
+            + flash +
             "<h2>Per-retailer health</h2>" + health +
             "<h2>Recent alerts</h2>" + recent +
             "<h2>Tracked products</h2>" + products
@@ -165,17 +256,80 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(page)
 
+    # --- actions ---
+
+    def _action_mute(self, form: dict, *, muted: bool) -> None:
+        key = (form.get("product_key") or "").strip()
+        if not key:
+            return self._redirect("/?err=Missing%20product_key")
+        with sqlite3.connect(DB_PATH) as db:
+            state_mod.set_runtime_mute(db, key, muted)
+        verb = "muted" if muted else "unmuted"
+        self._redirect(f"/?ok=Product%20{html.escape(key)}%20{verb}")
+
+    def _action_bought(self, form: dict) -> None:
+        retailer = (form.get("retailer") or "").strip()
+        product_key = (form.get("product_key") or "").strip()
+        store_id = (form.get("store_id") or "").strip()
+        hit_id = form.get("hit_id")
+        if not (retailer and product_key and store_id):
+            return self._redirect("/?err=Missing%20fields")
+        with sqlite3.connect(DB_PATH) as db:
+            state_mod.suppress_drop(
+                db, retailer, product_key, store_id,
+                duration_seconds=6 * 3600, reason="bought via dashboard",
+            )
+            state_mod.record_feedback(
+                db, hit_id=int(hit_id) if hit_id else None,
+                verdict="bought", note="dashboard",
+            )
+        self._redirect("/?ok=Suppressed%20further%20alerts%20for%206h")
+
+    def _action_feedback(self, form: dict, *, verdict: str) -> None:
+        hit_id = form.get("hit_id")
+        if not hit_id:
+            return self._redirect("/?err=Missing%20hit_id")
+        with sqlite3.connect(DB_PATH) as db:
+            state_mod.record_feedback(
+                db, hit_id=int(hit_id), verdict=verdict, note="dashboard",
+            )
+        self._redirect(f"/?ok=Recorded%20{verdict}")
+
+    # --- helpers ---
+
+    def _authorized(self) -> bool:
+        if not self.token:
+            return True
+        return self.headers.get("X-Dashboard-Token", "") == self.token
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def _json(self, payload: Any, status: int = 200) -> None:
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Read-only scanner dashboard.")
+    parser = argparse.ArgumentParser(description="Interactive scanner dashboard.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
 
     configure_logging("INFO")
     _Handler.cfg = cfg_mod.load()
+    _Handler.token = str((getattr(_Handler.cfg, "dashboard", None) or {}).get("token", "")).strip()
     srv = HTTPServer((args.host, args.port), _Handler)
-    log.info("dashboard listening on http://%s:%d/", args.host, args.port)
+    log.info(
+        "dashboard listening on http://%s:%d/ (token=%s)",
+        args.host, args.port, "set" if _Handler.token else "open (localhost only)",
+    )
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

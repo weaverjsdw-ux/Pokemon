@@ -81,6 +81,44 @@ def test_restore_latest_copies_file(tmp_path, fresh_state, monkeypatch):
     assert (tmp_path / "state.db").exists()
 
 
+def test_runtime_mute_round_trip(fresh_state):
+    from scanner import state as state_mod
+    assert state_mod.is_runtime_muted(fresh_state.db, "pe_etb") is False
+    state_mod.set_runtime_mute(fresh_state.db, "pe_etb", True)
+    assert state_mod.is_runtime_muted(fresh_state.db, "pe_etb") is True
+    state_mod.set_runtime_mute(fresh_state.db, "pe_etb", False)
+    assert state_mod.is_runtime_muted(fresh_state.db, "pe_etb") is False
+
+
+def test_suppress_drop_blocks_subsequent_alert(fresh_state):
+    from scanner import state as state_mod
+    state_mod.suppress_drop(
+        fresh_state.db, "target", "pe_etb", "1234",
+        duration_seconds=3600, reason="bought",
+    )
+    assert state_mod.is_suppressed(fresh_state.db, "target", "pe_etb", "1234") is True
+    # Different store -> not suppressed
+    assert state_mod.is_suppressed(fresh_state.db, "target", "pe_etb", "9999") is False
+
+
+def test_suppress_drop_expires(fresh_state):
+    from scanner import state as state_mod
+    state_mod.suppress_drop(
+        fresh_state.db, "target", "pe_etb", "1234",
+        duration_seconds=0,  # already expired
+    )
+    assert state_mod.is_suppressed(fresh_state.db, "target", "pe_etb", "1234") is False
+
+
+def test_record_feedback_persists(fresh_state):
+    from scanner import state as state_mod
+    state_mod.record_feedback(fresh_state.db, hit_id=42, verdict="bought", note="x")
+    rows = fresh_state.db.execute(
+        "SELECT hit_id, verdict, note FROM feedback"
+    ).fetchall()
+    assert rows == [(42, "bought", "x")]
+
+
 def test_restore_with_no_backups_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         restore_latest(
