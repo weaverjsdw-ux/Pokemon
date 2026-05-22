@@ -15,6 +15,7 @@ import time
 
 from datetime import datetime
 
+from . import analytics
 from . import config as cfg_mod
 from . import drop_windows as drop_windows_mod
 from . import filters as filters_mod
@@ -319,13 +320,15 @@ def main() -> int:
         run_pass(cfg, stores_by_retailer, state, notifier)
         return 0
 
-    windows = drop_windows_mod.parse(cfg.drop_windows_raw)
+    explicit_windows = drop_windows_mod.parse(cfg.drop_windows_raw)
+    observed_windows: list = []
+    observed_refresh_at: float = 0.0
     enabled_slugs = [s for s, r in cfg.retailers.items() if r.enabled]
     signal_sources = _build_signal_sources(cfg)
 
     log.info(
         "scanning interval=%ds (+jitter), drop_windows=%d, signal_sources=%d. Ctrl-C to stop.",
-        cfg.poll_interval_seconds, len(windows), len(signal_sources),
+        cfg.poll_interval_seconds, len(explicit_windows), len(signal_sources),
     )
     while True:
         fired = run_pass(cfg, stores_by_retailer, state, notifier)
@@ -339,9 +342,29 @@ def main() -> int:
                 stores_by_retailer,
             )
         state.maybe_backup()
+
+        # Refresh analytics-derived windows hourly. Avoids re-querying
+        # SQLite on every pass when there are thousands of hits.
+        now_secs = time.time()
+        if now_secs >= observed_refresh_at:
+            try:
+                observed_windows = analytics.suggested_drop_windows_as_runtime(
+                    state.db, tz=cfg.timezone,
+                )
+                if observed_windows:
+                    log.info(
+                        "analytics suggested %d observed drop windows; merging",
+                        len(observed_windows),
+                    )
+            except Exception:
+                log.exception("analytics window refresh failed")
+                observed_windows = []
+            observed_refresh_at = now_secs + 3600
+
         now = datetime.now(cfg.tzinfo())
         interval, tags = drop_windows_mod.effective_interval(
-            windows, enabled_slugs, cfg.poll_interval_seconds, now=now,
+            explicit_windows + observed_windows,
+            enabled_slugs, cfg.poll_interval_seconds, now=now,
         )
         if tags:
             log.info("drop-window active (%s) — interval=%ds", ",".join(tags), interval)

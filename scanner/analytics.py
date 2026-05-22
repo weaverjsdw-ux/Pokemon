@@ -147,6 +147,34 @@ def per_store_hit_rate(
     return stats[:limit]
 
 
+def suggested_drop_windows_as_runtime(
+    db: sqlite3.Connection,
+    *,
+    tz: str = "UTC",
+    days_back: int = 30,
+    boosted_poll_seconds: int = 60,
+):
+    """Same as suggest_drop_windows() but returns scanner.drop_windows.DropWindow
+    instances so they can be merged into the runtime window list.
+
+    Used by the scan loop to *automatically* poll faster during windows
+    the user hasn't explicitly configured. Conservative thresholds in
+    suggest_drop_windows mean we won't shift cadence on a single hit."""
+    from . import drop_windows
+    from datetime import time as dtime
+    raw = suggest_drop_windows(db, days_back=days_back, tz=tz)
+    out: list[drop_windows.DropWindow] = []
+    for s in raw:
+        out.append(drop_windows.DropWindow(
+            retailers=[s.retailer],
+            days={s.weekday},
+            start=dtime(s.start_hour, 0),
+            end=dtime(s.end_hour, 0) if s.end_hour < 24 else dtime(23, 59),
+            poll_interval_seconds=boosted_poll_seconds,
+        ))
+    return out
+
+
 def feedback_quality(
     db: sqlite3.Connection, *, days_back: int = 30,
 ) -> dict[str, dict[str, Any]]:
