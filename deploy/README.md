@@ -57,3 +57,16 @@ If you already use Docker, the simpler alternative to any of the above
 is `docker compose up -d` — `restart: unless-stopped` in `compose.yaml`
 handles both crashes and reboots without touching the host's init
 system.
+
+## Cloud (Fly.io / Railway)
+
+If you don't want to run it on hardware you own at all:
+
+- **Fly.io** — see [`deploy/fly/fly.toml`](fly/fly.toml). One-line
+  install + a `fly launch`. Cheapest steady-state (~\$2/mo); has a
+  built-in persistent volume for `data/`.
+- **Railway** — see [`deploy/railway/README.md`](railway/README.md).
+  Web-GUI workflow, no CLI. Free trial → ~\$5/mo.
+
+Both pull the same `Dockerfile` the local Docker path uses, so the
+build is identical and switching hosts is a no-op.
