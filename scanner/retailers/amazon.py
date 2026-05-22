@@ -33,10 +33,7 @@ from ..log import get_logger
 
 log = get_logger(__name__)
 
-UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+from ..useragents import UA
 
 _IN_STOCK = re.compile(r"In Stock|Only \d+ left in stock", re.I)
 _PRICE = re.compile(r'"priceToPay"\s*:\s*\{[^}]*"amount"\s*:\s*"?([\d.]+)"?', re.I)

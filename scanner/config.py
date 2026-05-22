@@ -66,6 +66,7 @@ class Config:
     outbound_webhooks: list[str]
     community_signal: dict  # passed through to scanner.sources.*
     dashboard: dict         # {token: ...} for the interactive dashboard
+    operator_email: str     # included in the From: header per RFC 2616 §14.22
     products_filter: Any  # "all_sealed" or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -141,6 +142,7 @@ def load() -> Config:
         outbound_webhooks=[str(u) for u in (raw.get("outbound_webhooks") or []) if str(u).strip()],
         community_signal=dict(raw.get("community_signal") or {}),
         dashboard=dict(raw.get("dashboard") or {}),
+        operator_email=str(raw.get("operator_email", "")).strip(),
         products_filter=raw.get("products", "all_sealed"),
         products=products,
     )

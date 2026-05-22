@@ -291,6 +291,7 @@ def main() -> int:
         return run_wizard()
 
     cfg = cfg_mod.load()
+    default_client.operator_email = cfg.operator_email
 
     if args.check_config:
         return check_config(cfg)

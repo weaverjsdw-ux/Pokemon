@@ -171,6 +171,11 @@ price_filter:
   only_at_or_near_msrp: false
   msrp_multiplier: 1.10
 
+# Per RFC 2616 §14.22, public scrapers identify their operator. If you set
+# this, the scanner sends a "From: <email>" header on every retailer
+# request so an admin can reach you. Strongly recommended.
+operator_email: ""
+
 # Interactive dashboard (run via `python -m scanner.dashboard`). Only
 # the token matters here — bind address/port are CLI flags on the
 # dashboard process. Leave token blank for localhost-only use; set it

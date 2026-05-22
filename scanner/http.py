@@ -68,6 +68,7 @@ class HTTPClient:
         self.cooldown_seconds = cooldown_seconds
         self.rate_per_hour = rate_per_hour
         self.backoff = backoff
+        self.operator_email = ""    # set from config at startup
         self.session = requests.Session()
         self._health: dict[str, _Health] = {}
         self._lock = threading.Lock()
@@ -125,6 +126,11 @@ class HTTPClient:
 
         max_attempts = (retries if retries is not None else len(self.backoff)) + 1
         last_exc: Exception | None = None
+        # Inject From: header so retailers can ID/contact the operator.
+        if self.operator_email and "headers" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["headers"] = {**kwargs["headers"]}
+            kwargs["headers"].setdefault("From", self.operator_email)
         for attempt in range(max_attempts):
             try:
                 h.request_times.append(time.time())

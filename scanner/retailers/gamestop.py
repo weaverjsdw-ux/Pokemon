@@ -12,10 +12,7 @@ from typing import Any, Iterable
 
 from .base import Retailer, Store, StockResult, variant_ids
 
-UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+from ..useragents import UA
 
 
 class GameStop(Retailer):
