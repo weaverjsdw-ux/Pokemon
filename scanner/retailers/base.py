@@ -73,6 +73,30 @@ class Retailer:
         """Yield StockResult for each (product, store) combination this adapter handles."""
         return []
 
+    def detect_block(self, resp) -> bool:
+        """Inspect a response for captcha / Cloudflare challenge / shadow-ban
+        markers. Returns True if blocked (and marks a logical failure on
+        the shared HTTP client so the health tracker counts it)."""
+        from ..detection import detect_block as _detect
+        from ..log import get_logger
+        if resp is None:
+            return False
+        try:
+            body = resp.text or ""
+        except Exception:
+            body = ""
+        result = _detect(self.slug or self.name.lower(), body, resp.status_code)
+        if result.blocked:
+            get_logger(__name__).warning(
+                "retailer=%s appears blocked: %s",
+                self.slug or self.name.lower(), result.reason,
+            )
+            try:
+                self.http._mark_failure(self.slug or self.name.lower())  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+        return result.blocked
+
     def http_get(
         self, url: str, *, params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None, timeout: float = 15.0,

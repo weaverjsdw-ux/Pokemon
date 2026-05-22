@@ -38,7 +38,6 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-_CAPTCHA_MARKERS = ("captcha-image", "Enter the characters you see below", "errors/validateCaptcha")
 _IN_STOCK = re.compile(r"In Stock|Only \d+ left in stock", re.I)
 _PRICE = re.compile(r'"priceToPay"\s*:\s*\{[^}]*"amount"\s*:\s*"?([\d.]+)"?', re.I)
 _PRICE_ALT = re.compile(r'<span class="a-offscreen">\$([\d,.]+)</span>')
@@ -69,14 +68,12 @@ class Amazon(Retailer):
                 )
                 if resp is None or resp.status_code != 200:
                     continue
-                text = resp.text or ""
-                if any(marker in text for marker in _CAPTCHA_MARKERS):
-                    log.warning("amazon captcha for asin=%s — backing off", asin)
-                    # One CAPTCHA per pass disables the adapter for the rest
-                    # of this pass; the HTTP client's health tracker takes
-                    # over for longer-term disable if it keeps happening.
-                    self.http._mark_failure(self.slug)  # type: ignore[attr-defined]
+                if self.detect_block(resp):
+                    # detect_block marks a failure on the HTTP client; bail
+                    # this pass so we don't burn budget on more 200-with-
+                    # captcha responses.
                     return
+                text = resp.text or ""
                 if not _IN_STOCK.search(text):
                     continue
                 price = ""
