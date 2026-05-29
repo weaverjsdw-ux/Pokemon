@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to proxies.json and fill in your own proxy endpoints. proxies.json is gitignored so credentials never get committed. A bare URL applies to both http and https; use a per-scheme object if they differ.",
+  "proxies": [
+    "http://user:pass@proxy-a.example.com:8080",
+    "http://user:pass@proxy-b.example.com:8080",
+    {
+      "http": "http://proxy-c.example.com:3128",
+      "https": "http://proxy-c.example.com:3128"
+    }
+  ]
+}
