@@ -81,6 +81,18 @@ def test_selected_products_explicit_list(monkeypatch, tmp_path):
     assert list(selected) == ["a"]
 
 
+def test_selected_products_missing_explicit_key_raises(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\nproducts: ['a', 'missing']\n",
+    )
+    _write(products_path, "a: {name: A}\n")
+    cfg = cfg_mod.load()
+    with pytest.raises(SystemExit, match="missing"):
+        cfg_mod.selected_products(cfg)
+
+
 def test_selected_products_invalid_filter_raises(monkeypatch, tmp_path):
     cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
     _write(
@@ -91,3 +103,14 @@ def test_selected_products_invalid_filter_raises(monkeypatch, tmp_path):
     cfg = cfg_mod.load()
     with pytest.raises(SystemExit, match="invalid 'products'"):
         cfg_mod.selected_products(cfg)
+
+
+def test_retailer_config_must_be_mapping(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\nretailers:\n  target: true\n",
+    )
+    _write(products_path, "a: {name: A}\n")
+    with pytest.raises(SystemExit, match="retailers.target"):
+        cfg_mod.load()

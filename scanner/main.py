@@ -23,6 +23,56 @@ from .route import get_polyline
 from .state import State
 
 
+def config_errors(cfg: cfg_mod.Config) -> list[str]:
+    errors: list[str] = []
+    unknown = [s for s in cfg.retailers if s not in RETAILER_REGISTRY]
+    if unknown:
+        errors.append(f"config.yaml references unknown retailers: {', '.join(unknown)}")
+
+    unsupported_enabled = []
+    for slug, rcfg in cfg.retailers.items():
+        if not rcfg.enabled or slug not in RETAILER_REGISTRY:
+            continue
+        RClass = RETAILER_REGISTRY[slug]
+        if not getattr(RClass, "supported", True):
+            reason = getattr(RClass, "unsupported_reason", "") or "not implemented"
+            unsupported_enabled.append(f"{slug} ({reason})")
+    if unsupported_enabled:
+        errors.append(
+            "config.yaml enables unsupported retailers: " + "; ".join(unsupported_enabled)
+        )
+
+    if cfg.routing_engine not in {"osrm", "google"}:
+        errors.append("config.yaml: routing.engine must be 'osrm' or 'google'")
+    if cfg.route_radius_miles <= 0:
+        errors.append("config.yaml: route_radius_miles must be greater than 0")
+    if cfg.poll_interval_seconds < 60:
+        errors.append("config.yaml: poll_interval_seconds must be at least 60")
+
+    try:
+        selected = cfg_mod.selected_products(cfg)
+    except SystemExit as exc:
+        errors.append(str(exc))
+        return errors
+
+    for slug, rcfg in cfg.retailers.items():
+        if not rcfg.enabled or slug not in RETAILER_REGISTRY:
+            continue
+        RClass = RETAILER_REGISTRY[slug]
+        if not getattr(RClass, "supported", True):
+            continue
+        fields = getattr(RClass, "product_id_fields", ())
+        if fields and not any(
+            any(str(product.get(field) or "").strip() for field in fields)
+            for product in selected.values()
+        ):
+            errors.append(
+                f"config.yaml enables {slug}, but selected products have no "
+                f"{'/'.join(fields)} values"
+            )
+    return errors
+
+
 def build_corridor(cfg: cfg_mod.Config):
     print(f"Geocoding addresses...", flush=True)
     home = geocode(cfg.home_address)
@@ -99,6 +149,15 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
             traceback.print_exc()
 
 
+def enabled_retailer_slugs(cfg: cfg_mod.Config) -> list[str]:
+    return [
+        slug
+        for slug, RClass in RETAILER_REGISTRY.items()
+        if getattr(RClass, "supported", True)
+        and (cfg.retailers.get(slug) and cfg.retailers[slug].enabled)
+    ]
+
+
 def check_config(cfg: cfg_mod.Config) -> int:
     """Validate config + product catalog without making any network calls.
 
@@ -118,18 +177,18 @@ def check_config(cfg: cfg_mod.Config) -> int:
     print(f"\nretailers enabled ({len(enabled)}): {', '.join(enabled) or '(none)'}")
     print(f"retailers disabled ({len(disabled)}): {', '.join(disabled) or '(none)'}")
 
-    unknown = [s for s in cfg.retailers if s not in RETAILER_REGISTRY]
-    if unknown:
-        print(f"\n! config.yaml references unknown retailers: {', '.join(unknown)}")
+    errors = config_errors(cfg)
+    if errors:
+        print("\nconfiguration errors:")
+        for error in errors:
+            print(f"! {error}")
 
-    selected = cfg_mod.selected_products(cfg)
+    try:
+        selected = cfg_mod.selected_products(cfg)
+    except SystemExit:
+        return 1
     print(f"\nproducts: {len(selected)} selected / {len(cfg.products)} in catalog")
-    filt = cfg.products_filter
-    if isinstance(filt, list):
-        missing = [k for k in filt if k not in cfg.products]
-        if missing:
-            print(f"! products filter lists keys not in catalog: {', '.join(missing)}")
-    return 0
+    return 1 if errors else 0
 
 
 def main() -> int:
@@ -144,11 +203,27 @@ def main() -> int:
     if args.check_config:
         return check_config(cfg)
 
-    home, work, polyline = build_corridor(cfg)
-    stores_by_retailer = discover_stores(cfg, home, work, polyline)
+    errors = config_errors(cfg)
+    if errors:
+        raise SystemExit("\n".join(errors))
+
+    enabled_slugs = enabled_retailer_slugs(cfg)
+    needs_route = any(not RETAILER_REGISTRY[slug].online_only for slug in enabled_slugs)
+    if needs_route:
+        try:
+            home, work, polyline = build_corridor(cfg)
+        except Exception as exc:
+            raise SystemExit(f"route setup failed: {exc}")
+        stores_by_retailer = discover_stores(cfg, home, work, polyline)
+    else:
+        stores_by_retailer = {slug: [] for slug in enabled_slugs}
 
     if args.dry_run:
         for slug, stores in stores_by_retailer.items():
+            RClass = RETAILER_REGISTRY[slug]
+            if RClass.online_only:
+                print(f"\n{slug} (online-only)")
+                continue
             print(f"\n{slug} ({len(stores)} stores in corridor):")
             for s in stores:
                 print(f"  {s.label()}  ({s.distance_miles:.2f} mi from route)")

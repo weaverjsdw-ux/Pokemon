@@ -23,12 +23,12 @@ routing:
 # Retailers to monitor. Disable any you don't care about to cut traffic.
 retailers:
   target:        { enabled: true }
-  walmart:       { enabled: true }
+  walmart:       { enabled: true }                   # Online-only signal in this build
   bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
-  pokemoncenter: { enabled: true }                  # Online-only, no store filter
-  gamestop:      { enabled: true }
-  costco:        { enabled: false }                 # Online-only
-  samsclub:      { enabled: false }                 # Online-only
+  pokemoncenter: { enabled: false }                 # Enable after adding pokemoncenter_slug IDs
+  gamestop:      { enabled: false }                 # Enable after adding gamestop_pid IDs
+  costco:        { enabled: false }                 # Placeholder; no live checks yet
+  samsclub:      { enabled: false }                 # Placeholder; no live checks yet
 
 # Poll interval (seconds) per retailer. Jitter is added automatically.
 # Don't crank this too low — these are public site APIs, be polite.

@@ -31,6 +31,9 @@ class StockResult:
 class Retailer:
     name: str = ""
     online_only: bool = False
+    supported: bool = True
+    unsupported_reason: str = ""
+    product_id_fields: tuple[str, ...] = ()
 
     def __init__(self, **kwargs: Any) -> None:
         self.opts = kwargs

@@ -21,6 +21,7 @@ UA = (
 class PokemonCenter(Retailer):
     name = "Pokemon Center"
     online_only = True
+    product_id_fields = ("pokemoncenter_slug",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         return []

@@ -22,6 +22,7 @@ UA = (
 
 class GameStop(Retailer):
     name = "GameStop"
+    product_id_fields = ("gamestop_pid",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:

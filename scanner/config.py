@@ -53,25 +53,37 @@ def load() -> Config:
 
     routing = raw.get("routing") or {}
     retailers_raw = raw.get("retailers") or {}
-    retailers = {
-        name: RetailerCfg(
+    retailers = {}
+    for name, value in retailers_raw.items():
+        cfg = value or {}
+        if not isinstance(cfg, dict):
+            raise SystemExit(f"config.yaml: retailers.{name} must be a mapping.")
+        retailers[name] = RetailerCfg(
             enabled=bool(cfg.get("enabled", False)),
             api_key=str(cfg.get("api_key", "")),
         )
-        for name, cfg in retailers_raw.items()
-    }
 
     with PRODUCTS_PATH.open() as f:
         products = yaml.safe_load(f) or {}
 
+    try:
+        route_radius_miles = float(raw.get("route_radius_miles", 4))
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: route_radius_miles must be a number.")
+
+    try:
+        poll_interval_seconds = int(raw.get("poll_interval_seconds", 180))
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: poll_interval_seconds must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
-        route_radius_miles=float(raw.get("route_radius_miles", 4)),
+        route_radius_miles=route_radius_miles,
         routing_engine=str(routing.get("engine", "osrm")).lower(),
         google_api_key=str(routing.get("google_api_key", "") or os.getenv("GOOGLE_API_KEY", "")),
         retailers=retailers,
-        poll_interval_seconds=int(raw.get("poll_interval_seconds", 180)),
+        poll_interval_seconds=poll_interval_seconds,
         discord_webhook=str(raw.get("discord_webhook", "") or os.getenv("DISCORD_WEBHOOK", "")),
         ntfy_topic=str(raw.get("ntfy_topic", "") or os.getenv("NTFY_TOPIC", "")),
         products_filter=raw.get("products", "all_sealed"),
@@ -84,5 +96,11 @@ def selected_products(cfg: Config) -> dict[str, dict[str, Any]]:
     if cfg.products_filter == "all_sealed" or cfg.products_filter is None:
         return cfg.products
     if isinstance(cfg.products_filter, list):
-        return {k: cfg.products[k] for k in cfg.products_filter if k in cfg.products}
+        missing = [k for k in cfg.products_filter if k not in cfg.products]
+        if missing:
+            raise SystemExit(
+                "config.yaml: products filter lists keys not in catalog: "
+                + ", ".join(missing)
+            )
+        return {k: cfg.products[k] for k in cfg.products_filter}
     raise SystemExit(f"config.yaml: invalid 'products' value: {cfg.products_filter!r}")

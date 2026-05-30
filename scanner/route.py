@@ -1,7 +1,6 @@
 """Route polyline via OSRM (free) or Google Directions (key required)."""
 from __future__ import annotations
 
-import polyline as _polyline
 import requests
 
 
@@ -28,6 +27,8 @@ def osrm_polyline(start: tuple[float, float], end: tuple[float, float]) -> list[
 def google_polyline(
     start: tuple[float, float], end: tuple[float, float], api_key: str
 ) -> list[tuple[float, float]]:
+    import polyline as _polyline
+
     resp = requests.get(
         "https://maps.googleapis.com/maps/api/directions/json",
         params={

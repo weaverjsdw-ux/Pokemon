@@ -23,6 +23,8 @@ UA = (
 
 class Walmart(Retailer):
     name = "Walmart"
+    online_only = True
+    product_id_fields = ("walmart_item_id",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:

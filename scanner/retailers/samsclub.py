@@ -14,6 +14,9 @@ from .base import Retailer, StockResult, Store
 class SamsClub(Retailer):
     name = "Sam's Club"
     online_only = True
+    supported = False
+    unsupported_reason = "Sam's Club live stock checks need a dedicated adapter."
+    product_id_fields = ("samsclub_item_id",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         return []

@@ -17,6 +17,7 @@ from .base import Retailer, StockResult, Store
 class BestBuy(Retailer):
     name = "Best Buy"
     online_only = True
+    product_id_fields = ("bestbuy_sku",)
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)

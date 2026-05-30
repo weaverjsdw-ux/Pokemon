@@ -23,6 +23,7 @@ UA = (
 
 class Target(Retailer):
     name = "Target"
+    product_id_fields = ("target_tcin",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         resp = requests.get(
@@ -115,13 +116,16 @@ class Target(Retailer):
             opt_store = (opt.get("store") or {}).get("store_id")
             if str(opt_store) != store.store_id:
                 continue
-            pickup = (opt.get("order_pickup") or {}).get("availability_status", "")
-            in_store = (opt.get("in_store_only") or {}).get("availability_status", "")
-            status_raw = pickup or in_store or "UNKNOWN"
-            status = {
-                "IN_STOCK": "IN_STOCK",
-                "LIMITED_STOCK": "LIMITED",
-            }.get(status_raw, "OUT")
+            statuses = [
+                (opt.get("order_pickup") or {}).get("availability_status", ""),
+                (opt.get("in_store_only") or {}).get("availability_status", ""),
+            ]
+            if "IN_STOCK" in statuses:
+                status = "IN_STOCK"
+            elif "LIMITED_STOCK" in statuses:
+                status = "LIMITED"
+            else:
+                status = "OUT"
             if status == "OUT":
                 return None
             return StockResult(

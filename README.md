@@ -4,12 +4,13 @@ Polls retailer stock endpoints for sealed Pokémon TCG product and fires a
 Discord alert when something pops at a store along your home↔work commute.
 
 **Scope of this build**
-- Big-box: Target, Walmart, GameStop
-- Online-only: Pokémon Center (Best Buy/Costco/Sam's wired in but disabled by default)
-- Route-aware: only alerts for stores within N miles of your driving route, not just radial from one point
+- Route-aware store checks: Target (GameStop adapter available after you add `gamestop_pid` IDs and enable it)
+- Online checks: Walmart by default; Best Buy with an API key; Pokémon Center after you add `pokemoncenter_slug` IDs and enable it
+- Placeholders: Costco and Sam's are listed in config but disabled because live checks are not implemented yet
+- Route-aware mode only alerts for supported store retailers within N miles of your driving route, not just radial from one point
 - Polite by default: 3-minute poll interval with jitter, identifies itself with a real User-Agent, dedupes via SQLite so you don't get hammered with the same alert
 - Local-first: addresses + webhook live in `config.yaml` which is gitignored
-- Aggressive polling, scraping behind login walls, or distributed/proxy networks if not against ToS
+- No aggressive polling, scraping behind login walls, or distributed/proxy networks
 
 **Not in scope (and won't be)**
 - Auto-checkout / cart bots (against every retailer's ToS, gets accounts banned, doesn't actually help you)
@@ -97,8 +98,8 @@ You should see something like:
 target: 3 stores in corridor
   Target #1234 — Springfield, IL  (0.42 mi from route)
   Target #5678 — Bloomington, IL  (3.81 mi from route)
-walmart: 5 stores in corridor
-  ...
+
+walmart (online-only)
 ```
 
 If that looks right, kick off the real loop:
@@ -125,7 +126,9 @@ python -m scanner --once
 - **GameStop**: URL like `/p/pokemon-tcg-...`. The slug after `/p/` is `gamestop_pid`.
 - **Pokémon Center**: URL like `pokemoncenter.com/product/...`. The path after `/product/` is `pokemoncenter_slug`.
 
-Leave fields blank to skip that retailer for that product. The catalog ships with the most-tracked recent sets pre-populated where IDs were stable; most slots are blank — fill them in for the SKUs you care about.
+Leave fields blank to skip that retailer for that product. `--check-config`
+fails if you enable a retailer but the selected products have no IDs for it,
+so either fill in the IDs or keep that retailer disabled.
 
 ---
 
@@ -154,7 +157,8 @@ Each retailer is a self-contained module in `scanner/retailers/`. To add a new r
 - **Polling cadence**: default 3 min + jitter. Don't lower this past ~60s — these are public site endpoints, not real APIs, and hammering them is what gets them locked down for everyone.
 - **Coverage gaps**: Walmart's per-store stock API is unreliable; this build surfaces Walmart **online** restocks instead, which is still useful (you can ship-to-store for free). When their store API works again, the Walmart adapter is the place to add it.
 - **Local game stores (LGS)**: not auto-discoverable — every LGS uses a different POS (Square, Crystal Commerce, BinderPOS, Shopify). The cleanest path is to follow your local stores on Instagram/Discord directly; auto-scraping them is high-effort, low-yield, and antagonizes the store owners you actually want to be friendly with.
-- **Best Buy**: free developer API at https://developer.bestbuy.com — get a key, set `retailers.bestbuy.api_key`, flip `enabled: true`. Adapter scaffolding is in place; SKU lookups in `data/products.yaml` need to be filled in.
+- **Best Buy**: free developer API at https://developer.bestbuy.com — get a key, set `retailers.bestbuy.api_key`, fill `bestbuy_sku` values in `data/products.yaml`, then flip `enabled: true`.
+- **Costco / Sam's Club**: disabled placeholders only. If you enable either one, `--check-config` fails until a real adapter is implemented.
 - **What to do when something hits**: alerts include a direct URL — tap it, add to cart, check out. That's the entire workflow. No bot will do this faster than a person who's already at their phone.
 
 ---

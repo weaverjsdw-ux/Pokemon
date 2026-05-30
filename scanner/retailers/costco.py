@@ -14,6 +14,9 @@ from .base import Retailer, StockResult, Store
 class Costco(Retailer):
     name = "Costco"
     online_only = True
+    supported = False
+    unsupported_reason = "Costco live stock checks need a dedicated adapter."
+    product_id_fields = ("costco_item_id",)
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         return []
