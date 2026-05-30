@@ -26,6 +26,37 @@ class Walmart(Retailer):
     online_only = True
     product_id_fields = ("walmart_item_id",)
 
+    @staticmethod
+    def _availability_status_from_page(text: str, item_id: str) -> str | None:
+        """Best-effort extraction from Walmart's product-page data blob.
+
+        Walmart changes its embedded payload shape often. Prefer matches near
+        this item id, then fall back to the legacy page-wide status pattern.
+        """
+        item_patterns = (
+            rf'"(?:itemId|usItemId|productId)"\s*:\s*"?{re.escape(item_id)}"?',
+            rf'"id"\s*:\s*"?{re.escape(item_id)}"?',
+        )
+        for pattern in item_patterns:
+            for match in re.finditer(pattern, text):
+                start = max(0, match.start() - 4000)
+                end = min(len(text), match.end() + 4000)
+                status = Walmart._first_availability_status(text[match.end() : end])
+                if status:
+                    return status
+                status = Walmart._first_availability_status(text[start : match.start()])
+                if status:
+                    return status
+        return Walmart._first_availability_status(text)
+
+    @staticmethod
+    def _first_availability_status(text: str) -> str | None:
+        m = re.search(
+            r'"availabilityStatus"\s*:\s*"(IN_STOCK|OUT_OF_STOCK|LIMITED_STOCK)"',
+            text,
+        )
+        return m.group(1) if m else None
+
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:
             resp = requests.get(
@@ -102,13 +133,9 @@ class Walmart(Retailer):
             return None
         if resp.status_code != 200:
             return None
-        m = re.search(
-            r'"availabilityStatus"\s*:\s*"(IN_STOCK|OUT_OF_STOCK|LIMITED_STOCK)"',
-            resp.text,
-        )
-        if not m:
+        status_raw = self._availability_status_from_page(resp.text, item_id)
+        if not status_raw:
             return None
-        status_raw = m.group(1)
         if status_raw == "OUT_OF_STOCK":
             return None
         status = "ONLINE_IN_STOCK" if status_raw == "IN_STOCK" else "LIMITED"

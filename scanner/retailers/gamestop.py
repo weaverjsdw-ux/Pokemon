@@ -24,6 +24,12 @@ class GameStop(Retailer):
     name = "GameStop"
     product_id_fields = ("gamestop_pid",)
 
+    @staticmethod
+    def _inventory_text_in_stock(text: str) -> bool:
+        if re.search(r"out[\s-]*of[\s-]*stock|not\s+available|unavailable", text, re.I):
+            return False
+        return bool(re.search(r"\bin[\s-]*stock\b", text, re.I))
+
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:
             resp = requests.get(
@@ -86,9 +92,7 @@ class GameStop(Retailer):
                 # GameStop returns HTML fragment with availability text; fall
                 # back to a regex on the response body.
                 text = resp.text or ""
-                if re.search(r"in[\s-]*stock", text, re.I) and not re.search(
-                    r"out[\s-]*of[\s-]*stock", text, re.I
-                ):
+                if self._inventory_text_in_stock(text):
                     yield StockResult(
                         store=store,
                         product_key=key,

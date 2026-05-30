@@ -23,6 +23,16 @@ class PokemonCenter(Retailer):
     online_only = True
     product_id_fields = ("pokemoncenter_slug",)
 
+    @staticmethod
+    def _available_from_product_json(data: dict[str, Any]) -> bool:
+        variants = data.get("variants") or []
+        return any(v.get("available") for v in variants if isinstance(v, dict))
+
+    @staticmethod
+    def _price_from_product_json(data: dict[str, Any]) -> str:
+        price_cents = data.get("price")
+        return f"${price_cents/100:.2f}" if isinstance(price_cents, (int, float)) else ""
+
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         return []
 
@@ -48,18 +58,14 @@ class PokemonCenter(Retailer):
                 data = resp.json()
             except ValueError:
                 continue
-            variants = data.get("variants") or []
-            available = any(v.get("available") for v in variants)
-            if not available:
+            if not self._available_from_product_json(data):
                 continue
-            price_cents = data.get("price")
-            price = f"${price_cents/100:.2f}" if isinstance(price_cents, (int, float)) else ""
             yield StockResult(
                 store=None,
                 product_key=key,
                 product_name=prod.get("name", key),
                 status="ONLINE_IN_STOCK",
                 url=url,
-                price=price,
+                price=self._price_from_product_json(data),
             )
             time.sleep(0.4)

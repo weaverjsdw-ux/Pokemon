@@ -25,6 +25,18 @@ class Target(Retailer):
     name = "Target"
     product_id_fields = ("target_tcin",)
 
+    @staticmethod
+    def _status_from_store_option(opt: dict[str, Any]) -> str:
+        statuses = [
+            (opt.get("order_pickup") or {}).get("availability_status", ""),
+            (opt.get("in_store_only") or {}).get("availability_status", ""),
+        ]
+        if "IN_STOCK" in statuses:
+            return "IN_STOCK"
+        if "LIMITED_STOCK" in statuses:
+            return "LIMITED"
+        return "OUT"
+
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         resp = requests.get(
             "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1",
@@ -116,16 +128,7 @@ class Target(Retailer):
             opt_store = (opt.get("store") or {}).get("store_id")
             if str(opt_store) != store.store_id:
                 continue
-            statuses = [
-                (opt.get("order_pickup") or {}).get("availability_status", ""),
-                (opt.get("in_store_only") or {}).get("availability_status", ""),
-            ]
-            if "IN_STOCK" in statuses:
-                status = "IN_STOCK"
-            elif "LIMITED_STOCK" in statuses:
-                status = "LIMITED"
-            else:
-                status = "OUT"
+            status = self._status_from_store_option(opt)
             if status == "OUT":
                 return None
             return StockResult(
