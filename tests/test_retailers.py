@@ -97,6 +97,42 @@ def test_target_uses_in_store_stock_when_pickup_is_out(monkeypatch):
     assert result.status == "IN_STOCK"
 
 
+def test_target_accepts_single_store_option_without_store_object(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "data": {
+                    "product": {
+                        "fulfillment": {
+                            "store_options": [
+                                {
+                                    "order_pickup": {"availability_status": "UNAVAILABLE"},
+                                    "in_store_only": {"availability_status": "OUT_OF_STOCK"},
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+
+    monkeypatch.setattr("scanner.retailers.target.requests.get", lambda *a, **k: FakeResponse())
+    store = Store("Target", "123", "Target #123", 39.0, -86.0)
+    result = Target()._check_one(
+        "999",
+        store,
+        {"name": "Foo"},
+        "foo",
+        "https://example.test",
+        include_out=True,
+    )
+
+    assert result is not None
+    assert result.status == "OUT"
+    assert result.product_name == "Foo"
+
+
 def test_target_inventory_includes_out_status_but_check_does_not(monkeypatch):
     class FakeResponse:
         status_code = 200

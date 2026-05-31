@@ -157,7 +157,7 @@ class Target(Retailer):
         store_options = data.get("store_options") or []
         for opt in store_options:
             opt_store = (opt.get("store") or {}).get("store_id")
-            if str(opt_store) != store.store_id:
+            if opt_store is not None and str(opt_store) != store.store_id:
                 continue
             status = self._status_from_store_option(opt)
             if status == "OUT" and not include_out:
