@@ -184,7 +184,8 @@ label {
 .stat,
 .store,
 .alert,
-.error {
+.error,
+.notice {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -354,6 +355,12 @@ label {
   border-color: #714343;
   color: #ffd7d7;
   background: #2e1d1d;
+}
+
+.notice {
+  border-color: #755f2b;
+  color: #f2dfad;
+  background: #2d2818;
 }
 
 .alert {

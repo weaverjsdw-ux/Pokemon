@@ -36,13 +36,19 @@ function configIsBeingEdited() {
   );
 }
 
-function renderErrors(errors = []) {
+function renderErrors(errors = [], warnings = []) {
   const box = qs("#errorList");
   box.innerHTML = "";
   for (const error of errors) {
     const item = document.createElement("div");
     item.className = "error";
     item.textContent = error;
+    box.appendChild(item);
+  }
+  for (const warning of warnings) {
+    const item = document.createElement("div");
+    item.className = "notice";
+    item.textContent = warning;
     box.appendChild(item);
   }
 }
@@ -326,7 +332,6 @@ function fillConfig(config = {}) {
 function renderStatus(payload) {
   const config = payload.config || {};
   const runner = payload.runner || {};
-  const notices = [...(payload.errors || []), ...(runner.warnings || [])];
   const preserveConfigInputs = configIsBeingEdited();
   const configLabel = config.configMissing ? "example config loaded; save config.yaml to run scanners" : "config.yaml loaded";
   const okLabel = payload.ok ? "ready" : "needs attention";
@@ -339,9 +344,7 @@ function renderStatus(payload) {
     fillConfig(config);
     renderRetailers(payload.retailers || []);
   }
-  if (!payload.ok || notices.length) {
-    renderErrors(notices);
-  }
+  renderErrors(payload.errors || [], runner.warnings || []);
   if (!runnerBoard.length && Object.keys(runner.stores || {}).length) {
     renderStores(runner.stores || {});
   }
@@ -382,7 +385,7 @@ async function runAction(path, body = {}, refreshAfter = true) {
       method: "POST",
       body: JSON.stringify(body),
     });
-    renderErrors([...(payload.errors || []), ...(payload.warnings || [])]);
+    renderErrors(payload.errors || [], payload.warnings || []);
     const board = payload.stockBoard || payload.runner?.stockBoard || [];
     renderStockBoard(board);
     if (!board.length) {

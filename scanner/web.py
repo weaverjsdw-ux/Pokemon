@@ -283,12 +283,51 @@ def _capture_output(fn):
     return result, out.getvalue(), err.getvalue()
 
 
+def _friendly_warning(line: str) -> str:
+    raw = line.lstrip("! ").strip()
+    lower = raw.lower()
+
+    if "target store search failed" in lower and "403" in lower:
+        return (
+            "Target store discovery is blocked by Target (HTTP 403). "
+            "Route-store Target checks are unavailable right now; online checks continue."
+        )
+    if "target store search failed" in lower:
+        return (
+            "Target store discovery failed. Route-store Target checks are unavailable "
+            "for this scan; the scanner will retry."
+        )
+    if "store search failed" in lower:
+        slug = raw.split(" store search failed", 1)[0].strip()
+        retailer_name = RETAILER_REGISTRY.get(slug, type("_Unknown", (), {"name": slug})).name
+        return (
+            f"{retailer_name} store discovery failed. Route-store checks for this "
+            "retailer are unavailable for this scan; the scanner will retry."
+        )
+    if "discord webhook failed" in lower:
+        return "Discord notification failed. The stock alert was still logged locally."
+    if "ntfy failed" in lower:
+        return "ntfy notification failed. The stock alert was still logged locally."
+    if "check raised" in lower:
+        slug = raw.split(" check raised", 1)[0].strip()
+        retailer_name = RETAILER_REGISTRY.get(slug, type("_Unknown", (), {"name": slug})).name
+        return f"{retailer_name} stock check failed for this scan; the scanner will retry."
+    return raw
+
+
 def _warning_lines(text: str) -> list[str]:
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip().startswith("!")
-    ]
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("!"):
+            continue
+        warning = _friendly_warning(line)
+        if warning in seen:
+            continue
+        seen.add(warning)
+        warnings.append(warning)
+    return warnings
 
 
 def _stores_payload(stores_by_retailer: dict[str, list[Store]]) -> dict[str, list[dict[str, Any]]]:

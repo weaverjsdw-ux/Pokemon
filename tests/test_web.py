@@ -173,6 +173,28 @@ def test_dry_run_payload_returns_discovered_stores(monkeypatch):
     assert payload["stores"]["target"][0]["distanceMiles"] == 1.2
 
 
+def test_warning_lines_sanitizes_and_dedupes_target_403_urls():
+    stderr = "\n".join(
+        [
+            "  ! target store search failed: 403 Client Error: Forbidden for url: "
+            "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1?"
+            "key=abc&visitor_id=FIRST",
+            "  ! target store search failed: 403 Client Error: Forbidden for url: "
+            "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1?"
+            "key=abc&visitor_id=SECOND",
+        ]
+    )
+
+    warnings = web._warning_lines(stderr)
+
+    assert warnings == [
+        "Target store discovery is blocked by Target (HTTP 403). "
+        "Route-store Target checks are unavailable right now; online checks continue."
+    ]
+    assert "redsky" not in warnings[0].lower()
+    assert "visitor_id" not in warnings[0].lower()
+
+
 def test_stock_board_payload_groups_products_under_store_statuses():
     cfg = _cfg()
     store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
