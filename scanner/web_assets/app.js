@@ -87,6 +87,90 @@ function renderRetailers(retailers = []) {
   }
 }
 
+function formatTimestamp(epochSeconds) {
+  if (!epochSeconds) return "none";
+  return new Date(epochSeconds * 1000).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function renderRunner(runner = {}, config = {}) {
+  const stateText = runner.running ? `${runner.phase || "running"}` : runner.phase || "idle";
+  qs("#runnerState").textContent = stateText;
+  const interval = runner.intervalSeconds || config.pollIntervalSeconds || 180;
+  const stats = [
+    ["Mode", runner.running ? "interval running" : "not scanning"],
+    ["Interval", `${interval}s`],
+    ["Scans", String(runner.scanCount || 0)],
+    ["Last scan", formatTimestamp(runner.lastScanAt)],
+    ["Next scan", runner.running ? formatTimestamp(runner.nextScanAt) : "stopped"],
+  ];
+  const root = qs("#runnerStats");
+  root.innerHTML = "";
+  for (const [label, value] of stats) {
+    const item = document.createElement("div");
+    item.className = "stat";
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    const valueEl = document.createElement("strong");
+    valueEl.textContent = value;
+    item.append(labelEl, valueEl);
+    root.appendChild(item);
+  }
+}
+
+function renderProducts(products = []) {
+  const active = products.filter((product) => product.scanned);
+  qs("#scanCoverage").textContent = `${active.length}/${products.length} active`;
+  const list = qs("#productList");
+  list.innerHTML = "";
+
+  for (const product of products) {
+    const card = document.createElement("article");
+    card.className = "product";
+
+    const header = document.createElement("div");
+    header.className = "product-header";
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = product.name;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const parts = [product.key, product.set, product.type].filter(Boolean);
+    meta.textContent = parts.join(" | ");
+    text.append(name, meta);
+
+    const status = document.createElement("span");
+    status.className = "pill";
+    status.textContent = product.scanned ? "scanning" : "not active";
+    header.append(text, status);
+
+    const tags = document.createElement("div");
+    tags.className = "scan-tags";
+    const scannedRetailers = product.retailers.filter((retailer) => retailer.active);
+    if (!scannedRetailers.length) {
+      const tag = document.createElement("span");
+      tag.className = "scan-tag inactive";
+      tag.textContent = "No enabled retailer ID";
+      tags.appendChild(tag);
+    }
+    for (const retailer of scannedRetailers) {
+      const tag = document.createElement("span");
+      tag.className = "scan-tag";
+      const ids = Object.entries(retailer.ids)
+        .map(([field, value]) => `${field}: ${value}`)
+        .join(", ");
+      tag.textContent = `${retailer.name} | ${ids}`;
+      tags.appendChild(tag);
+    }
+
+    card.append(header, tags);
+    list.appendChild(card);
+  }
+}
+
 function renderStores(storesByRetailer = {}) {
   const root = qs("#stores");
   root.innerHTML = "";
@@ -145,7 +229,8 @@ function renderStatus(payload) {
   const configLabel = config.configMissing ? "example config loaded; save config.yaml to run scanners" : "config.yaml loaded";
   const okLabel = payload.ok ? "ready" : "needs attention";
   qs("#statusText").textContent = `${okLabel} | ${configLabel}`;
-  qs("#runnerState").textContent = runner.phase || "idle";
+  renderRunner(runner, config);
+  renderProducts(payload.products || []);
   if (!preserveConfigInputs) {
     fillConfig(config);
     renderRetailers(payload.retailers || []);

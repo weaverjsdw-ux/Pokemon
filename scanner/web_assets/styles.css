@@ -162,13 +162,17 @@ label {
 }
 
 .retailer-list,
+.product-list,
 .stores,
-.alerts {
+.alerts,
+.runner-stats {
   display: grid;
   gap: 10px;
 }
 
 .retailer,
+.product,
+.stat,
 .store,
 .alert,
 .error {
@@ -191,7 +195,66 @@ label {
   min-height: auto;
 }
 
+.product {
+  display: grid;
+  gap: 10px;
+}
+
+.product-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scan-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #50633f;
+  border-radius: 999px;
+  background: #263321;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.scan-tag.inactive {
+  border-color: var(--line);
+  color: var(--muted);
+  background: #1b2118;
+}
+
+.runner-stats {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 12px;
+}
+
+.stat {
+  min-height: 72px;
+}
+
+.stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 16px;
+}
+
 .retailer strong,
+.product strong,
 .store strong,
 .alert strong {
   display: block;
@@ -240,7 +303,8 @@ label {
 
   .topbar,
   .grid,
-  .row {
+  .row,
+  .runner-stats {
     grid-template-columns: 1fr;
   }
 

@@ -17,7 +17,7 @@
           <button id="refreshBtn" type="button">Refresh</button>
           <button id="dryRunBtn" type="button">Dry Run</button>
           <button id="scanOnceBtn" type="button">Scan Once</button>
-          <button id="startBtn" type="button">Start</button>
+          <button id="startBtn" type="button">Start Interval</button>
           <button id="stopBtn" type="button" class="secondary">Stop</button>
         </div>
       </section>
@@ -74,9 +74,18 @@
 
       <section class="panel">
         <div class="panel-title">
-          <h2>Operation</h2>
+          <h2>Products Being Scanned</h2>
+          <span id="scanCoverage" class="pill">0 active</span>
+        </div>
+        <div id="productList" class="product-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Interval Scanner</h2>
           <span id="runnerState" class="pill">idle</span>
         </div>
+        <div id="runnerStats" class="runner-stats"></div>
         <div id="errorList" class="errors"></div>
         <div id="stores" class="stores"></div>
         <div id="alerts" class="alerts"></div>

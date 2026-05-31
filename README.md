@@ -117,9 +117,10 @@ python -m scanner --once
 ### Local UI
 
 The scanner also ships with a local web UI. It reads `config.yaml`, can save the
-same local config file, shows enabled retailers and product-ID coverage, and
-calls the same scanner code paths as the CLI for dry runs, one-pass scans, and
-continuous scanning.
+same local config file, shows the exact products and retailer IDs being scanned,
+and calls the same scanner code paths as the CLI. When `config.yaml` is valid,
+the UI starts the interval scanner automatically so it keeps checking on the
+configured cadence.
 
 ```bash
 python -m scanner.web
@@ -127,6 +128,8 @@ python -m scanner.web
 
 Open <http://127.0.0.1:8765>. The UI is local-only by default and does not
 expose the scanner outside your machine unless you run it with a different host.
+Use `python -m scanner.web --no-autostart` if you only want the dashboard
+without starting the interval scanner.
 
 ---
 

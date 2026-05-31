@@ -80,7 +80,50 @@ def test_status_payload_reports_missing_config_but_loads_example(tmp_path, monke
     assert payload["ok"] is False
     assert payload["config"]["configMissing"] is True
     assert payload["config"]["productsSelected"] == 1
+    assert payload["products"][0]["key"] == "booster"
+    assert payload["products"][0]["scanned"] is True
+    assert payload["products"][0]["activeRetailers"] == ["target", "walmart"]
     assert {retailer["slug"] for retailer in payload["retailers"]} == set(web.RETAILER_REGISTRY)
+
+
+def test_product_payload_marks_exact_active_retailer_ids():
+    payload = web._product_payload(
+        Config(
+            home_address="1 Home St",
+            work_address="2 Work Ave",
+            route_radius_miles=4,
+            routing_engine="osrm",
+            google_api_key="",
+            retailers={
+                "target": RetailerCfg(enabled=True),
+                "walmart": RetailerCfg(enabled=False),
+            },
+            poll_interval_seconds=180,
+            discord_webhook="",
+            ntfy_topic="",
+            products_filter="all_sealed",
+            products={
+                "booster": {
+                    "name": "Booster",
+                    "set": "Test Set",
+                    "type": "ETB",
+                    "target_tcin": "123",
+                    "walmart_item_id": "456",
+                }
+            },
+        )
+    )
+
+    product = payload[0]
+    assert product["name"] == "Booster"
+    assert product["scanned"] is True
+    assert product["activeRetailers"] == ["target"]
+    target = next(retailer for retailer in product["retailers"] if retailer["slug"] == "target")
+    walmart = next(retailer for retailer in product["retailers"] if retailer["slug"] == "walmart")
+    assert target["ids"] == {"target_tcin": "123"}
+    assert target["active"] is True
+    assert walmart["ids"] == {"walmart_item_id": "456"}
+    assert walmart["active"] is False
 
 
 def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
@@ -108,6 +151,14 @@ def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
     assert saved["retailers"]["target"]["enabled"] is True
     assert saved["retailers"]["walmart"]["enabled"] is False
     assert saved["retailers"]["costco"]["enabled"] is False
+
+
+def test_should_autostart_requires_valid_saved_config(monkeypatch):
+    monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
+    assert web._should_autostart() is True
+
+    monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), True))
+    assert web._should_autostart() is False
 
 
 def test_dry_run_payload_returns_discovered_stores(monkeypatch):

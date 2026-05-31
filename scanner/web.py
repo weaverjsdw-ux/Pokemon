@@ -88,6 +88,53 @@ def _retailer_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     return retailers
 
 
+def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
+    selected = _selected_products_or_empty(cfg)
+    selected_keys = set(selected)
+    products: list[dict[str, Any]] = []
+    for key, product in cfg.products.items():
+        selected_for_scan = key in selected_keys
+        retailer_entries = []
+        for slug, cls in RETAILER_REGISTRY.items():
+            fields = getattr(cls, "product_id_fields", ())
+            ids = {
+                field: str(product.get(field) or "").strip()
+                for field in fields
+                if str(product.get(field) or "").strip()
+            }
+            rcfg = cfg.retailers.get(slug, cfg_mod.RetailerCfg())
+            supported = bool(getattr(cls, "supported", True))
+            active = selected_for_scan and bool(rcfg.enabled) and supported and bool(ids)
+            retailer_entries.append(
+                {
+                    "slug": slug,
+                    "name": cls.name,
+                    "enabled": bool(rcfg.enabled),
+                    "supported": supported,
+                    "onlineOnly": bool(getattr(cls, "online_only", False)),
+                    "ids": ids,
+                    "active": active,
+                }
+            )
+
+        active_retailers = [
+            entry["slug"] for entry in retailer_entries if entry["active"]
+        ]
+        products.append(
+            {
+                "key": key,
+                "name": product.get("name", key),
+                "set": product.get("set", ""),
+                "type": product.get("type", ""),
+                "selected": selected_for_scan,
+                "scanned": bool(active_retailers),
+                "activeRetailers": active_retailers,
+                "retailers": retailer_entries,
+            }
+        )
+    return products
+
+
 def _config_summary(cfg: cfg_mod.Config, config_missing: bool) -> dict[str, Any]:
     selected = _selected_products_or_empty(cfg)
     return {
@@ -115,6 +162,7 @@ def status_payload() -> dict[str, Any]:
             "ok": not errors and not config_missing,
             "config": _config_summary(cfg, config_missing),
             "retailers": _retailer_payload(cfg),
+            "products": _product_payload(cfg),
             "errors": errors,
             "runner": RUNNER.snapshot(),
         }
@@ -305,6 +353,9 @@ class ScannerRunner:
             "lastError": "",
             "lastStartedAt": None,
             "lastScanAt": None,
+            "nextScanAt": None,
+            "scanCount": 0,
+            "intervalSeconds": None,
             "lastAlerts": [],
             "stores": {},
             "stdout": "",
@@ -333,6 +384,10 @@ class ScannerRunner:
                     "phase": "starting",
                     "lastError": "",
                     "lastStartedAt": int(time.time()),
+                    "lastScanAt": None,
+                    "nextScanAt": None,
+                    "scanCount": 0,
+                    "intervalSeconds": None,
                     "lastAlerts": [],
                     "stdout": "",
                     "stderr": "",
@@ -357,6 +412,8 @@ class ScannerRunner:
             cfg, config_missing = _load_current_config()
             if config_missing:
                 raise RuntimeError("Save config.yaml before starting the scanner.")
+            interval = max(60, cfg.poll_interval_seconds)
+            self._update(intervalSeconds=interval)
             self._update(phase="discovering")
             stores, setup_stdout, setup_stderr = _capture_output(lambda: _prepare_scan(cfg))
             self._update(
@@ -367,27 +424,45 @@ class ScannerRunner:
             )
             notifier = CapturingNotifier(cfg, forward=notify)
             state = State()
+            scan_count = 0
             while not self._stop.is_set():
+                self._update(phase="scanning", nextScanAt=None)
                 _, scan_stdout, scan_stderr = _capture_output(
                     lambda: run_pass(cfg, stores, state, notifier)
                 )
+                scan_count += 1
+                now = int(time.time())
                 self._update(
-                    lastScanAt=int(time.time()),
+                    lastScanAt=now,
+                    nextScanAt=now + interval,
+                    scanCount=scan_count,
                     lastAlerts=[_alert_payload(alert) for alert in notifier.alerts[-25:]],
                     stdout=setup_stdout + scan_stdout,
                     stderr=setup_stderr + scan_stderr,
                     phase="sleeping",
                 )
-                if self._stop.wait(max(60, cfg.poll_interval_seconds)):
+                if self._stop.wait(interval):
                     break
                 self._update(phase="scanning")
         except Exception as exc:
-            self._update(lastError=str(exc), phase="error", running=False)
+            self._update(lastError=str(exc), phase="error", running=False, nextScanAt=None)
             return
-        self._update(phase="idle", running=False)
+        self._update(phase="idle", running=False, nextScanAt=None)
 
 
 RUNNER = ScannerRunner()
+
+
+def _should_autostart() -> bool:
+    try:
+        cfg, config_missing = _load_current_config()
+        return (
+            not config_missing
+            and not config_errors(cfg)
+            and bool(enabled_retailer_slugs(cfg))
+        )
+    except Exception:
+        return False
 
 
 class WebHandler(BaseHTTPRequestHandler):
@@ -474,9 +549,16 @@ class WebHandler(BaseHTTPRequestHandler):
         print(f"[ui] {self.address_string()} - {fmt % args}", file=sys.__stderr__)
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    autostart: bool = True,
+) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), WebHandler)
     print(f"Pokemon scanner UI: http://{host}:{server.server_port}", flush=True)
+    if autostart and _should_autostart():
+        RUNNER.start(notify=True)
+        print("Interval scanner: started", flush=True)
     server.serve_forever()
     return server
 
@@ -485,8 +567,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the local Pokemon scanner UI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--no-autostart",
+        action="store_true",
+        help="serve the UI without starting the interval scanner",
+    )
     args = parser.parse_args()
-    serve(args.host, args.port)
+    serve(args.host, args.port, autostart=not args.no_autostart)
     return 0
 
 
