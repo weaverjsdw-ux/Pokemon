@@ -26,6 +26,7 @@ class StockResult:
     status: str            # "IN_STOCK" | "LIMITED" | "OUT" | "ONLINE_IN_STOCK" | "ONLINE_OUT"
     url: str
     price: str = ""
+    retailer_slug: str = ""
 
 
 class Retailer:
@@ -45,3 +46,13 @@ class Retailer:
     def check(self, products: dict[str, dict[str, Any]], stores: list[Store]) -> Iterable[StockResult]:
         """Yield StockResult for each (product, store) combination this adapter handles."""
         return []
+
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        """Yield all known stock states for UI inventory views.
+
+        Adapters that can distinguish OUT from unknown should override this.
+        The default preserves legacy behavior by returning alertable positives.
+        """
+        yield from self.check(products, stores)

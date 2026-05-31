@@ -34,11 +34,35 @@ from .main import (
 )
 from .notify import Notifier, StockAlert
 from .retailers import ALL as RETAILER_REGISTRY
-from .retailers.base import Store
+from .retailers.base import StockResult, Store
 from .state import State
 
 ASSETS_DIR = Path(__file__).resolve().parent / "web_assets"
 EXAMPLE_CONFIG_PATH = cfg_mod.ROOT / "config.example.yaml"
+PRIORITY_KEYWORDS = (
+    "prismatic",
+    "151",
+    "surging sparks",
+    "journey together",
+    "evolving skies",
+    "booster bundle",
+    "booster box",
+    "elite trainer box",
+    "ultra-premium",
+    "premium collection",
+    "special collection",
+)
+POSITIVE_STATUSES = {"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"}
+
+
+def _product_priority(product: dict[str, Any]) -> tuple[str, int]:
+    text = " ".join(
+        str(product.get(field, ""))
+        for field in ("name", "set", "type")
+    ).lower()
+    if any(keyword in text for keyword in PRIORITY_KEYWORDS):
+        return "High priority", 100
+    return "Standard", 10
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -93,6 +117,7 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     selected_keys = set(selected)
     products: list[dict[str, Any]] = []
     for key, product in cfg.products.items():
+        priority, priority_score = _product_priority(product)
         selected_for_scan = key in selected_keys
         retailer_entries = []
         for slug, cls in RETAILER_REGISTRY.items():
@@ -128,6 +153,8 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
                 "type": product.get("type", ""),
                 "selected": selected_for_scan,
                 "scanned": bool(active_retailers),
+                "priority": priority,
+                "priorityScore": priority_score,
                 "activeRetailers": active_retailers,
                 "retailers": retailer_entries,
             }
@@ -256,6 +283,14 @@ def _capture_output(fn):
     return result, out.getvalue(), err.getvalue()
 
 
+def _warning_lines(text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("!")
+    ]
+
+
 def _stores_payload(stores_by_retailer: dict[str, list[Store]]) -> dict[str, list[dict[str, Any]]]:
     return {
         slug: [
@@ -270,6 +305,132 @@ def _stores_payload(stores_by_retailer: dict[str, list[Store]]) -> dict[str, lis
         ]
         for slug, stores in stores_by_retailer.items()
     }
+
+
+def _result_payload(result: StockResult, checked_at: int | None = None) -> dict[str, Any]:
+    store = result.store
+    return {
+        "retailerSlug": result.retailer_slug,
+        "retailer": store.retailer if store else result.retailer_slug,
+        "storeId": store.store_id if store else "_online_",
+        "storeLabel": store.label() if store else "Online",
+        "distanceMiles": store.distance_miles if store else None,
+        "productKey": result.product_key,
+        "productName": result.product_name,
+        "status": result.status,
+        "price": result.price,
+        "url": result.url,
+        "checkedAt": checked_at,
+    }
+
+
+def _stock_board_payload(
+    cfg: cfg_mod.Config,
+    stores_by_retailer: dict[str, list[Store]],
+    results: list[StockResult],
+    checked_at: int | None = None,
+) -> list[dict[str, Any]]:
+    products = {product["key"]: product for product in _product_payload(cfg)}
+    result_map = {
+        (
+            result.retailer_slug,
+            result.store.store_id if result.store else "_online_",
+            result.product_key,
+        ): result
+        for result in results
+    }
+    board: list[dict[str, Any]] = []
+    for slug, RClass in RETAILER_REGISTRY.items():
+        rcfg = cfg.retailers.get(slug)
+        if not rcfg or not rcfg.enabled or not getattr(RClass, "supported", True):
+            continue
+
+        active_products = [
+            product
+            for product in products.values()
+            if product["selected"] and any(
+                retailer["slug"] == slug and retailer["active"]
+                for retailer in product["retailers"]
+            )
+        ]
+        active_products.sort(
+            key=lambda product: (
+                -int(product["priorityScore"]),
+                product["name"],
+            )
+        )
+        stores = stores_by_retailer.get(slug, [])
+        locations: list[Store | None]
+        if getattr(RClass, "online_only", False):
+            locations = [None]
+        else:
+            locations = list(stores)
+
+        retailer_rows = []
+        if not locations:
+            retailer_rows.append(
+                {
+                    "storeId": "",
+                    "storeLabel": "No route stores found",
+                    "distanceMiles": None,
+                    "inStockCount": 0,
+                    "products": [],
+                }
+            )
+
+        for store in locations:
+            store_id = store.store_id if store else "_online_"
+            statuses = []
+            for product in active_products:
+                result = result_map.get((slug, store_id, product["key"]))
+                if result is None:
+                    status = "UNKNOWN"
+                    price = ""
+                    url = ""
+                else:
+                    status = result.status
+                    price = result.price
+                    url = result.url
+                statuses.append(
+                    {
+                        "productKey": product["key"],
+                        "productName": product["name"],
+                        "priority": product["priority"],
+                        "priorityScore": product["priorityScore"],
+                        "status": status,
+                        "price": price,
+                        "url": url,
+                    }
+                )
+            retailer_rows.append(
+                {
+                    "storeId": store_id,
+                    "storeLabel": store.label() if store else "Online",
+                    "distanceMiles": store.distance_miles if store else None,
+                    "inStockCount": sum(
+                        1 for item in statuses if item["status"] in POSITIVE_STATUSES
+                    ),
+                    "products": statuses,
+                }
+            )
+        retailer_rows.sort(
+            key=lambda row: (
+                -int(row["inStockCount"]),
+                9999 if row["distanceMiles"] is None else float(row["distanceMiles"]),
+                row["storeLabel"],
+            )
+        )
+        board.append(
+            {
+                "retailerSlug": slug,
+                "retailerName": RClass.name,
+                "onlineOnly": bool(getattr(RClass, "online_only", False)),
+                "activeProductCount": len(active_products),
+                "locations": retailer_rows,
+                "checkedAt": checked_at,
+            }
+        )
+    return board
 
 
 def _prepare_scan(cfg: cfg_mod.Config) -> dict[str, list[Store]]:
@@ -296,6 +457,7 @@ def dry_run_payload() -> dict[str, Any]:
     return {
         "ok": True,
         "stores": _stores_payload(stores),
+        "warnings": _warning_lines(stderr),
         "stdout": stdout,
         "stderr": stderr,
     }
@@ -327,16 +489,20 @@ def scan_once_payload(notify: bool = False) -> dict[str, Any]:
         stores, setup_stdout, setup_stderr = _capture_output(lambda: _prepare_scan(cfg))
         notifier = CapturingNotifier(cfg, forward=notify)
         state = State()
-        _, scan_stdout, scan_stderr = _capture_output(
+        results, scan_stdout, scan_stderr = _capture_output(
             lambda: run_pass(cfg, stores, state, notifier)
         )
+        checked_at = int(time.time())
     except Exception as exc:
         return {"ok": False, "errors": [str(exc)]}
 
     return {
         "ok": True,
         "stores": _stores_payload(stores),
+        "stockBoard": _stock_board_payload(cfg, stores, results, checked_at),
+        "lastResults": [_result_payload(result, checked_at) for result in results],
         "alerts": [_alert_payload(alert) for alert in notifier.alerts],
+        "warnings": _warning_lines(setup_stderr + scan_stderr),
         "stdout": setup_stdout + scan_stdout,
         "stderr": setup_stderr + scan_stderr,
     }
@@ -357,6 +523,9 @@ class ScannerRunner:
             "scanCount": 0,
             "intervalSeconds": None,
             "lastAlerts": [],
+            "lastResults": [],
+            "stockBoard": [],
+            "warnings": [],
             "stores": {},
             "stdout": "",
             "stderr": "",
@@ -389,6 +558,9 @@ class ScannerRunner:
                     "scanCount": 0,
                     "intervalSeconds": None,
                     "lastAlerts": [],
+                    "lastResults": [],
+                    "stockBoard": [],
+                    "warnings": [],
                     "stdout": "",
                     "stderr": "",
                 }
@@ -420,6 +592,7 @@ class ScannerRunner:
                 stores=_stores_payload(stores),
                 stdout=setup_stdout,
                 stderr=setup_stderr,
+                warnings=_warning_lines(setup_stderr),
                 phase="scanning",
             )
             notifier = CapturingNotifier(cfg, forward=notify)
@@ -427,7 +600,7 @@ class ScannerRunner:
             scan_count = 0
             while not self._stop.is_set():
                 self._update(phase="scanning", nextScanAt=None)
-                _, scan_stdout, scan_stderr = _capture_output(
+                results, scan_stdout, scan_stderr = _capture_output(
                     lambda: run_pass(cfg, stores, state, notifier)
                 )
                 scan_count += 1
@@ -437,6 +610,11 @@ class ScannerRunner:
                     nextScanAt=now + interval,
                     scanCount=scan_count,
                     lastAlerts=[_alert_payload(alert) for alert in notifier.alerts[-25:]],
+                    lastResults=[
+                        _result_payload(result, now) for result in results
+                    ],
+                    stockBoard=_stock_board_payload(cfg, stores, results, now),
+                    warnings=_warning_lines(setup_stderr + scan_stderr),
                     stdout=setup_stdout + scan_stdout,
                     stderr=setup_stderr + scan_stderr,
                     phase="sleeping",

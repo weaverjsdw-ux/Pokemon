@@ -5,7 +5,7 @@ import yaml
 
 from scanner.config import Config, RetailerCfg
 from scanner.notify import StockAlert
-from scanner.retailers.base import Store
+from scanner.retailers.base import StockResult, Store
 from scanner import web
 
 
@@ -173,10 +173,40 @@ def test_dry_run_payload_returns_discovered_stores(monkeypatch):
     assert payload["stores"]["target"][0]["distanceMiles"] == 1.2
 
 
+def test_stock_board_payload_groups_products_under_store_statuses():
+    cfg = _cfg()
+    store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
+    result = StockResult(
+        store=store,
+        product_key="booster",
+        product_name="Booster",
+        status="OUT",
+        url="https://example.test/booster",
+        retailer_slug="target",
+    )
+
+    board = web._stock_board_payload(cfg, {"target": [store]}, [result], checked_at=12345)
+
+    assert board[0]["retailerSlug"] == "target"
+    assert board[0]["locations"][0]["storeLabel"] == "Target #123"
+    assert board[0]["locations"][0]["products"][0]["productName"] == "Booster"
+    assert board[0]["locations"][0]["products"][0]["status"] == "OUT"
+    assert board[0]["locations"][0]["inStockCount"] == 0
+
+
 def test_scan_once_payload_captures_scanner_alert(monkeypatch):
     store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
 
     def fake_run_pass(cfg, stores, state, notifier):
+        result = StockResult(
+            store=store,
+            product_key="booster",
+            product_name="Booster",
+            status="IN_STOCK",
+            url="https://example.test",
+            price="$49.99",
+            retailer_slug="target",
+        )
         notifier.send(
             StockAlert(
                 retailer="Target",
@@ -188,6 +218,7 @@ def test_scan_once_payload_captures_scanner_alert(monkeypatch):
                 price="$49.99",
             )
         )
+        return [result]
 
     monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
     monkeypatch.setattr(web, "_prepare_scan", lambda cfg: {"target": [store]})
@@ -197,5 +228,7 @@ def test_scan_once_payload_captures_scanner_alert(monkeypatch):
     payload = web.scan_once_payload()
 
     assert payload["ok"] is True
+    assert payload["stockBoard"][0]["locations"][0]["inStockCount"] == 1
+    assert payload["lastResults"][0]["status"] == "IN_STOCK"
     assert payload["alerts"][0]["retailer"] == "Target"
     assert payload["alerts"][0]["status"] == "IN_STOCK"

@@ -18,7 +18,7 @@ from .geo import distance_to_polyline_miles
 from .geocode import geocode
 from .notify import Notifier, StockAlert
 from .retailers import ALL as RETAILER_REGISTRY
-from .retailers.base import Store
+from .retailers.base import StockResult, Store
 from .route import get_polyline
 from .state import State
 
@@ -121,8 +121,17 @@ def discover_stores(cfg: cfg_mod.Config, home, work, polyline) -> dict[str, list
     return out
 
 
-def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], state: State, notifier: Notifier) -> None:
+ALERTABLE_STATUSES = {"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"}
+
+
+def run_pass(
+    cfg: cfg_mod.Config,
+    stores_by_retailer: dict[str, list[Store]],
+    state: State,
+    notifier: Notifier,
+) -> list[StockResult]:
     products = cfg_mod.selected_products(cfg)
+    results: list[StockResult] = []
     for slug, RClass in RETAILER_REGISTRY.items():
         rcfg = cfg.retailers.get(slug)
         if not rcfg or not rcfg.enabled:
@@ -130,7 +139,11 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
         retailer = RClass(api_key=rcfg.api_key)
         stores = stores_by_retailer.get(slug, [])
         try:
-            for result in retailer.check(products, stores):
+            for result in retailer.inventory(products, stores):
+                result.retailer_slug = slug
+                results.append(result)
+                if result.status not in ALERTABLE_STATUSES:
+                    continue
                 store_id = result.store.store_id if result.store else "_online_"
                 if not state.should_alert(slug, store_id, result.product_key, result.status):
                     continue
@@ -147,6 +160,7 @@ def run_pass(cfg: cfg_mod.Config, stores_by_retailer: dict[str, list[Store]], st
         except Exception:
             print(f"  ! {slug} check raised:", file=sys.stderr)
             traceback.print_exc()
+    return results
 
 
 def enabled_retailer_slugs(cfg: cfg_mod.Config) -> list[str]:

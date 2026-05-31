@@ -45,6 +45,12 @@ body {
   padding: 22px;
 }
 
+.topbar + .panel,
+.panel + .panel,
+.panel + .grid {
+  margin-top: 16px;
+}
+
 h1,
 h2,
 p {
@@ -163,6 +169,8 @@ label {
 
 .retailer-list,
 .product-list,
+.stock-board,
+.stock-products,
 .stores,
 .alerts,
 .runner-stats {
@@ -172,6 +180,7 @@ label {
 
 .retailer,
 .product,
+.stock-location,
 .stat,
 .store,
 .alert,
@@ -229,6 +238,75 @@ label {
   border-color: var(--line);
   color: var(--muted);
   background: #1b2118;
+}
+
+.stock-retailer {
+  display: grid;
+  gap: 10px;
+}
+
+.stock-retailer + .stock-retailer {
+  margin-top: 14px;
+}
+
+.stock-retailer-title,
+.stock-location-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stock-location {
+  display: grid;
+  gap: 10px;
+}
+
+.stock-products {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.stock-chip {
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+  background: #1b2118;
+}
+
+.stock-chip strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.stock-chip .meta {
+  margin-top: 6px;
+}
+
+.stock-in {
+  border-color: #4d8f60;
+  background: #1e3423;
+}
+
+.stock-limited {
+  border-color: #9a7a36;
+  background: #302817;
+}
+
+.stock-out {
+  border-color: #444d3f;
+}
+
+.stock-unknown {
+  border-color: #665b32;
+  background: #282516;
+}
+
+.priority {
+  border-color: #8c7437;
+  color: var(--accent);
 }
 
 .runner-stats {
@@ -293,6 +371,15 @@ label {
   border-radius: 8px;
   background: #0b0d0a;
   white-space: pre-wrap;
+}
+
+.technical-log {
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+.technical-log summary {
+  cursor: pointer;
 }
 
 @media (max-width: 780px) {

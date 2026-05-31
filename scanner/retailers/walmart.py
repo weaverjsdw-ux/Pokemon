@@ -102,18 +102,35 @@ class Walmart(Retailer):
     def check(
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, include_out=False)
+
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, include_out=True)
+
+    def _iter_products(
+        self,
+        products: dict[str, dict[str, Any]],
+        include_out: bool,
+    ) -> Iterable[StockResult]:
         for key, prod in products.items():
             item_id = (prod.get("walmart_item_id") or "").strip()
             if not item_id:
                 continue
             url = f"https://www.walmart.com/ip/{item_id}"
-            online = self._check_online(item_id, url, prod, key)
+            online = self._check_online(item_id, url, prod, key, include_out=include_out)
             if online is not None:
                 yield online
             time.sleep(0.6)
 
     def _check_online(
-        self, item_id: str, url: str, prod: dict[str, Any], key: str
+        self,
+        item_id: str,
+        url: str,
+        prod: dict[str, Any],
+        key: str,
+        include_out: bool = False,
     ) -> StockResult | None:
         """Parse the JSON-LD / __NEXT_DATA__ blob embedded in the product page
         to determine online availability. Store-level pickup status is in the
@@ -137,8 +154,11 @@ class Walmart(Retailer):
         if not status_raw:
             return None
         if status_raw == "OUT_OF_STOCK":
-            return None
-        status = "ONLINE_IN_STOCK" if status_raw == "IN_STOCK" else "LIMITED"
+            if not include_out:
+                return None
+            status = "ONLINE_OUT"
+        else:
+            status = "ONLINE_IN_STOCK" if status_raw == "IN_STOCK" else "LIMITED"
         return StockResult(
             store=None,
             product_key=key,

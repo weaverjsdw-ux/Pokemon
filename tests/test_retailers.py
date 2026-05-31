@@ -97,6 +97,38 @@ def test_target_uses_in_store_stock_when_pickup_is_out(monkeypatch):
     assert result.status == "IN_STOCK"
 
 
+def test_target_inventory_includes_out_status_but_check_does_not(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "data": {
+                    "product": {
+                        "fulfillment": {
+                            "store_options": [
+                                {
+                                    "store": {"store_id": "123"},
+                                    "order_pickup": {"availability_status": "OUT_OF_STOCK"},
+                                    "in_store_only": {"availability_status": "OUT_OF_STOCK"},
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+
+    monkeypatch.setattr("scanner.retailers.target.requests.get", lambda *a, **k: FakeResponse())
+    store = Store("Target", "123", "Target #123", 39.0, -86.0)
+    products = {"foo": {"name": "Foo", "target_tcin": "999"}}
+
+    assert list(Target().check(products, [store])) == []
+    inventory = list(Target().inventory(products, [store]))
+
+    assert inventory[0].status == "OUT"
+    assert inventory[0].product_name == "Foo"
+
+
 def test_target_find_stores_uses_place_and_geocodes_store_address(monkeypatch):
     captured = {}
 

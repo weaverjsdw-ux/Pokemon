@@ -118,9 +118,10 @@ python -m scanner --once
 
 The scanner also ships with a local web UI. It reads `config.yaml`, can save the
 same local config file, shows the exact products and retailer IDs being scanned,
-and calls the same scanner code paths as the CLI. When `config.yaml` is valid,
-the UI starts the interval scanner automatically so it keeps checking on the
-configured cadence.
+groups the latest product statuses by store or online retailer, and calls the
+same scanner code paths as the CLI. When `config.yaml` is valid, the UI starts
+the interval scanner automatically so it keeps checking on the configured
+cadence.
 
 ```bash
 python -m scanner.web

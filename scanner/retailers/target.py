@@ -98,13 +98,26 @@ class Target(Retailer):
     def check(
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, stores, include_out=False)
+
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, stores, include_out=True)
+
+    def _iter_products(
+        self,
+        products: dict[str, dict[str, Any]],
+        stores: list[Store],
+        include_out: bool,
+    ) -> Iterable[StockResult]:
         for key, prod in products.items():
             tcin = (prod.get("target_tcin") or "").strip()
             if not tcin:
                 continue
             url = f"https://www.target.com/p/A-{tcin}"
             for store in stores:
-                result = self._check_one(tcin, store, prod, key, url)
+                result = self._check_one(tcin, store, prod, key, url, include_out=include_out)
                 if result is not None:
                     yield result
                 time.sleep(0.4)  # be polite
@@ -116,6 +129,7 @@ class Target(Retailer):
         prod: dict[str, Any],
         key: str,
         url: str,
+        include_out: bool = False,
     ) -> StockResult | None:
         try:
             resp = requests.get(
@@ -146,7 +160,7 @@ class Target(Retailer):
             if str(opt_store) != store.store_id:
                 continue
             status = self._status_from_store_option(opt)
-            if status == "OUT":
+            if status == "OUT" and not include_out:
                 return None
             return StockResult(
                 store=store,

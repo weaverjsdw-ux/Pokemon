@@ -15,17 +15,41 @@
         </div>
         <div class="actions">
           <button id="refreshBtn" type="button">Refresh</button>
-          <button id="dryRunBtn" type="button">Dry Run</button>
-          <button id="scanOnceBtn" type="button">Scan Once</button>
-          <button id="startBtn" type="button">Start Interval</button>
-          <button id="stopBtn" type="button" class="secondary">Stop</button>
+          <button id="dryRunBtn" type="button">Check Stores</button>
+          <button id="scanOnceBtn" type="button">Scan Now</button>
+          <button id="startBtn" type="button">Start Live Scanner</button>
+          <button id="stopBtn" type="button" class="secondary">Stop Scanner</button>
         </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Store Stock Board</h2>
+          <span id="runnerState" class="pill">idle</span>
+        </div>
+        <div id="runnerStats" class="runner-stats"></div>
+        <div id="errorList" class="errors"></div>
+        <div id="stockBoard" class="stock-board"></div>
+        <div id="stores" class="stores"></div>
+        <div id="alerts" class="alerts"></div>
+        <details class="technical-log">
+          <summary>Technical Log</summary>
+          <pre id="logOutput" class="log"></pre>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Products Being Scanned</h2>
+          <span id="scanCoverage" class="pill">0 active</span>
+        </div>
+        <div id="productList" class="product-list"></div>
       </section>
 
       <section class="grid">
         <form id="configForm" class="panel config-panel">
           <div class="panel-title">
-            <h2>Config</h2>
+            <h2>Settings</h2>
             <button id="saveBtn" type="submit">Save</button>
           </div>
           <label>
@@ -65,31 +89,11 @@
 
         <section class="panel">
           <div class="panel-title">
-            <h2>Retailers</h2>
+            <h2>Scanner Coverage</h2>
             <span id="productCount" class="pill">0 products</span>
           </div>
           <div id="retailerList" class="retailer-list"></div>
         </section>
-      </section>
-
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Products Being Scanned</h2>
-          <span id="scanCoverage" class="pill">0 active</span>
-        </div>
-        <div id="productList" class="product-list"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Interval Scanner</h2>
-          <span id="runnerState" class="pill">idle</span>
-        </div>
-        <div id="runnerStats" class="runner-stats"></div>
-        <div id="errorList" class="errors"></div>
-        <div id="stores" class="stores"></div>
-        <div id="alerts" class="alerts"></div>
-        <pre id="logOutput" class="log"></pre>
       </section>
     </main>
     <script src="/static/app.js" defer></script>

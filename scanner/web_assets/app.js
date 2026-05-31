@@ -74,12 +74,12 @@ function renderRetailers(retailers = []) {
 
     const pill = document.createElement("span");
     pill.className = "pill";
-    pill.textContent = retailer.enabled ? "enabled" : "disabled";
+    pill.textContent = retailer.enabled ? "scanning" : "off";
 
     checkbox.addEventListener("change", () => {
       state.configDirty = true;
       retailer.enabled = checkbox.checked;
-      pill.textContent = checkbox.checked ? "enabled" : "disabled";
+      pill.textContent = checkbox.checked ? "scanning" : "off";
     });
 
     row.append(checkbox, text, pill);
@@ -122,12 +122,19 @@ function renderRunner(runner = {}, config = {}) {
 }
 
 function renderProducts(products = []) {
-  const active = products.filter((product) => product.scanned);
+  const sortedProducts = [...products].sort((a, b) => {
+    if (a.scanned !== b.scanned) return a.scanned ? -1 : 1;
+    if ((b.priorityScore || 0) !== (a.priorityScore || 0)) {
+      return (b.priorityScore || 0) - (a.priorityScore || 0);
+    }
+    return String(a.name).localeCompare(String(b.name));
+  });
+  const active = sortedProducts.filter((product) => product.scanned);
   qs("#scanCoverage").textContent = `${active.length}/${products.length} active`;
   const list = qs("#productList");
   list.innerHTML = "";
 
-  for (const product of products) {
+  for (const product of sortedProducts) {
     const card = document.createElement("article");
     card.className = "product";
 
@@ -144,7 +151,8 @@ function renderProducts(products = []) {
 
     const status = document.createElement("span");
     status.className = "pill";
-    status.textContent = product.scanned ? "scanning" : "not active";
+    status.classList.toggle("priority", product.priority === "High priority");
+    status.textContent = product.scanned ? product.priority : "not active";
     header.append(text, status);
 
     const tags = document.createElement("div");
@@ -168,6 +176,99 @@ function renderProducts(products = []) {
 
     card.append(header, tags);
     list.appendChild(card);
+  }
+}
+
+function stockClass(status) {
+  if (status === "IN_STOCK" || status === "ONLINE_IN_STOCK") return "stock-in";
+  if (status === "LIMITED") return "stock-limited";
+  if (status === "OUT" || status === "ONLINE_OUT") return "stock-out";
+  return "stock-unknown";
+}
+
+function stockLabel(status) {
+  const labels = {
+    IN_STOCK: "In stock",
+    ONLINE_IN_STOCK: "Online in stock",
+    LIMITED: "Limited",
+    OUT: "Out",
+    ONLINE_OUT: "Online out",
+    UNKNOWN: "Unknown",
+  };
+  return labels[status] || status || "Unknown";
+}
+
+function renderStockBoard(board = []) {
+  const root = qs("#stockBoard");
+  root.innerHTML = "";
+  if (!board.length) return;
+
+  for (const retailer of board) {
+    const section = document.createElement("section");
+    section.className = "stock-retailer";
+
+    const title = document.createElement("div");
+    title.className = "stock-retailer-title";
+    const titleText = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = retailer.retailerName;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${retailer.onlineOnly ? "Online checks" : "Route store checks"} | ${retailer.activeProductCount} products`;
+    titleText.append(name, meta);
+    const checked = document.createElement("span");
+    checked.className = "pill";
+    checked.textContent = retailer.checkedAt ? `checked ${formatTimestamp(retailer.checkedAt)}` : "not checked";
+    title.append(titleText, checked);
+    section.appendChild(title);
+
+    for (const location of retailer.locations || []) {
+      const card = document.createElement("article");
+      card.className = "stock-location";
+      const head = document.createElement("div");
+      head.className = "stock-location-head";
+      const storeText = document.createElement("div");
+      const storeName = document.createElement("strong");
+      storeName.textContent = location.storeLabel;
+      const storeMeta = document.createElement("div");
+      storeMeta.className = "meta";
+      storeMeta.textContent = typeof location.distanceMiles === "number"
+        ? `${location.distanceMiles.toFixed(2)} mi from route`
+        : retailer.onlineOnly ? "online" : "distance unavailable";
+      storeText.append(storeName, storeMeta);
+      const count = document.createElement("span");
+      count.className = "pill";
+      count.textContent = `${location.inStockCount || 0} hits`;
+      head.append(storeText, count);
+      card.appendChild(head);
+
+      const products = document.createElement("div");
+      products.className = "stock-products";
+      for (const item of location.products || []) {
+        const chip = document.createElement("div");
+        chip.className = `stock-chip ${stockClass(item.status)}`;
+        const productName = document.createElement("strong");
+        productName.textContent = item.productName;
+        const itemMeta = document.createElement("div");
+        itemMeta.className = "meta";
+        const price = item.price ? ` | ${item.price}` : "";
+        itemMeta.textContent = `${stockLabel(item.status)} | ${item.priority}${price}`;
+        chip.append(productName, itemMeta);
+        products.appendChild(chip);
+      }
+      if (!(location.products || []).length) {
+        const chip = document.createElement("div");
+        chip.className = "stock-chip stock-unknown";
+        const noStores = String(location.storeLabel || "").toLowerCase().includes("no route stores");
+        chip.innerHTML = noStores
+          ? "<strong>No store products checked</strong><div class=\"meta\">No route stores were discovered for this retailer on the last scan.</div>"
+          : "<strong>No tracked products checked</strong><div class=\"meta\">No active product IDs for this scanner/store.</div>";
+        products.appendChild(chip);
+      }
+      card.appendChild(products);
+      section.appendChild(card);
+    }
+    root.appendChild(section);
   }
 }
 
@@ -225,20 +326,23 @@ function fillConfig(config = {}) {
 function renderStatus(payload) {
   const config = payload.config || {};
   const runner = payload.runner || {};
+  const notices = [...(payload.errors || []), ...(runner.warnings || [])];
   const preserveConfigInputs = configIsBeingEdited();
   const configLabel = config.configMissing ? "example config loaded; save config.yaml to run scanners" : "config.yaml loaded";
   const okLabel = payload.ok ? "ready" : "needs attention";
   qs("#statusText").textContent = `${okLabel} | ${configLabel}`;
   renderRunner(runner, config);
   renderProducts(payload.products || []);
+  const runnerBoard = runner.stockBoard || [];
+  renderStockBoard(runnerBoard);
   if (!preserveConfigInputs) {
     fillConfig(config);
     renderRetailers(payload.retailers || []);
   }
-  if (!payload.ok || (payload.errors || []).length) {
-    renderErrors(payload.errors || []);
+  if (!payload.ok || notices.length) {
+    renderErrors(notices);
   }
-  if (Object.keys(runner.stores || {}).length) {
+  if (!runnerBoard.length && Object.keys(runner.stores || {}).length) {
     renderStores(runner.stores || {});
   }
   if ((runner.lastAlerts || []).length) {
@@ -278,8 +382,12 @@ async function runAction(path, body = {}, refreshAfter = true) {
       method: "POST",
       body: JSON.stringify(body),
     });
-    renderErrors(payload.errors || []);
-    renderStores(payload.stores || payload.runner?.stores || {});
+    renderErrors([...(payload.errors || []), ...(payload.warnings || [])]);
+    const board = payload.stockBoard || payload.runner?.stockBoard || [];
+    renderStockBoard(board);
+    if (!board.length) {
+      renderStores(payload.stores || payload.runner?.stores || {});
+    }
     renderAlerts(payload.alerts || payload.runner?.lastAlerts || []);
     renderLog(payload);
     if (refreshAfter) {
