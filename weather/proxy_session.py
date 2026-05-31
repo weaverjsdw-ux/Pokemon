@@ -231,6 +231,7 @@ class ProxyRotatingSession:
         last_resp: requests.Response | None = None
 
         for attempt in range(self.max_attempts):
+            is_last = attempt == self.max_attempts - 1
             now = time.monotonic()
             proxy = self._next_proxy(now)
             try:
@@ -244,7 +245,8 @@ class ProxyRotatingSession:
                     "proxy %s failed (%s): %s; rotating",
                     proxy.label, type(exc).__name__, exc,
                 )
-                self._sleep_for(attempt, None)
+                if not is_last:  # no point backing off right before we give up
+                    self._sleep_for(attempt, None)
                 continue
 
             if resp.status_code in RETRYABLE_STATUS:
@@ -256,7 +258,8 @@ class ProxyRotatingSession:
                     proxy.label, resp.status_code, url,
                     f" (Retry-After={retry_after}s)" if retry_after else "",
                 )
-                self._sleep_for(attempt, retry_after)
+                if not is_last:
+                    self._sleep_for(attempt, retry_after)
                 continue
 
             # Success (any non-retryable status, including 4xx the caller
