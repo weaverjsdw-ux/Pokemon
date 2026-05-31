@@ -3,6 +3,7 @@ const qs = (selector) => document.querySelector(selector);
 const state = {
   retailers: {},
   busy: false,
+  configDirty: false,
 };
 
 async function api(path, options = {}) {
@@ -22,6 +23,17 @@ function setBusy(value) {
   document.querySelectorAll("button").forEach((button) => {
     button.disabled = value;
   });
+}
+
+function configIsBeingEdited() {
+  const active = document.activeElement;
+  const configForm = qs("#configForm");
+  const retailerList = qs("#retailerList");
+  return Boolean(
+    state.configDirty ||
+      (active && configForm?.contains(active)) ||
+      (active && retailerList?.contains(active))
+  );
 }
 
 function renderErrors(errors = []) {
@@ -65,6 +77,7 @@ function renderRetailers(retailers = []) {
     pill.textContent = retailer.enabled ? "enabled" : "disabled";
 
     checkbox.addEventListener("change", () => {
+      state.configDirty = true;
       retailer.enabled = checkbox.checked;
       pill.textContent = checkbox.checked ? "enabled" : "disabled";
     });
@@ -128,12 +141,15 @@ function fillConfig(config = {}) {
 function renderStatus(payload) {
   const config = payload.config || {};
   const runner = payload.runner || {};
+  const preserveConfigInputs = configIsBeingEdited();
   const configLabel = config.configMissing ? "example config loaded; save config.yaml to run scanners" : "config.yaml loaded";
   const okLabel = payload.ok ? "ready" : "needs attention";
   qs("#statusText").textContent = `${okLabel} | ${configLabel}`;
   qs("#runnerState").textContent = runner.phase || "idle";
-  fillConfig(config);
-  renderRetailers(payload.retailers || []);
+  if (!preserveConfigInputs) {
+    fillConfig(config);
+    renderRetailers(payload.retailers || []);
+  }
   if (!payload.ok || (payload.errors || []).length) {
     renderErrors(payload.errors || []);
   }
@@ -184,6 +200,7 @@ async function runAction(path, body = {}, refreshAfter = true) {
     if (refreshAfter) {
       await refresh();
     }
+    return payload;
   } finally {
     setBusy(false);
   }
@@ -191,7 +208,19 @@ async function runAction(path, body = {}, refreshAfter = true) {
 
 qs("#configForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  await runAction("/api/config", collectConfig());
+  const payload = await runAction("/api/config", collectConfig(), false);
+  if (payload.ok) {
+    state.configDirty = false;
+    await refresh();
+  }
+});
+
+qs("#configForm").addEventListener("input", () => {
+  state.configDirty = true;
+});
+
+qs("#configForm").addEventListener("change", () => {
+  state.configDirty = true;
 });
 
 qs("#refreshBtn").addEventListener("click", refresh);
