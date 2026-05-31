@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from typing import Any, Iterable
 
 import requests
 
+from ..geocode import geocode
 from .base import Retailer, Store, StockResult
 
 REDSKY_KEY = os.getenv("TARGET_API_KEY", "9f36aeafbe60771e321a7cc95a78140772ab3e96")
@@ -42,10 +44,10 @@ class Target(Retailer):
             "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1",
             params={
                 "key": REDSKY_KEY,
-                "limit": 25,
+                "limit": 20,
                 "within": max(int(radius_miles) + 5, 25),  # generous; we re-filter ourselves
-                "latitude": lat,
-                "longitude": lng,
+                "place": f"{lat},{lng}",
+                "visitor_id": uuid.uuid4().hex.upper(),
             },
             headers={"User-Agent": UA, "Accept": "application/json"},
             timeout=15,
@@ -63,10 +65,25 @@ class Target(Retailer):
             addr = s.get("mailing_address") or {}
             slat = geo.get("latitude")
             slng = geo.get("longitude")
-            if slat is None or slng is None:
-                continue
             city = addr.get("city", "")
-            state = addr.get("state", "")
+            state = addr.get("state") or addr.get("region", "")
+            if slat is None or slng is None:
+                address = ", ".join(
+                    part
+                    for part in (
+                        addr.get("address_line1", ""),
+                        city,
+                        state,
+                        addr.get("postal_code", ""),
+                    )
+                    if part
+                )
+                if not address:
+                    continue
+                try:
+                    slat, slng = geocode(address)
+                except Exception:
+                    continue
             out.append(
                 Store(
                     retailer="Target",

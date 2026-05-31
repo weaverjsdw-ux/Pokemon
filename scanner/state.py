@@ -12,10 +12,15 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "state.db"
 
 
 class State:
-    def __init__(self, cooldown_seconds: int = 6 * 3600):
+    def __init__(
+        self,
+        cooldown_seconds: int = 6 * 3600,
+        db_path: str | Path | None = None,
+    ):
         self.cooldown = cooldown_seconds
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(DB_PATH)
+        path = Path(db_path) if db_path is not None else DB_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path)
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS last_alert (

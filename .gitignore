@@ -7,6 +7,7 @@ config.local.yaml
 
 # Runtime state
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3
 data/stores.cache.json
@@ -16,6 +17,7 @@ logs/
 # Python
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 *.py[cod]
 *$py.class
 .venv/

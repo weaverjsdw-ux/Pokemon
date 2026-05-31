@@ -34,17 +34,22 @@ class Config:
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def load() -> Config:
-    if not CONFIG_PATH.exists():
+def load(path: Path | None = None) -> Config:
+    path = path or CONFIG_PATH
+    if not path.exists():
         raise SystemExit(
-            f"Missing {CONFIG_PATH.name}. Run:\n"
+            f"Missing {path.name}. Run:\n"
             f"  cp config.example.yaml config.yaml\n"
             f"Then edit config.yaml with your addresses + Discord webhook."
         )
 
-    with CONFIG_PATH.open() as f:
+    with path.open() as f:
         raw = yaml.safe_load(f) or {}
 
+    return from_mapping(raw)
+
+
+def from_mapping(raw: dict[str, Any]) -> Config:
     locations = raw.get("locations") or {}
     home = (locations.get("home") or "").strip()
     work = (locations.get("work") or "").strip()

@@ -95,3 +95,45 @@ def test_target_uses_in_store_stock_when_pickup_is_out(monkeypatch):
 
     assert result is not None
     assert result.status == "IN_STOCK"
+
+
+def test_target_find_stores_uses_place_and_geocodes_store_address(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "nearby_stores": {
+                        "stores": [
+                            {
+                                "store_id": "123",
+                                "mailing_address": {
+                                    "address_line1": "10 Main St",
+                                    "city": "Indianapolis",
+                                    "region": "IN",
+                                    "postal_code": "46204",
+                                },
+                                "geographic_specifications": {},
+                            }
+                        ]
+                    }
+                }
+            }
+
+    def fake_get(url, **kwargs):
+        captured.update(kwargs["params"])
+        return FakeResponse()
+
+    monkeypatch.setattr("scanner.retailers.target.requests.get", fake_get)
+    monkeypatch.setattr("scanner.retailers.target.geocode", lambda address: (39.0, -86.0))
+
+    stores = Target().find_stores(39.1, -86.1, 5)
+
+    assert captured["place"] == "39.1,-86.1"
+    assert captured["limit"] == 20
+    assert stores[0].lat == 39.0
+    assert stores[0].lng == -86.0

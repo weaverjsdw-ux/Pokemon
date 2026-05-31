@@ -114,6 +114,20 @@ Or one pass and exit:
 python -m scanner --once
 ```
 
+### Local UI
+
+The scanner also ships with a local web UI. It reads `config.yaml`, can save the
+same local config file, shows enabled retailers and product-ID coverage, and
+calls the same scanner code paths as the CLI for dry runs, one-pass scans, and
+continuous scanning.
+
+```bash
+python -m scanner.web
+```
+
+Open <http://127.0.0.1:8765>. The UI is local-only by default and does not
+expose the scanner outside your machine unless you run it with a different host.
+
 ---
 
 ## Adding products / new sets
