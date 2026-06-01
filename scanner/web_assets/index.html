@@ -14,12 +14,47 @@
           <p id="statusText">Loading scanner status...</p>
         </div>
         <div class="actions">
-          <button id="refreshBtn" type="button">Refresh</button>
-          <button id="dryRunBtn" type="button">Check Stores</button>
-          <button id="scanOnceBtn" type="button">Scan Now</button>
-          <button id="startBtn" type="button">Start Live Scanner</button>
-          <button id="stopBtn" type="button" class="secondary">Stop Scanner</button>
+          <button id="refreshBtn" type="button" title="Refresh dashboard data">Refresh</button>
+          <button id="safeDemoBtn" type="button" title="Render a local-only scanner demo without network calls">Safe Demo</button>
+          <button id="dryRunBtn" type="button" title="Check route and store discovery">Check Stores</button>
+          <button id="scanOnceBtn" type="button" title="Run one inventory scan">Scan Once</button>
+          <button id="startBtn" type="button" title="Start interval scanner">Start Live</button>
+          <button id="stopBtn" type="button" class="secondary" title="Stop interval scanner">Stop</button>
         </div>
+      </section>
+
+      <section class="summary-strip" aria-label="Scanner summary">
+        <div class="summary-card">
+          <span>Coverage</span>
+          <strong id="summaryCoverage">0%</strong>
+          <small id="summaryCoverageSub">0/0 actionable</small>
+        </div>
+        <div class="summary-card">
+          <span>Sources</span>
+          <strong id="summarySources">0 active</strong>
+          <small id="summarySourcesSub">0 enabled</small>
+        </div>
+        <div class="summary-card">
+          <span>Health</span>
+          <strong id="summaryHealth">unknown</strong>
+          <small id="summaryHealthSub">no scans yet</small>
+        </div>
+        <div class="summary-card">
+          <span>Last Scan</span>
+          <strong id="summaryLastScan">none</strong>
+          <small id="summaryLastScanSub">idle</small>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Active Coverage &amp; Source Health</h2>
+          <span id="coverageScore" class="pill">0%</span>
+        </div>
+        <div class="coverage-bar"><div id="coverageFill" class="coverage-fill"></div></div>
+        <div id="coverageDetail" class="meta"></div>
+        <div id="coverageBreakdown" class="coverage-breakdown"></div>
+        <div id="healthGrid" class="health-grid"></div>
       </section>
 
       <section class="panel">
@@ -28,6 +63,7 @@
           <span id="runnerState" class="pill">idle</span>
         </div>
         <div id="runnerStats" class="runner-stats"></div>
+        <div id="storeDiagnostics" class="store-diagnostics"></div>
         <div id="errorList" class="errors"></div>
         <div id="stockBoard" class="stock-board"></div>
         <div id="stores" class="stores"></div>
@@ -44,6 +80,36 @@
           <span id="scanCoverage" class="pill">0 active</span>
         </div>
         <div id="productList" class="product-list"></div>
+      </section>
+
+      <form id="productIdForm" class="panel id-panel">
+        <div class="panel-title">
+          <h2>Add Product ID</h2>
+          <button id="saveProductIdBtn" type="submit">Add ID</button>
+        </div>
+        <div class="row id-row">
+          <label>
+            Retailer
+            <select id="idRetailer" name="retailer"></select>
+          </label>
+          <label>
+            Product
+            <select id="idProduct" name="productKey"></select>
+          </label>
+        </div>
+        <label>
+          Product URL or ID
+          <input id="idValue" name="urlOrId" placeholder="Paste a product page URL or bare retailer ID">
+        </label>
+        <div id="idSaveStatus" class="meta"></div>
+      </form>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Recently In Stock</h2>
+          <span id="restockCount" class="pill">0</span>
+        </div>
+        <div id="recentRestocks" class="restock-list"></div>
       </section>
 
       <section class="grid">

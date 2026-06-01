@@ -83,6 +83,13 @@ def test_status_payload_reports_missing_config_but_loads_example(tmp_path, monke
     assert payload["products"][0]["key"] == "booster"
     assert payload["products"][0]["scanned"] is True
     assert payload["products"][0]["activeRetailers"] == ["target", "walmart"]
+    assert payload["coverage"]["score"] == 100
+    assert payload["summary"]["coverageScore"] == 100
+    assert payload["summary"]["actionableProducts"] == 1
+    assert payload["summary"]["activeSources"] == 2
+    assert payload["summary"]["sourceHealth"]["unknown"] == 2
+    assert "health" in payload
+    assert "recentRestocks" in payload
     assert {retailer["slug"] for retailer in payload["retailers"]} == set(web.RETAILER_REGISTRY)
 
 
@@ -126,6 +133,37 @@ def test_product_payload_marks_exact_active_retailer_ids():
     assert walmart["active"] is False
 
 
+def test_product_payload_blocks_bestbuy_without_api_key():
+    payload = web._product_payload(
+        Config(
+            home_address="1 Home St",
+            work_address="2 Work Ave",
+            route_radius_miles=4,
+            routing_engine="osrm",
+            google_api_key="",
+            retailers={"bestbuy": RetailerCfg(enabled=True, api_key="")},
+            poll_interval_seconds=180,
+            discord_webhook="",
+            ntfy_topic="",
+            products_filter="all_sealed",
+            products={
+                "booster": {
+                    "name": "Booster",
+                    "bestbuy_sku": "12345",
+                }
+            },
+        )
+    )
+
+    product = payload[0]
+    bestbuy = next(retailer for retailer in product["retailers"] if retailer["slug"] == "bestbuy")
+    assert product["scanned"] is False
+    assert product["activeRetailers"] == []
+    assert bestbuy["ids"] == {"bestbuy_sku": "12345"}
+    assert bestbuy["missingApiKey"] is True
+    assert bestbuy["blockedReason"] == "missing API key"
+
+
 def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
     _write_fixture_files(tmp_path, monkeypatch)
 
@@ -153,12 +191,70 @@ def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
     assert saved["retailers"]["costco"]["enabled"] is False
 
 
+def test_save_product_id_payload_updates_catalog(tmp_path, monkeypatch):
+    _write_fixture_files(tmp_path, monkeypatch)
+
+    payload = web.save_product_id_payload(
+        {
+            "retailer": "target",
+            "productKey": "booster",
+            "urlOrId": "https://www.target.com/p/-/A-93954435",
+        }
+    )
+
+    assert payload["ok"] is True
+    assert payload["field"] == "target_tcin"
+    assert payload["value"] == "93954435"
+    saved = yaml.safe_load((tmp_path / "products.yaml").read_text(encoding="utf-8"))
+    assert saved["booster"]["target_tcin"] == "93954435"
+
+
+def test_save_product_id_payload_rejects_placeholder_retailer(tmp_path, monkeypatch):
+    _write_fixture_files(tmp_path, monkeypatch)
+
+    payload = web.save_product_id_payload(
+        {"retailer": "costco", "productKey": "booster", "urlOrId": "12345"}
+    )
+
+    assert payload["ok"] is False
+    assert "supported catalog ID field" in payload["errors"][0]
+
+
 def test_should_autostart_requires_valid_saved_config(monkeypatch):
     monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
     assert web._should_autostart() is True
 
     monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), True))
     assert web._should_autostart() is False
+
+
+def test_prepare_scan_capture_reports_online_only_sources(monkeypatch):
+    cfg = Config(
+        home_address="1 Home St",
+        work_address="2 Work Ave",
+        route_radius_miles=8.5,
+        routing_engine="osrm",
+        google_api_key="",
+        retailers={"walmart": RetailerCfg(enabled=True)},
+        poll_interval_seconds=180,
+        discord_webhook="",
+        ntfy_topic="",
+        products_filter="all_sealed",
+        products={"booster": {"name": "Booster", "walmart_item_id": "456"}},
+    )
+    monkeypatch.setattr(
+        web,
+        "build_corridor",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("route setup should not run")),
+    )
+
+    stores, diagnostics = web._prepare_scan_capture(cfg)
+
+    assert stores == {"walmart": []}
+    assert diagnostics[0]["slug"] == "walmart"
+    assert diagnostics[0]["status"] == "skipped"
+    assert diagnostics[0]["skippedReason"] == "online_only"
+    assert diagnostics[0]["corridorRadiusMiles"] == 8.5
 
 
 def test_dry_run_payload_returns_discovered_stores(monkeypatch):
@@ -169,6 +265,12 @@ def test_dry_run_payload_returns_discovered_stores(monkeypatch):
     payload = web.dry_run_payload()
 
     assert payload["ok"] is True
+    assert "coverage" in payload
+    assert payload["summary"]["coverageScore"] == 100
+    assert payload["summary"]["enabledSources"] == 1
+    assert "health" in payload
+    assert "recentRestocks" in payload
+    assert payload["storeDiagnostics"] == []
     assert payload["stores"]["target"][0]["name"] == "Target #123"
     assert payload["stores"]["target"][0]["distanceMiles"] == 1.2
 
@@ -195,6 +297,74 @@ def test_warning_lines_sanitizes_and_dedupes_target_403_urls():
     assert "visitor_id" not in warnings[0].lower()
 
 
+def test_safe_log_text_redacts_browser_log_details():
+    raw = (
+        "  home: (39.9760163, -86.1970761)\n"
+        "  work: (39.9123247, -86.2337369)\n"
+        "403 Client Error for url: "
+        "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1?"
+        "key=abc&visitor_id=SECRET"
+    )
+
+    safe = web._safe_log_text(raw)
+
+    assert "home: (redacted)" in safe
+    assert "work: (redacted)" in safe
+    assert "key=abc" not in safe
+    assert "visitor_id" not in safe
+    assert "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1?..." in safe
+
+
+def test_stores_payload_omits_coordinates():
+    store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
+
+    payload = web._stores_payload({"target": [store]})
+
+    assert payload["target"][0] == {
+        "storeId": "123",
+        "name": "Target #123",
+        "distanceMiles": 1.2,
+    }
+
+
+def test_dry_run_payload_redacts_errors(monkeypatch):
+    monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
+    monkeypatch.setattr(
+        web,
+        "_prepare_scan_capture",
+        lambda cfg: (_ for _ in ()).throw(
+            RuntimeError(
+                "home: (39.9760163, -86.1970761) "
+                "https://redsky.target.com/path?key=secret&visitor_id=abc"
+            )
+        ),
+    )
+
+    payload = web.dry_run_payload()
+
+    assert payload["ok"] is False
+    assert "home: (redacted)" in payload["errors"][0]
+    assert "key=secret" not in payload["errors"][0]
+    assert "visitor_id" not in payload["errors"][0]
+
+
+def test_safe_demo_payload_uses_synthetic_rows_without_route_setup(monkeypatch):
+    monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
+    monkeypatch.setattr(
+        web,
+        "build_corridor",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("route setup should not run")),
+    )
+
+    payload = web.safe_demo_payload()
+
+    assert payload["ok"] is True
+    assert payload["warnings"][0].startswith("Safe demo only")
+    assert payload["storeDiagnostics"][0]["demo"] is True
+    assert payload["stockBoard"][0]["locations"][0]["products"][0]["status"] == "OUT"
+    assert payload["stores"]["target"][0]["storeId"] == "_demo_store_"
+
+
 def test_stock_board_payload_groups_products_under_store_statuses():
     cfg = _cfg()
     store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
@@ -214,6 +384,20 @@ def test_stock_board_payload_groups_products_under_store_statuses():
     assert board[0]["locations"][0]["products"][0]["productName"] == "Booster"
     assert board[0]["locations"][0]["products"][0]["status"] == "OUT"
     assert board[0]["locations"][0]["inStockCount"] == 0
+
+
+def test_stock_board_payload_explains_missing_result_from_blocked_source():
+    cfg = _cfg()
+    store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
+    web.health.reset()
+    web.health.record_failure("target", "BLOCKED", "last HTTP 403; retailer endpoint blocked")
+
+    board = web._stock_board_payload(cfg, {"target": [store]}, [], checked_at=12345)
+
+    product = board[0]["locations"][0]["products"][0]
+    assert product["status"] == "BLOCKED"
+    assert "HTTP 403" in product["statusReason"]
+    web.health.reset()
 
 
 def test_scan_once_payload_captures_scanner_alert(monkeypatch):
@@ -250,7 +434,17 @@ def test_scan_once_payload_captures_scanner_alert(monkeypatch):
     payload = web.scan_once_payload()
 
     assert payload["ok"] is True
+    assert "coverage" in payload
+    assert payload["summary"]["coverageScore"] == 100
+    assert payload["summary"]["stockHits"] == 1
+    assert "health" in payload
+    assert "recentRestocks" in payload
+    assert payload["storeDiagnostics"] == []
     assert payload["stockBoard"][0]["locations"][0]["inStockCount"] == 1
     assert payload["lastResults"][0]["status"] == "IN_STOCK"
     assert payload["alerts"][0]["retailer"] == "Target"
     assert payload["alerts"][0]["status"] == "IN_STOCK"
+    runner = web.RUNNER.snapshot()
+    assert runner["lastScanAt"] is not None
+    assert runner["stockBoard"][0]["locations"][0]["inStockCount"] == 1
+    assert runner["lastResults"][0]["status"] == "IN_STOCK"

@@ -13,6 +13,7 @@ from typing import Any, Iterable
 
 import requests
 
+from . import http
 from .base import Retailer, Store, StockResult
 
 UA = (
@@ -59,8 +60,9 @@ class Walmart(Retailer):
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:
-            resp = requests.get(
+            resp = http.get(
                 "https://www.walmart.com/store/finder/electrode/api/stores",
+                retailer="walmart",
                 params={"singleLineAddr": f"{lat},{lng}", "distance": int(radius_miles) + 5},
                 headers={
                     "User-Agent": UA,
@@ -137,8 +139,9 @@ class Walmart(Retailer):
         same blob; we surface online as the primary signal because Walmart's
         store inventory feed is unreliable."""
         try:
-            resp = requests.get(
+            resp = http.get(
                 url,
+                retailer="walmart",
                 headers={
                     "User-Agent": UA,
                     "Accept": "text/html",

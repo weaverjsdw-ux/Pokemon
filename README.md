@@ -57,7 +57,8 @@ cp config.example.yaml config.yaml
 
 Open `config.yaml` and fill in:
 - `locations.home` and `locations.work` — full addresses or zips work
-- `route_radius_miles` — default 4
+- `route_radius_miles` — default 4; this is the corridor distance from your
+  home/work route, not a generic "search every store within X miles" setting
 - `discord_webhook` — see walkthrough below
 - Enable/disable retailers as you like
 
@@ -102,6 +103,18 @@ target: 3 stores in corridor
 walmart (online-only)
 ```
 
+If you want to verify the CLI and dashboard wiring without sending your
+home/work addresses to any geocoder, router, or retailer endpoint, use the
+local-only safe demo:
+
+```bash
+python -m scanner --safe-demo
+```
+
+Safe demo uses synthetic stores and out-of-stock rows. It is not a live stock
+check; it exists so you can validate coverage, board layout, source labels, and
+the UI without transmitting private location data.
+
 If that looks right, kick off the real loop:
 
 ```bash
@@ -121,7 +134,8 @@ same local config file, shows the exact products and retailer IDs being scanned,
 groups the latest product statuses by store or online retailer, and calls the
 same scanner code paths as the CLI. When `config.yaml` is valid, the UI starts
 the interval scanner automatically so it keeps checking on the configured
-cadence.
+cadence. Products confirmed out of stock show as **Out** rather than
+**Unknown** for every supported retailer.
 
 ```bash
 python -m scanner.web
@@ -132,6 +146,60 @@ expose the scanner outside your machine unless you run it with a different host.
 Use `python -m scanner.web --no-autostart` if you only want the dashboard
 without starting the interval scanner.
 
+The dashboard also surfaces three things that make it worth opening even when
+nothing is live:
+
+- **Active coverage** — what share of your tracked products are actually
+  actionable (have an ID for an enabled, supported retailer). A pretty product
+  list with no IDs is decorative, not a scanner.
+- **Source health** — per retailer: healthy / degraded / down, last successful
+  check, last HTTP status, and *why* it's quiet — genuinely out of stock vs.
+  blocked vs. parser returned nothing vs. network error. These used to all look
+  identical.
+- **Store discovery diagnostics** — shows how route radius was applied: how
+  many route sample centers were queried, how many candidate stores came back,
+  how many survived the corridor filter, and which enabled sources ignore
+  radius because they are online-only.
+- **Recently in stock** — restock memory per product/store: when it was last
+  seen in stock and how many distinct restocks have been logged.
+- **Add Product ID** — paste a retailer product URL or bare ID and the UI writes
+  the matching field into `data/products.yaml` through the same parser used by
+  `python -m scanner.add_id`.
+
+---
+
+## Coverage & health from the CLI
+
+```bash
+python -m scanner.coverage      # active-coverage score + per-retailer ID counts
+python -m scanner --check-config # now also prints the coverage score
+```
+
+Coverage is the single best signal of whether this tool is doing anything. Drive
+it up by adding IDs (below) for current sets — the catalog ships intentionally
+sparse so it never carries stale or guessed identifiers.
+
+---
+
+## Running unattended (Windows)
+
+A scanner that only runs while a terminal is open isn't much of a scanner. The
+included script registers a Windows Scheduled Task that launches the scanner at
+logon (no console window) and restarts it if it exits. It is **dry-run by
+default** — it prints the plan and changes nothing until you pass `-Install`:
+
+```powershell
+# See the plan (no changes):
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-task.ps1
+
+# Install the background scan loop:
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-task.ps1 -Install
+
+# Or install the local dashboard instead; remove either with -Remove:
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-task.ps1 -Install -Web
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-task.ps1 -Remove
+```
+
 ---
 
 ## Adding products / new sets
@@ -139,10 +207,19 @@ without starting the interval scanner.
 `data/products.yaml` is the catalog. Each entry needs the retailer-specific ID for products you want to track at that retailer. To add a new ID:
 
 - **Target**: open the product page on target.com, find the URL like `/p/.../A-93954435`. The number after `A-` is the `target_tcin`.
-- **Walmart**: open the product page on walmart.com, URL like `/ip/.../15433520586`. The trailing number is `walmart_item_id`.
-- **Best Buy**: SKU is the digits in the URL `/site/.../6566943.p`.
+- **Walmart**: open the product page on walmart.com, URL like `/ip/.../15433520586`. The trailing number is `walmart_item_id`. Skip third-party marketplace listings unless you explicitly want scalper-price alerts.
+- **Best Buy**: SKU is the digits in the URL `/site/.../6566943.p`. Prefer products sold by Best Buy; marketplace seller SKUs can point at inflated third-party listings.
 - **GameStop**: URL like `/p/pokemon-tcg-...`. The slug after `/p/` is `gamestop_pid`.
 - **Pokémon Center**: URL like `pokemoncenter.com/product/...`. The path after `/product/` is `pokemoncenter_slug`.
+
+Or skip the copy/paste: paste the product-page URL and let the scanner pull the
+id out and write it into `data/products.yaml` for you (comments and formatting
+are preserved — only the one field line is rewritten):
+
+```bash
+python -m scanner.add_id target prismatic_evolutions_etb https://www.target.com/p/-/A-93954435
+python -m scanner.add_id walmart prismatic_evolutions_etb 15433520586   # a bare id works too
+```
 
 Leave fields blank to skip that retailer for that product. `--check-config`
 fails if you enable a retailer but the selected products have no IDs for it,
@@ -173,6 +250,7 @@ Each retailer is a self-contained module in `scanner/retailers/`. To add a new r
 ## Operational notes
 
 - **Polling cadence**: default 3 min + jitter. Don't lower this past ~60s — these are public site endpoints, not real APIs, and hammering them is what gets them locked down for everyone.
+- **Rate-limit backoff**: individual stock checks retry HTTP 429 (Too Many Requests) and transient 5xx with exponential backoff, honoring the server's `Retry-After` header when present, instead of silently dropping that check for the cycle.
 - **Coverage gaps**: Walmart's per-store stock API is unreliable; this build surfaces Walmart **online** restocks instead, which is still useful (you can ship-to-store for free). When their store API works again, the Walmart adapter is the place to add it.
 - **Local game stores (LGS)**: not auto-discoverable — every LGS uses a different POS (Square, Crystal Commerce, BinderPOS, Shopify). The cleanest path is to follow your local stores on Instagram/Discord directly; auto-scraping them is high-effort, low-yield, and antagonizes the store owners you actually want to be friendly with.
 - **Best Buy**: free developer API at https://developer.bestbuy.com — get a key, set `retailers.bestbuy.api_key`, fill `bestbuy_sku` values in `data/products.yaml`, then flip `enabled: true`.

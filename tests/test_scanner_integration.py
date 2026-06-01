@@ -44,10 +44,17 @@ class RecordingState:
     def __init__(self, decisions: list[bool]):
         self.decisions = decisions
         self.calls: list[tuple[str, str, str, str]] = []
+        self.observations: list[tuple[str, str, str, str]] = []
 
     def should_alert(self, retailer: str, store_id: str, product_key: str, status: str) -> bool:
         self.calls.append((retailer, store_id, product_key, status))
         return self.decisions.pop(0)
+
+    def record_observation(self, retailer: str, store_id: str, product_key: str, status: str) -> None:
+        self.observations.append((retailer, store_id, product_key, status))
+
+    def history_for(self, retailer: str, store_id: str, product_key: str):
+        return None
 
 
 class RecordingNotifier:

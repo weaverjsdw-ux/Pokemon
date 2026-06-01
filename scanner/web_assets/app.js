@@ -1,10 +1,24 @@
 const qs = (selector) => document.querySelector(selector);
+const clear = (element) => element.replaceChildren();
 
 const state = {
   retailers: {},
+  products: [],
   busy: false,
   configDirty: false,
 };
+
+function appendTextBlock(parent, titleText, metaText = "") {
+  const title = document.createElement("strong");
+  title.textContent = titleText;
+  parent.appendChild(title);
+  if (metaText) {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = metaText;
+    parent.appendChild(meta);
+  }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -38,7 +52,7 @@ function configIsBeingEdited() {
 
 function renderErrors(errors = [], warnings = []) {
   const box = qs("#errorList");
-  box.innerHTML = "";
+  clear(box);
   for (const error of errors) {
     const item = document.createElement("div");
     item.className = "error";
@@ -55,7 +69,7 @@ function renderErrors(errors = [], warnings = []) {
 
 function renderRetailers(retailers = []) {
   const list = qs("#retailerList");
-  list.innerHTML = "";
+  clear(list);
   state.retailers = {};
   for (const retailer of retailers) {
     state.retailers[retailer.slug] = retailer;
@@ -74,7 +88,8 @@ function renderRetailers(retailers = []) {
     const meta = document.createElement("div");
     meta.className = "meta";
     const mode = retailer.onlineOnly ? "online" : "route";
-    const support = retailer.supported ? `${mode} scanner` : retailer.unsupportedReason || "unsupported";
+    let support = retailer.supported ? `${mode} scanner` : retailer.unsupportedReason || "unsupported";
+    if (retailer.missingApiKey) support = `${support} | missing API key`;
     meta.textContent = `${support} | ${retailer.selectedProductIds} product IDs`;
     text.append(title, meta);
 
@@ -114,7 +129,7 @@ function renderRunner(runner = {}, config = {}) {
     ["Next scan", runner.running ? formatTimestamp(runner.nextScanAt) : "stopped"],
   ];
   const root = qs("#runnerStats");
-  root.innerHTML = "";
+  clear(root);
   for (const [label, value] of stats) {
     const item = document.createElement("div");
     item.className = "stat";
@@ -127,7 +142,81 @@ function renderRunner(runner = {}, config = {}) {
   }
 }
 
+function formatMiles(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+  return `${value.toFixed(value % 1 ? 1 : 0)} mi`;
+}
+
+function renderStoreDiagnostics(rows = [], config = {}) {
+  const root = qs("#storeDiagnostics");
+  clear(root);
+  if (!rows.length) {
+    const note = document.createElement("div");
+    note.className = "discovery-note";
+    note.textContent = "Run Check Stores or Scan Once to see how the route radius is applied.";
+    root.appendChild(note);
+    return;
+  }
+
+  const heading = document.createElement("div");
+  heading.className = "discovery-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Store Discovery";
+  const radius = document.createElement("span");
+  radius.className = "meta";
+  radius.textContent = `configured route radius ${formatMiles(config.routeRadiusMiles)}`;
+  heading.append(title, radius);
+  root.appendChild(heading);
+
+  for (const row of rows) {
+    const card = document.createElement("div");
+    card.className = `discovery-card discovery-${row.status || "unknown"}`;
+    const cardTitle = document.createElement("div");
+    cardTitle.className = "discovery-title";
+    const name = document.createElement("strong");
+    name.textContent = row.name || row.slug;
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = row.status || "unknown";
+    cardTitle.append(name, pill);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    if (row.onlineOnly) {
+      meta.textContent = "Online-only source; route radius does not apply.";
+    } else {
+      meta.textContent = [
+        `route filter ${formatMiles(row.corridorRadiusMiles)}`,
+        `candidate search ${formatMiles(row.candidateSearchRadiusMiles)}`,
+        `${row.centersQueried || 0}/${row.centersPlanned || 0} centers`,
+        `${row.uniqueCandidateStores || 0} unique candidates`,
+        `${row.keptStores || 0} kept`,
+        `${row.filteredOutStores || 0} filtered out`,
+      ].join(" / ");
+    }
+
+    const detail = document.createElement("div");
+    detail.className = "meta discovery-detail";
+    if ((row.errors || []).length) {
+      detail.textContent = row.errors[0];
+    } else if (row.status === "filtered_out") {
+      detail.textContent = "Stores were found, but none landed inside the route corridor radius.";
+    } else if (row.status === "empty") {
+      detail.textContent = "The retailer returned no candidate stores for the home/work search centers.";
+    } else if (row.status === "ready") {
+      detail.textContent = "Radius is active: stores found by the retailer were filtered against the route corridor.";
+    } else if (row.status === "skipped") {
+      detail.textContent = "This source checks online stock only, so increasing radius will not change its store count.";
+    }
+
+    card.append(cardTitle, meta);
+    if (detail.textContent) card.appendChild(detail);
+    root.appendChild(card);
+  }
+}
+
 function renderProducts(products = []) {
+  state.products = products;
   const sortedProducts = [...products].sort((a, b) => {
     if (a.scanned !== b.scanned) return a.scanned ? -1 : 1;
     if ((b.priorityScore || 0) !== (a.priorityScore || 0)) {
@@ -138,7 +227,7 @@ function renderProducts(products = []) {
   const active = sortedProducts.filter((product) => product.scanned);
   qs("#scanCoverage").textContent = `${active.length}/${products.length} active`;
   const list = qs("#productList");
-  list.innerHTML = "";
+  clear(list);
 
   for (const product of sortedProducts) {
     const card = document.createElement("article");
@@ -165,10 +254,22 @@ function renderProducts(products = []) {
     tags.className = "scan-tags";
     const scannedRetailers = product.retailers.filter((retailer) => retailer.active);
     if (!scannedRetailers.length) {
-      const tag = document.createElement("span");
-      tag.className = "scan-tag inactive";
-      tag.textContent = "No enabled retailer ID";
-      tags.appendChild(tag);
+      const blockers = product.retailers
+        .filter((retailer) => retailer.enabled && retailer.supported && retailer.blockedReason)
+        .slice(0, 3);
+      if (blockers.length) {
+        for (const retailer of blockers) {
+          const tag = document.createElement("span");
+          tag.className = "scan-tag inactive";
+          tag.textContent = `${retailer.name}: ${retailer.blockedReason}`;
+          tags.appendChild(tag);
+        }
+      } else {
+        const tag = document.createElement("span");
+        tag.className = "scan-tag inactive";
+        tag.textContent = "No enabled retailer ID";
+        tags.appendChild(tag);
+      }
     }
     for (const retailer of scannedRetailers) {
       const tag = document.createElement("span");
@@ -185,10 +286,49 @@ function renderProducts(products = []) {
   }
 }
 
+function renderProductIdOptions(retailers = [], products = []) {
+  const retailerSelect = qs("#idRetailer");
+  const productSelect = qs("#idProduct");
+  const previousRetailer = retailerSelect.value;
+  const previousProduct = productSelect.value;
+  clear(retailerSelect);
+  clear(productSelect);
+
+  const eligibleRetailers = retailers.filter(
+    (retailer) => retailer.supported && (retailer.productIdFields || []).length,
+  );
+  for (const retailer of eligibleRetailers) {
+    const option = document.createElement("option");
+    option.value = retailer.slug;
+    const field = (retailer.productIdFields || []).join("/");
+    option.textContent = `${retailer.name} (${field})`;
+    retailerSelect.appendChild(option);
+  }
+
+  const sortedProducts = [...products].sort((a, b) => {
+    if (a.scanned !== b.scanned) return a.scanned ? -1 : 1;
+    return String(a.name).localeCompare(String(b.name));
+  });
+  for (const product of sortedProducts) {
+    const option = document.createElement("option");
+    option.value = product.key;
+    option.textContent = product.name;
+    productSelect.appendChild(option);
+  }
+
+  if (previousRetailer && [...retailerSelect.options].some((option) => option.value === previousRetailer)) {
+    retailerSelect.value = previousRetailer;
+  }
+  if (previousProduct && [...productSelect.options].some((option) => option.value === previousProduct)) {
+    productSelect.value = previousProduct;
+  }
+}
+
 function stockClass(status) {
   if (status === "IN_STOCK" || status === "ONLINE_IN_STOCK") return "stock-in";
   if (status === "LIMITED") return "stock-limited";
   if (status === "OUT" || status === "ONLINE_OUT") return "stock-out";
+  if (status === "BLOCKED" || status === "SOURCE_ERROR" || status === "DISCOVERY_FAILED") return "stock-error";
   return "stock-unknown";
 }
 
@@ -199,6 +339,11 @@ function stockLabel(status) {
     LIMITED: "Limited",
     OUT: "Out",
     ONLINE_OUT: "Online out",
+    BLOCKED: "Source blocked",
+    SOURCE_ERROR: "Source error",
+    NO_DATA: "No data",
+    DISCOVERY_FAILED: "Store discovery failed",
+    NOT_CHECKED: "Not checked",
     UNKNOWN: "Unknown",
   };
   return labels[status] || status || "Unknown";
@@ -206,7 +351,7 @@ function stockLabel(status) {
 
 function renderStockBoard(board = []) {
   const root = qs("#stockBoard");
-  root.innerHTML = "";
+  clear(root);
   if (!board.length) return;
 
   for (const retailer of board) {
@@ -258,7 +403,8 @@ function renderStockBoard(board = []) {
         const itemMeta = document.createElement("div");
         itemMeta.className = "meta";
         const price = item.price ? ` | ${item.price}` : "";
-        itemMeta.textContent = `${stockLabel(item.status)} | ${item.priority}${price}`;
+        const reason = item.statusReason ? ` | ${item.statusReason}` : "";
+        itemMeta.textContent = `${stockLabel(item.status)} | ${item.priority}${price}${reason}`;
         chip.append(productName, itemMeta);
         products.appendChild(chip);
       }
@@ -266,9 +412,13 @@ function renderStockBoard(board = []) {
         const chip = document.createElement("div");
         chip.className = "stock-chip stock-unknown";
         const noStores = String(location.storeLabel || "").toLowerCase().includes("no route stores");
-        chip.innerHTML = noStores
-          ? "<strong>No store products checked</strong><div class=\"meta\">No route stores were discovered for this retailer on the last scan.</div>"
-          : "<strong>No tracked products checked</strong><div class=\"meta\">No active product IDs for this scanner/store.</div>";
+        appendTextBlock(
+          chip,
+          noStores ? "No store products checked" : "No tracked products checked",
+          noStores
+            ? "No route stores were discovered for this retailer on the last scan."
+            : "No active product IDs for this scanner/store.",
+        );
         products.appendChild(chip);
       }
       card.appendChild(products);
@@ -280,14 +430,14 @@ function renderStockBoard(board = []) {
 
 function renderStores(storesByRetailer = {}) {
   const root = qs("#stores");
-  root.innerHTML = "";
+  clear(root);
   const entries = Object.entries(storesByRetailer);
   if (!entries.length) return;
   for (const [slug, stores] of entries) {
     if (!stores.length) {
       const item = document.createElement("div");
       item.className = "store";
-      item.innerHTML = `<strong>${slug}</strong><div class="meta">online-only or no route stores found</div>`;
+      appendTextBlock(item, slug, "online-only or no route stores found");
       root.appendChild(item);
       continue;
     }
@@ -295,7 +445,7 @@ function renderStores(storesByRetailer = {}) {
       const item = document.createElement("div");
       item.className = "store";
       const miles = typeof store.distanceMiles === "number" ? `${store.distanceMiles.toFixed(2)} mi from route` : "distance unavailable";
-      item.innerHTML = `<strong>${store.name}</strong><div class="meta">${slug} | ${miles}</div>`;
+      appendTextBlock(item, store.name, `${slug} | ${miles}`);
       root.appendChild(item);
     }
   }
@@ -303,19 +453,19 @@ function renderStores(storesByRetailer = {}) {
 
 function renderAlerts(alerts = []) {
   const root = qs("#alerts");
-  root.innerHTML = "";
+  clear(root);
   for (const alert of alerts) {
     const item = document.createElement("div");
     item.className = "alert";
     const price = alert.price ? ` | ${alert.price}` : "";
-    item.innerHTML = `<strong>${alert.status}: ${alert.product_name}</strong><div class="meta">${alert.retailer} | ${alert.store_label}${price}</div>`;
+    appendTextBlock(item, `${alert.status}: ${alert.product_name}`, `${alert.retailer} | ${alert.store_label}${price}`);
     root.appendChild(item);
   }
 }
 
 function renderLog(payload = {}) {
   const text = [payload.stdout || "", payload.stderr || ""].filter(Boolean).join("\n");
-  if (text) qs("#logOutput").textContent = text;
+  qs("#logOutput").textContent = text;
 }
 
 function fillConfig(config = {}) {
@@ -329,6 +479,191 @@ function fillConfig(config = {}) {
   qs("#productCount").textContent = `${config.productsSelected || 0}/${config.productsTotal || 0} products`;
 }
 
+function formatAgo(ts) {
+  if (!ts) return "never";
+  const delta = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (delta < 90) return `${delta}s ago`;
+  if (delta < 5400) return `${Math.floor(delta / 60)}m ago`;
+  if (delta < 36 * 3600) return `${Math.floor(delta / 3600)}h ago`;
+  return `${Math.floor(delta / 86400)}d ago`;
+}
+
+function renderSummary(summary = {}, coverage = {}) {
+  const score = summary.coverageScore ?? coverage.score ?? 0;
+  const actionable = summary.actionableProducts ?? coverage.actionableProducts ?? 0;
+  const total = summary.totalProducts ?? coverage.totalProducts ?? 0;
+  const activeSources = summary.activeSources ?? 0;
+  const enabledSources = summary.enabledSources ?? 0;
+  const healthCounts = summary.sourceHealth || {};
+  const degraded = healthCounts.degraded || 0;
+  const down = healthCounts.down || 0;
+  const healthy = healthCounts.healthy || 0;
+  const unknown = healthCounts.unknown || 0;
+
+  qs("#summaryCoverage").textContent = `${score}%`;
+  qs("#summaryCoverageSub").textContent = `${actionable}/${total} actionable`;
+  qs("#summarySources").textContent = `${activeSources} active`;
+  qs("#summarySourcesSub").textContent = `${enabledSources} enabled`;
+
+  if (down > 0) {
+    qs("#summaryHealth").textContent = `${down} down`;
+  } else if (degraded > 0) {
+    qs("#summaryHealth").textContent = `${degraded} degraded`;
+  } else if (healthy > 0) {
+    qs("#summaryHealth").textContent = "healthy";
+  } else {
+    qs("#summaryHealth").textContent = "unknown";
+  }
+  qs("#summaryHealthSub").textContent = `${healthy} ok / ${degraded} degraded / ${unknown} unknown`;
+
+  qs("#summaryLastScan").textContent = formatTimestamp(summary.lastScanAt);
+  const hits = summary.stockHits || 0;
+  const restocks = summary.recentRestocks || 0;
+  qs("#summaryLastScanSub").textContent = `${summary.phase || "idle"} / ${summary.scanCount || 0} scans / ${hits} hits / ${restocks} recent`;
+}
+
+function renderCoverage(coverage = {}) {
+  const score = coverage.score || 0;
+  qs("#coverageScore").textContent = `${score}%`;
+  const fill = qs("#coverageFill");
+  fill.style.width = `${score}%`;
+  fill.style.background = score >= 67 ? "#2ecc71" : score >= 34 ? "#f1c40f" : "#e74c3c";
+
+  const detail = [
+    `${coverage.actionableProducts || 0}/${coverage.totalProducts || 0} products actionable`,
+  ];
+  const perRetailer = (coverage.retailers || [])
+    .filter((r) => r.enabled && r.supported)
+    .map((r) => `${r.name} ${r.withId}/${r.total}`);
+  if (perRetailer.length) detail.push(perRetailer.join(" / "));
+  qs("#coverageDetail").textContent = detail.join(" - ");
+
+  const root = qs("#coverageBreakdown");
+  clear(root);
+  const rows = [...(coverage.retailers || [])]
+    .filter((r) => r.enabled && r.supported)
+    .sort((a, b) => (b.withId || 0) - (a.withId || 0) || String(a.name).localeCompare(String(b.name)));
+  if (!rows.length) {
+    const note = document.createElement("div");
+    note.className = "meta";
+    note.textContent = "No enabled supported retailers are active.";
+    root.appendChild(note);
+    return;
+  }
+  for (const retailer of rows) {
+    const row = document.createElement("div");
+    row.className = "coverage-row";
+    const label = document.createElement("span");
+    label.textContent = retailer.name;
+    const miniBar = document.createElement("div");
+    miniBar.className = "mini-bar";
+    const miniFill = document.createElement("div");
+    miniFill.style.width = `${retailer.pct || 0}%`;
+    miniBar.appendChild(miniFill);
+    const count = document.createElement("strong");
+    count.textContent = `${retailer.withId}/${retailer.total}`;
+    row.append(label, miniBar, count);
+    root.appendChild(row);
+  }
+}
+
+const HEALTH_LABEL = {
+  OK: "ok",
+  NO_DATA: "no data (parser?)",
+  BLOCKED: "blocked",
+  ERROR: "error",
+  DISCOVERY_FAILED: "store search failed",
+  "": "not checked",
+};
+
+function renderHealth(healthList = [], retailers = []) {
+  const root = qs("#healthGrid");
+  clear(root);
+  const bySlug = {};
+  for (const h of healthList) bySlug[h.slug] = h;
+  const enabledRetailers = retailers
+    .filter((r) => r.enabled && r.supported)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  if (!enabledRetailers.length) {
+    const note = document.createElement("div");
+    note.className = "meta";
+    note.textContent = "No enabled supported sources.";
+    root.appendChild(note);
+    return;
+  }
+
+  for (const retailer of enabledRetailers) {
+    const h = bySlug[retailer.slug] || {
+      slug: retailer.slug,
+      state: "unknown",
+      last_status: "",
+      last_http_status: null,
+      last_success_ts: null,
+      last_check_ts: null,
+      last_items_found: 0,
+      last_detail: "",
+    };
+    const card = document.createElement("div");
+    card.className = `health-card health-${h.state || "unknown"}`;
+    const title = document.createElement("div");
+    title.className = "health-card-title";
+    const label = document.createElement("strong");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    label.append(dot, document.createTextNode(retailer.name || h.slug));
+    const statePill = document.createElement("span");
+    statePill.className = "pill";
+    statePill.textContent = h.state || "unknown";
+    title.append(label, statePill);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const bits = [HEALTH_LABEL[h.last_status] ?? h.last_status];
+    if (typeof h.last_http_status === "number") bits.push(`HTTP ${h.last_http_status}`);
+    if (typeof retailer.selectedProductIds === "number") bits.push(`${retailer.selectedProductIds} IDs`);
+    bits.push(`checked ${formatAgo(h.last_check_ts)}`);
+    bits.push(`last ok ${formatAgo(h.last_success_ts)}`);
+    if (h.last_items_found) bits.push(`${h.last_items_found} rows`);
+    meta.textContent = bits.filter(Boolean).join(" / ");
+
+    card.append(title, meta);
+    if (h.last_detail) {
+      const detail = document.createElement("div");
+      detail.className = "meta health-detail";
+      detail.textContent = h.last_detail.length > 180 ? `${h.last_detail.slice(0, 177)}...` : h.last_detail;
+      detail.title = h.last_detail;
+      card.appendChild(detail);
+    }
+    root.appendChild(card);
+  }
+}
+
+function renderRecentRestocks(rows = []) {
+  const root = qs("#recentRestocks");
+  clear(root);
+  qs("#restockCount").textContent = String(rows.length);
+  if (!rows.length) {
+    const note = document.createElement("div");
+    note.className = "meta";
+    note.textContent = "Nothing seen in stock yet. History builds as scans run.";
+    root.appendChild(note);
+    return;
+  }
+  for (const r of rows) {
+    const item = document.createElement("div");
+    item.className = "restock";
+    const title = document.createElement("strong");
+    title.textContent = r.productName || r.productKey;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const where = r.storeId && r.storeId !== "_online_" ? `store ${r.storeId}` : "online";
+    meta.textContent = `${r.retailerName || r.retailer} / ${where} / seen ${formatAgo(r.lastInStockTs)} / ${r.inStockCount}x`;
+    item.append(title, meta);
+    root.appendChild(item);
+  }
+}
+
 function renderStatus(payload) {
   const config = payload.config || {};
   const runner = payload.runner || {};
@@ -336,8 +671,14 @@ function renderStatus(payload) {
   const configLabel = config.configMissing ? "example config loaded; save config.yaml to run scanners" : "config.yaml loaded";
   const okLabel = payload.ok ? "ready" : "needs attention";
   qs("#statusText").textContent = `${okLabel} | ${configLabel}`;
+  renderSummary(payload.summary || {}, payload.coverage || {});
+  renderCoverage(payload.coverage || {});
+  renderHealth(payload.health || [], payload.retailers || []);
+  renderRecentRestocks(payload.recentRestocks || []);
   renderRunner(runner, config);
+  renderStoreDiagnostics(runner.storeDiagnostics || [], config);
   renderProducts(payload.products || []);
+  renderProductIdOptions(payload.retailers || [], payload.products || []);
   const runnerBoard = runner.stockBoard || [];
   renderStockBoard(runnerBoard);
   if (!preserveConfigInputs) {
@@ -347,13 +688,11 @@ function renderStatus(payload) {
   renderErrors(payload.errors || [], runner.warnings || []);
   if (!runnerBoard.length && Object.keys(runner.stores || {}).length) {
     renderStores(runner.stores || {});
+  } else {
+    renderStores({});
   }
-  if ((runner.lastAlerts || []).length) {
-    renderAlerts(runner.lastAlerts || []);
-  }
-  if (runner.stdout || runner.stderr) {
-    renderLog(runner);
-  }
+  renderAlerts(runner.lastAlerts || []);
+  renderLog(runner);
 }
 
 function collectConfig() {
@@ -390,9 +729,20 @@ async function runAction(path, body = {}, refreshAfter = true) {
     renderStockBoard(board);
     if (!board.length) {
       renderStores(payload.stores || payload.runner?.stores || {});
+    } else {
+      renderStores({});
     }
     renderAlerts(payload.alerts || payload.runner?.lastAlerts || []);
     renderLog(payload);
+    if (payload.coverage) renderCoverage(payload.coverage);
+    if (payload.summary || payload.coverage) renderSummary(payload.summary || {}, payload.coverage || {});
+    if (payload.storeDiagnostics || payload.runner?.storeDiagnostics) {
+      renderStoreDiagnostics(payload.storeDiagnostics || payload.runner?.storeDiagnostics || [], {
+        routeRadiusMiles: Number(qs("#routeRadiusMiles").value),
+      });
+    }
+    if (payload.health) renderHealth(payload.health, payload.retailers || Object.values(state.retailers));
+    if (payload.recentRestocks) renderRecentRestocks(payload.recentRestocks);
     if (refreshAfter) {
       await refresh();
     }
@@ -419,7 +769,30 @@ qs("#configForm").addEventListener("change", () => {
   state.configDirty = true;
 });
 
+qs("#productIdForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = qs("#idSaveStatus");
+  status.textContent = "";
+  const payload = await runAction(
+    "/api/product-id",
+    {
+      retailer: qs("#idRetailer").value,
+      productKey: qs("#idProduct").value,
+      urlOrId: qs("#idValue").value,
+    },
+    false,
+  );
+  if (payload.ok) {
+    status.textContent = payload.message || "Product ID saved.";
+    qs("#idValue").value = "";
+    renderStatus(payload.currentStatus || (await api("/api/status")));
+  } else {
+    status.textContent = (payload.errors || ["Could not save product ID."])[0];
+  }
+});
+
 qs("#refreshBtn").addEventListener("click", refresh);
+qs("#safeDemoBtn").addEventListener("click", () => runAction("/api/safe-demo", {}, false));
 qs("#dryRunBtn").addEventListener("click", () => runAction("/api/dry-run", {}, false));
 qs("#scanOnceBtn").addEventListener("click", () => runAction("/api/scan-once", { notify: false }, false));
 qs("#startBtn").addEventListener("click", () => runAction("/api/start", { notify: true }));

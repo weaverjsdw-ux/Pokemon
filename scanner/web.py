@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import mimetypes
+import re
 import sys
 import threading
 import time
@@ -24,6 +25,9 @@ from urllib.parse import urlparse
 import yaml
 
 from . import config as cfg_mod
+from . import coverage as coverage_mod
+from . import health
+from .identifiers import extract_id, field_for_slug, set_product_id
 from .main import (
     build_corridor,
     check_config,
@@ -31,38 +35,19 @@ from .main import (
     discover_stores,
     enabled_retailer_slugs,
     run_pass,
+    safe_demo_results,
+    safe_demo_stores,
 )
 from .notify import Notifier, StockAlert
+from .priority import product_priority
 from .retailers import ALL as RETAILER_REGISTRY
 from .retailers.base import StockResult, Store
 from .state import State
 
 ASSETS_DIR = Path(__file__).resolve().parent / "web_assets"
 EXAMPLE_CONFIG_PATH = cfg_mod.ROOT / "config.example.yaml"
-PRIORITY_KEYWORDS = (
-    "prismatic",
-    "151",
-    "surging sparks",
-    "journey together",
-    "evolving skies",
-    "booster bundle",
-    "booster box",
-    "elite trainer box",
-    "ultra-premium",
-    "premium collection",
-    "special collection",
-)
 POSITIVE_STATUSES = {"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"}
-
-
-def _product_priority(product: dict[str, Any]) -> tuple[str, int]:
-    text = " ".join(
-        str(product.get(field, ""))
-        for field in ("name", "set", "type")
-    ).lower()
-    if any(keyword in text for keyword in PRIORITY_KEYWORDS):
-        return "High priority", 100
-    return "Standard", 10
+LAST_STORE_DIAGNOSTICS: list[dict[str, Any]] = []
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -85,6 +70,19 @@ def _selected_products_or_empty(cfg: cfg_mod.Config) -> dict[str, dict[str, Any]
         return {}
 
 
+def _api_key_missing(cls: type, rcfg: cfg_mod.RetailerCfg) -> bool:
+    return bool(getattr(cls, "api_key_required", False) and not rcfg.api_key.strip())
+
+
+def _query_ready(cls: type, rcfg: cfg_mod.RetailerCfg, product_ids: int) -> bool:
+    return (
+        bool(rcfg.enabled)
+        and bool(getattr(cls, "supported", True))
+        and product_ids > 0
+        and not _api_key_missing(cls, rcfg)
+    )
+
+
 def _retailer_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     selected = _selected_products_or_empty(cfg)
     retailers = []
@@ -96,6 +94,7 @@ def _retailer_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
             for product in selected.values()
             if any(str(product.get(field) or "").strip() for field in fields)
         )
+        missing_api_key = _api_key_missing(cls, rcfg)
         retailers.append(
             {
                 "slug": slug,
@@ -107,6 +106,9 @@ def _retailer_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
                 "productIdFields": list(fields),
                 "selectedProductIds": product_ids,
                 "apiKeySet": bool(rcfg.api_key),
+                "apiKeyRequired": bool(getattr(cls, "api_key_required", False)),
+                "missingApiKey": missing_api_key,
+                "queryReady": _query_ready(cls, rcfg, product_ids),
             }
         )
     return retailers
@@ -117,7 +119,7 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     selected_keys = set(selected)
     products: list[dict[str, Any]] = []
     for key, product in cfg.products.items():
-        priority, priority_score = _product_priority(product)
+        priority, priority_score = product_priority(product)
         selected_for_scan = key in selected_keys
         retailer_entries = []
         for slug, cls in RETAILER_REGISTRY.items():
@@ -129,7 +131,26 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
             }
             rcfg = cfg.retailers.get(slug, cfg_mod.RetailerCfg())
             supported = bool(getattr(cls, "supported", True))
-            active = selected_for_scan and bool(rcfg.enabled) and supported and bool(ids)
+            missing_api_key = _api_key_missing(cls, rcfg)
+            active = (
+                selected_for_scan
+                and bool(rcfg.enabled)
+                and supported
+                and bool(ids)
+                and not missing_api_key
+            )
+            if not supported:
+                blocked_reason = getattr(cls, "unsupported_reason", "") or "unsupported"
+            elif missing_api_key and ids:
+                blocked_reason = "missing API key"
+            elif bool(rcfg.enabled) and selected_for_scan and not ids:
+                blocked_reason = "missing product ID"
+            elif not rcfg.enabled:
+                blocked_reason = "retailer disabled"
+            elif not selected_for_scan:
+                blocked_reason = "product not selected"
+            else:
+                blocked_reason = ""
             retailer_entries.append(
                 {
                     "slug": slug,
@@ -139,6 +160,8 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
                     "onlineOnly": bool(getattr(cls, "online_only", False)),
                     "ids": ids,
                     "active": active,
+                    "missingApiKey": missing_api_key,
+                    "blockedReason": blocked_reason,
                 }
             )
 
@@ -180,18 +203,105 @@ def _config_summary(cfg: cfg_mod.Config, config_missing: bool) -> dict[str, Any]
     }
 
 
+def _recent_restocks_payload(cfg: cfg_mod.Config, limit: int = 10) -> list[dict[str, Any]]:
+    """Last few products seen in stock (restock memory), labelled for display."""
+    try:
+        rows = State().recent_restocks(limit)
+    except Exception:
+        return []
+    product_names = {k: v.get("name", k) for k, v in cfg.products.items()}
+    retailer_names = {slug: cls.name for slug, cls in RETAILER_REGISTRY.items()}
+    for r in rows:
+        r["productName"] = product_names.get(r["productKey"], r["productKey"])
+        r["retailerName"] = retailer_names.get(r["retailer"], r["retailer"])
+    return rows
+
+
+def _health_payload() -> list[dict[str, Any]]:
+    rows = health.snapshot()
+    if rows:
+        return rows
+    try:
+        return State().source_health_snapshot()
+    except Exception:
+        return []
+
+
+def _summary_payload(
+    cfg: cfg_mod.Config,
+    coverage: dict[str, Any],
+    retailers: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+    health_rows: list[dict[str, Any]],
+    recent_restocks: list[dict[str, Any]],
+    runner: dict[str, Any],
+) -> dict[str, Any]:
+    """Compact dashboard summary derived from the detailed API payloads."""
+    health_by_slug = {row.get("slug"): row for row in health_rows}
+    health_counts = {"healthy": 0, "degraded": 0, "down": 0, "unknown": 0}
+    for retailer in retailers:
+        if not (retailer.get("enabled") and retailer.get("supported")):
+            continue
+        state = str(health_by_slug.get(retailer["slug"], {}).get("state") or "unknown")
+        if state not in health_counts:
+            state = "unknown"
+        health_counts[state] += 1
+
+    stock_hits = 0
+    for retailer in runner.get("stockBoard") or []:
+        for location in retailer.get("locations") or []:
+            stock_hits += int(location.get("inStockCount") or 0)
+
+    return {
+        "coverageScore": int(coverage.get("score") or 0),
+        "actionableProducts": int(coverage.get("actionableProducts") or 0),
+        "totalProducts": int(coverage.get("totalProducts") or 0),
+        "selectedProducts": int(coverage.get("totalProducts") or 0),
+        "scannedProducts": sum(1 for product in products if product.get("scanned")),
+        "enabledSources": sum(
+            1 for retailer in retailers if retailer.get("enabled") and retailer.get("supported")
+        ),
+        "activeSources": sum(
+            1
+            for retailer in retailers
+            if retailer.get("queryReady")
+        ),
+        "sourceHealth": health_counts,
+        "stockHits": stock_hits,
+        "recentRestocks": len(recent_restocks),
+        "lastScanAt": runner.get("lastScanAt"),
+        "nextScanAt": runner.get("nextScanAt"),
+        "scanCount": int(runner.get("scanCount") or 0),
+        "running": bool(runner.get("running")),
+        "phase": runner.get("phase") or "idle",
+        "pollIntervalSeconds": cfg.poll_interval_seconds,
+    }
+
+
 def status_payload() -> dict[str, Any]:
     try:
         cfg, config_missing = _load_current_config()
         errors = config_errors(cfg)
+        coverage = coverage_mod.coverage_report(cfg)
+        retailers = _retailer_payload(cfg)
+        products = _product_payload(cfg)
+        health_rows = _health_payload()
+        recent_restocks = _recent_restocks_payload(cfg)
+        runner = RUNNER.snapshot()
         status = HTTPStatus.OK
         payload: dict[str, Any] = {
             "ok": not errors and not config_missing,
             "config": _config_summary(cfg, config_missing),
-            "retailers": _retailer_payload(cfg),
-            "products": _product_payload(cfg),
+            "coverage": coverage,
+            "retailers": retailers,
+            "products": products,
+            "health": health_rows,
+            "recentRestocks": recent_restocks,
+            "summary": _summary_payload(
+                cfg, coverage, retailers, products, health_rows, recent_restocks, runner
+            ),
             "errors": errors,
-            "runner": RUNNER.snapshot(),
+            "runner": runner,
         }
     except SystemExit as exc:
         status = HTTPStatus.BAD_REQUEST
@@ -275,6 +385,41 @@ def save_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "message": "config.yaml saved", "currentStatus": status_payload()}
 
 
+def save_product_id_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    slug = str(payload.get("retailer") or "").strip().lower()
+    product_key = str(payload.get("productKey") or "").strip()
+    url_or_id = str(payload.get("urlOrId") or "").strip()
+
+    if slug not in RETAILER_REGISTRY:
+        return {"ok": False, "errors": [f"Unknown retailer: {slug or '(blank)'}"]}
+    field = field_for_slug(slug)
+    if not field:
+        return {"ok": False, "errors": [f"{slug} does not have a supported catalog ID field."]}
+    value = extract_id(slug, url_or_id)
+    if not value:
+        return {
+            "ok": False,
+            "errors": [f"Could not extract a {slug} ID from the provided value."],
+        }
+
+    try:
+        text = cfg_mod.PRODUCTS_PATH.read_text(encoding="utf-8")
+        updated = set_product_id(text, product_key, field, value)
+        cfg_mod.PRODUCTS_PATH.write_text(updated, encoding="utf-8")
+    except KeyError as exc:
+        return {"ok": False, "errors": [str(exc).strip('"')]}
+    except OSError as exc:
+        return {"ok": False, "errors": [_safe_error_text(str(exc))]}
+
+    return {
+        "ok": True,
+        "message": f"Saved {product_key}.{field}",
+        "field": field,
+        "value": value,
+        "currentStatus": status_payload(),
+    }
+
+
 def _capture_output(fn):
     out = io.StringIO()
     err = io.StringIO()
@@ -330,14 +475,26 @@ def _warning_lines(text: str) -> list[str]:
     return warnings
 
 
+def _safe_log_text(text: str) -> str:
+    """Redact coordinates and query strings before logs reach the browser."""
+    text = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?...", text)
+    return re.sub(
+        r"\b(home|work): \([-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\)",
+        r"\1: (redacted)",
+        text,
+    )
+
+
+def _safe_error_text(text: str) -> str:
+    return _safe_log_text(str(text))
+
+
 def _stores_payload(stores_by_retailer: dict[str, list[Store]]) -> dict[str, list[dict[str, Any]]]:
     return {
         slug: [
             {
                 "storeId": store.store_id,
                 "name": store.name,
-                "lat": store.lat,
-                "lng": store.lng,
                 "distanceMiles": store.distance_miles,
             }
             for store in stores
@@ -378,6 +535,21 @@ def _stock_board_payload(
         ): result
         for result in results
     }
+
+    def missing_status(slug: str) -> tuple[str, str]:
+        row = health.get(slug) or {}
+        last_status = row.get("last_status") or ""
+        detail = str(row.get("last_detail") or "")
+        if last_status == "BLOCKED":
+            return "BLOCKED", detail or "Retailer blocked or rate-limited this check."
+        if last_status == "ERROR":
+            return "SOURCE_ERROR", detail or "Retailer check failed."
+        if last_status == "NO_DATA":
+            return "NO_DATA", detail or "Retailer returned no parseable inventory rows."
+        if last_status == "DISCOVERY_FAILED":
+            return "DISCOVERY_FAILED", detail or "Store discovery failed."
+        return "NOT_CHECKED", "No inventory row returned for this product on the last scan."
+
     board: list[dict[str, Any]] = []
     for slug, RClass in RETAILER_REGISTRY.items():
         rcfg = cfg.retailers.get(slug)
@@ -423,11 +595,12 @@ def _stock_board_payload(
             for product in active_products:
                 result = result_map.get((slug, store_id, product["key"]))
                 if result is None:
-                    status = "UNKNOWN"
+                    status, status_reason = missing_status(slug)
                     price = ""
                     url = ""
                 else:
                     status = result.status
+                    status_reason = ""
                     price = result.price
                     url = result.url
                 statuses.append(
@@ -437,6 +610,7 @@ def _stock_board_payload(
                         "priority": product["priority"],
                         "priorityScore": product["priorityScore"],
                         "status": status,
+                        "statusReason": status_reason,
                         "price": price,
                         "url": url,
                     }
@@ -472,6 +646,41 @@ def _stock_board_payload(
     return board
 
 
+def _online_only_diagnostic(cfg: cfg_mod.Config, slug: str) -> dict[str, Any]:
+    RClass = RETAILER_REGISTRY[slug]
+    return {
+        "slug": slug,
+        "name": RClass.name,
+        "onlineOnly": True,
+        "corridorRadiusMiles": cfg.route_radius_miles,
+        "candidateSearchRadiusMiles": 0,
+        "centersPlanned": 0,
+        "centersQueried": 0,
+        "candidateStores": 0,
+        "uniqueCandidateStores": 0,
+        "keptStores": 0,
+        "filteredOutStores": 0,
+        "status": "skipped",
+        "skippedReason": "online_only",
+        "errors": [],
+    }
+
+
+def _set_store_diagnostics(rows: list[dict[str, Any]]) -> None:
+    global LAST_STORE_DIAGNOSTICS
+    LAST_STORE_DIAGNOSTICS = [dict(row) for row in rows]
+
+
+def _get_store_diagnostics() -> list[dict[str, Any]]:
+    return [dict(row) for row in LAST_STORE_DIAGNOSTICS]
+
+
+def _prepare_scan_capture(cfg: cfg_mod.Config) -> tuple[dict[str, list[Store]], list[dict[str, Any]]]:
+    _set_store_diagnostics([])
+    stores = _prepare_scan(cfg)
+    return stores, _get_store_diagnostics()
+
+
 def _prepare_scan(cfg: cfg_mod.Config) -> dict[str, list[Store]]:
     errors = config_errors(cfg)
     if errors:
@@ -479,9 +688,13 @@ def _prepare_scan(cfg: cfg_mod.Config) -> dict[str, list[Store]]:
     enabled_slugs = enabled_retailer_slugs(cfg)
     needs_route = any(not RETAILER_REGISTRY[slug].online_only for slug in enabled_slugs)
     if not needs_route:
+        _set_store_diagnostics([_online_only_diagnostic(cfg, slug) for slug in enabled_slugs])
         return {slug: [] for slug in enabled_slugs}
     home, work, polyline = build_corridor(cfg)
-    return discover_stores(cfg, home, work, polyline)
+    diagnostics: list[dict[str, Any]] = []
+    stores = discover_stores(cfg, home, work, polyline, diagnostics=diagnostics)
+    _set_store_diagnostics(diagnostics)
+    return stores
 
 
 def dry_run_payload() -> dict[str, Any]:
@@ -490,15 +703,107 @@ def dry_run_payload() -> dict[str, Any]:
         return {"ok": False, "errors": ["Save config.yaml before running scanners."]}
 
     try:
-        stores, stdout, stderr = _capture_output(lambda: _prepare_scan(cfg))
+        (stores, store_diagnostics), stdout, stderr = _capture_output(
+            lambda: _prepare_scan_capture(cfg)
+        )
     except Exception as exc:
-        return {"ok": False, "errors": [str(exc)]}
+        return {"ok": False, "errors": [_safe_error_text(str(exc))]}
+    warnings = _warning_lines(stderr)
+    safe_stdout = _safe_log_text(stdout)
+    safe_stderr = _safe_log_text(stderr)
+    stores_payload = _stores_payload(stores)
+    RUNNER._update(
+        stores=stores_payload,
+        warnings=warnings,
+        stdout=safe_stdout,
+        stderr=safe_stderr,
+        stockBoard=[],
+        lastResults=[],
+        lastAlerts=[],
+        storeDiagnostics=store_diagnostics,
+        phase="idle",
+    )
+    coverage = coverage_mod.coverage_report(cfg)
+    retailers = _retailer_payload(cfg)
+    products = _product_payload(cfg)
+    health_rows = _health_payload()
+    recent_restocks = _recent_restocks_payload(cfg)
+    runner = RUNNER.snapshot()
     return {
         "ok": True,
-        "stores": _stores_payload(stores),
-        "warnings": _warning_lines(stderr),
-        "stdout": stdout,
-        "stderr": stderr,
+        "coverage": coverage,
+        "health": health_rows,
+        "recentRestocks": recent_restocks,
+        "summary": _summary_payload(
+            cfg, coverage, retailers, products, health_rows, recent_restocks, runner
+        ),
+        "retailers": retailers,
+        "stores": stores_payload,
+        "storeDiagnostics": store_diagnostics,
+        "warnings": warnings,
+        "stdout": safe_stdout,
+        "stderr": safe_stderr,
+    }
+
+
+def safe_demo_payload() -> dict[str, Any]:
+    cfg, config_missing = _load_current_config()
+    if config_missing:
+        return {"ok": False, "errors": ["Save config.yaml before running scanners."]}
+    errors = config_errors(cfg)
+    if errors:
+        return {"ok": False, "errors": errors}
+
+    try:
+        stores, store_diagnostics = safe_demo_stores(cfg)
+        results = safe_demo_results(cfg, stores)
+        checked_at = int(time.time())
+    except Exception as exc:
+        return {"ok": False, "errors": [_safe_error_text(str(exc))]}
+
+    stores_payload = _stores_payload(stores)
+    stock_board = _stock_board_payload(cfg, stores, results, checked_at)
+    last_results = [_result_payload(result, checked_at) for result in results]
+    warnings = [
+        "Safe demo only: synthetic stores and out-of-stock rows; no geocoding, routing, retailer, or alert network calls were made."
+    ]
+    RUNNER._update(
+        phase="idle",
+        running=False,
+        lastScanAt=checked_at,
+        nextScanAt=None,
+        lastAlerts=[],
+        lastResults=last_results,
+        stockBoard=stock_board,
+        warnings=warnings,
+        stores=stores_payload,
+        storeDiagnostics=store_diagnostics,
+        stdout="safe demo: local-only synthetic scanner state\n",
+        stderr="",
+    )
+    coverage = coverage_mod.coverage_report(cfg)
+    retailers = _retailer_payload(cfg)
+    products = _product_payload(cfg)
+    health_rows = _health_payload()
+    recent_restocks = _recent_restocks_payload(cfg)
+    runner = RUNNER.snapshot()
+    return {
+        "ok": True,
+        "coverage": coverage,
+        "health": health_rows,
+        "recentRestocks": recent_restocks,
+        "summary": _summary_payload(
+            cfg, coverage, retailers, products, health_rows, recent_restocks, runner
+        ),
+        "retailers": retailers,
+        "stores": stores_payload,
+        "storeDiagnostics": store_diagnostics,
+        "stockBoard": stock_board,
+        "lastResults": last_results,
+        "alerts": [],
+        "warnings": warnings,
+        "stdout": "safe demo: local-only synthetic scanner state\n",
+        "stderr": "",
     }
 
 
@@ -525,7 +830,9 @@ def scan_once_payload(notify: bool = False) -> dict[str, Any]:
         return {"ok": False, "errors": ["Save config.yaml before running scanners."]}
 
     try:
-        stores, setup_stdout, setup_stderr = _capture_output(lambda: _prepare_scan(cfg))
+        (stores, store_diagnostics), setup_stdout, setup_stderr = _capture_output(
+            lambda: _prepare_scan_capture(cfg)
+        )
         notifier = CapturingNotifier(cfg, forward=notify)
         state = State()
         results, scan_stdout, scan_stderr = _capture_output(
@@ -533,17 +840,54 @@ def scan_once_payload(notify: bool = False) -> dict[str, Any]:
         )
         checked_at = int(time.time())
     except Exception as exc:
-        return {"ok": False, "errors": [str(exc)]}
+        return {"ok": False, "errors": [_safe_error_text(str(exc))]}
+
+    stores_payload = _stores_payload(stores)
+    stock_board = _stock_board_payload(cfg, stores, results, checked_at)
+    last_results = [_result_payload(result, checked_at) for result in results]
+    alerts = [_alert_payload(alert) for alert in notifier.alerts]
+    warnings = _warning_lines(setup_stderr + scan_stderr)
+    safe_stdout = _safe_log_text(setup_stdout + scan_stdout)
+    safe_stderr = _safe_log_text(setup_stderr + scan_stderr)
+    RUNNER._update(
+        phase="idle",
+        running=False,
+        lastScanAt=checked_at,
+        nextScanAt=None,
+        scanCount=int(RUNNER.snapshot().get("scanCount") or 0) + 1,
+        lastAlerts=alerts[-25:],
+        lastResults=last_results,
+        stockBoard=stock_board,
+        warnings=warnings,
+        stores=stores_payload,
+        storeDiagnostics=store_diagnostics,
+        stdout=safe_stdout,
+        stderr=safe_stderr,
+    )
+    coverage = coverage_mod.coverage_report(cfg)
+    retailers = _retailer_payload(cfg)
+    products = _product_payload(cfg)
+    health_rows = _health_payload()
+    recent_restocks = _recent_restocks_payload(cfg)
+    runner = RUNNER.snapshot()
 
     return {
         "ok": True,
-        "stores": _stores_payload(stores),
-        "stockBoard": _stock_board_payload(cfg, stores, results, checked_at),
-        "lastResults": [_result_payload(result, checked_at) for result in results],
-        "alerts": [_alert_payload(alert) for alert in notifier.alerts],
-        "warnings": _warning_lines(setup_stderr + scan_stderr),
-        "stdout": setup_stdout + scan_stdout,
-        "stderr": setup_stderr + scan_stderr,
+        "coverage": coverage,
+        "health": health_rows,
+        "recentRestocks": recent_restocks,
+        "summary": _summary_payload(
+            cfg, coverage, retailers, products, health_rows, recent_restocks, runner
+        ),
+        "retailers": retailers,
+        "stores": stores_payload,
+        "storeDiagnostics": store_diagnostics,
+        "stockBoard": stock_board,
+        "lastResults": last_results,
+        "alerts": alerts,
+        "warnings": warnings,
+        "stdout": safe_stdout,
+        "stderr": safe_stderr,
     }
 
 
@@ -564,6 +908,7 @@ class ScannerRunner:
             "lastAlerts": [],
             "lastResults": [],
             "stockBoard": [],
+            "storeDiagnostics": [],
             "warnings": [],
             "stores": {},
             "stdout": "",
@@ -599,6 +944,7 @@ class ScannerRunner:
                     "lastAlerts": [],
                     "lastResults": [],
                     "stockBoard": [],
+                    "storeDiagnostics": [],
                     "warnings": [],
                     "stdout": "",
                     "stderr": "",
@@ -626,11 +972,14 @@ class ScannerRunner:
             interval = max(60, cfg.poll_interval_seconds)
             self._update(intervalSeconds=interval)
             self._update(phase="discovering")
-            stores, setup_stdout, setup_stderr = _capture_output(lambda: _prepare_scan(cfg))
+            (stores, store_diagnostics), setup_stdout, setup_stderr = _capture_output(
+                lambda: _prepare_scan_capture(cfg)
+            )
             self._update(
                 stores=_stores_payload(stores),
-                stdout=setup_stdout,
-                stderr=setup_stderr,
+                storeDiagnostics=store_diagnostics,
+                stdout=_safe_log_text(setup_stdout),
+                stderr=_safe_log_text(setup_stderr),
                 warnings=_warning_lines(setup_stderr),
                 phase="scanning",
             )
@@ -654,15 +1003,20 @@ class ScannerRunner:
                     ],
                     stockBoard=_stock_board_payload(cfg, stores, results, now),
                     warnings=_warning_lines(setup_stderr + scan_stderr),
-                    stdout=setup_stdout + scan_stdout,
-                    stderr=setup_stderr + scan_stderr,
+                    stdout=_safe_log_text(setup_stdout + scan_stdout),
+                    stderr=_safe_log_text(setup_stderr + scan_stderr),
                     phase="sleeping",
                 )
                 if self._stop.wait(interval):
                     break
                 self._update(phase="scanning")
         except Exception as exc:
-            self._update(lastError=str(exc), phase="error", running=False, nextScanAt=None)
+            self._update(
+                lastError=_safe_error_text(str(exc)),
+                phase="error",
+                running=False,
+                nextScanAt=None,
+            )
             return
         self._update(phase="idle", running=False, nextScanAt=None)
 
@@ -709,8 +1063,14 @@ class WebHandler(BaseHTTPRequestHandler):
         if path == "/api/config":
             self._send_json(save_config_payload(payload))
             return
+        if path == "/api/product-id":
+            self._send_json(save_product_id_payload(payload))
+            return
         if path == "/api/dry-run":
             self._send_json(dry_run_payload())
+            return
+        if path == "/api/safe-demo":
+            self._send_json(safe_demo_payload())
             return
         if path == "/api/scan-once":
             self._send_json(scan_once_payload(notify=bool(payload.get("notify", False))))

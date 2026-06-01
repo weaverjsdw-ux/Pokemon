@@ -1,15 +1,18 @@
 :root {
   color-scheme: dark;
-  --bg: #11140f;
-  --panel: #1c2119;
-  --panel-2: #242b21;
-  --text: #f4f6ef;
-  --muted: #b7c0ad;
-  --line: #3a4434;
+  --bg: #101114;
+  --panel: #181c21;
+  --panel-2: #222832;
+  --panel-3: #12161c;
+  --text: #f4f6f8;
+  --muted: #aeb8c4;
+  --line: #343c47;
   --accent: #e1be4b;
   --accent-2: #62b884;
+  --info: #6da7ff;
+  --warning: #f1c40f;
   --danger: #f07070;
-  --button: #315f42;
+  --button: #28624c;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -34,18 +37,20 @@ body {
   border: 1px solid var(--line);
   background: var(--panel);
   border-radius: 8px;
+  min-width: 0;
 }
 
 .topbar {
-  min-height: 128px;
+  min-height: 104px;
   display: flex;
   justify-content: space-between;
   gap: 20px;
   align-items: center;
-  padding: 22px;
+  padding: 18px;
 }
 
-.topbar + .panel,
+.topbar + .summary-strip,
+.summary-strip + .panel,
 .panel + .panel,
 .panel + .grid {
   margin-top: 16px;
@@ -58,7 +63,7 @@ p {
 }
 
 h1 {
-  font-size: clamp(28px, 4vw, 52px);
+  font-size: clamp(26px, 3vw, 38px);
   line-height: 1;
 }
 
@@ -110,7 +115,7 @@ button:disabled {
 }
 
 button.secondary {
-  background: #383f31;
+  background: #363c45;
 }
 
 input,
@@ -130,6 +135,36 @@ select {
   padding: 18px;
 }
 
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card {
+  min-height: 92px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px;
+  min-width: 0;
+}
+
+.summary-card span,
+.summary-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.summary-card strong {
+  display: block;
+  margin: 6px 0 4px;
+  color: var(--text);
+  font-size: clamp(20px, 2.6vw, 30px);
+  line-height: 1.05;
+}
+
 .panel-title {
   display: flex;
   align-items: center;
@@ -138,7 +173,8 @@ select {
   margin-bottom: 16px;
 }
 
-.config-panel {
+.config-panel,
+.id-panel {
   display: grid;
   gap: 12px;
 }
@@ -167,13 +203,64 @@ label {
   white-space: nowrap;
 }
 
+.coverage-bar {
+  height: 10px;
+  border-radius: 6px;
+  background: #2a303a;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.coverage-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent-2);
+  transition: width 0.3s ease;
+}
+
+.coverage-breakdown {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 2px;
+}
+
+.coverage-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.5fr) minmax(130px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.coverage-row strong {
+  color: var(--text);
+}
+
+.mini-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  overflow: hidden;
+}
+
+.mini-bar div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--info);
+}
+
 .retailer-list,
 .product-list,
 .stock-board,
 .stock-products,
 .stores,
 .alerts,
-.runner-stats {
+.runner-stats,
+.store-diagnostics,
+.health-grid,
+.restock-list {
   display: grid;
   gap: 10px;
 }
@@ -185,11 +272,108 @@ label {
 .store,
 .alert,
 .error,
-.notice {
+.notice,
+.discovery-card,
+.discovery-note,
+.health-card,
+.restock {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
   padding: 12px;
+  min-width: 0;
+}
+
+.store-diagnostics {
+  margin-bottom: 12px;
+}
+
+.discovery-heading,
+.discovery-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.discovery-card {
+  background: var(--panel-3);
+}
+
+.discovery-ready {
+  border-color: #4d8f60;
+}
+
+.discovery-blocked {
+  border-color: #755f2b;
+}
+
+.discovery-filtered_out,
+.discovery-empty {
+  border-color: #665b32;
+}
+
+.discovery-skipped {
+  border-color: #46515f;
+}
+
+.discovery-detail {
+  margin-top: 8px;
+}
+
+.discovery-note {
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.health-grid,
+.restock-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 12px;
+}
+
+.health-card,
+.restock {
+  overflow: hidden;
+}
+
+.health-card-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.health-card .dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+  background: #7d8794;
+}
+
+.health-healthy .dot {
+  background: var(--accent-2);
+}
+
+.health-degraded .dot {
+  background: var(--warning);
+}
+
+.health-down .dot {
+  background: var(--danger);
+}
+
+.health-unknown .dot {
+  background: #7d8794;
+}
+
+.health-detail,
+.health-card .meta,
+.restock .meta {
+  overflow-wrap: anywhere;
 }
 
 .retailer {
@@ -217,6 +401,13 @@ label {
   gap: 12px;
 }
 
+.product-header > div,
+.stock-retailer-title > div,
+.stock-location-head > div,
+.health-card-title > strong {
+  min-width: 0;
+}
+
 .scan-tags {
   display: flex;
   flex-wrap: wrap;
@@ -233,6 +424,9 @@ label {
   background: #263321;
   color: var(--text);
   font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .scan-tag.inactive {
@@ -305,6 +499,11 @@ label {
   background: #282516;
 }
 
+.stock-error {
+  border-color: #714343;
+  background: #2e1d1d;
+}
+
 .priority {
   border-color: #8c7437;
   color: var(--accent);
@@ -343,6 +542,13 @@ label {
 .meta {
   font-size: 12px;
   margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.product strong,
+.stock-chip strong,
+.summary-card strong {
+  overflow-wrap: anywhere;
 }
 
 .errors {
@@ -396,6 +602,7 @@ label {
   }
 
   .topbar,
+  .summary-strip,
   .grid,
   .row,
   .runner-stats {
@@ -412,5 +619,14 @@ label {
 
   button {
     flex: 1 1 130px;
+  }
+
+  .coverage-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .coverage-row .mini-bar {
+    grid-column: 1 / -1;
+    order: 3;
   }
 }

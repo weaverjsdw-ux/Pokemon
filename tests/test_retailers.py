@@ -9,6 +9,7 @@ import yaml
 from scanner.retailers import ALL
 from scanner.retailers.bestbuy import BestBuy
 from scanner.retailers.costco import Costco
+from scanner.retailers.gamestop import GameStop
 from scanner.retailers.samsclub import SamsClub
 from scanner.retailers.base import Retailer
 from scanner.retailers.base import Store
@@ -205,3 +206,36 @@ def test_target_find_stores_uses_place_and_geocodes_store_address(monkeypatch):
     assert captured["limit"] == 20
     assert stores[0].lat == 39.0
     assert stores[0].lng == -86.0
+
+
+def test_gamestop_find_stores_uses_shared_requests_module(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "stores": [
+                    {
+                        "ID": "42",
+                        "name": "#42",
+                        "city": "Indianapolis",
+                        "stateCode": "IN",
+                        "latitude": "39.0",
+                        "longitude": "-86.0",
+                    }
+                ]
+            }
+
+    def fake_get(url, **kwargs):
+        captured.update(kwargs["params"])
+        return FakeResponse()
+
+    monkeypatch.setattr("scanner.retailers.gamestop.requests.get", fake_get)
+
+    stores = GameStop().find_stores(39.1, -86.1, 5)
+
+    assert captured["latitude"] == 39.1
+    assert captured["longitude"] == -86.1
+    assert stores[0].store_id == "42"

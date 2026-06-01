@@ -35,6 +35,7 @@ class Retailer:
     supported: bool = True
     unsupported_reason: str = ""
     product_id_fields: tuple[str, ...] = ()
+    api_key_required: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
         self.opts = kwargs

@@ -14,6 +14,7 @@ from typing import Any, Iterable
 import requests
 
 from ..geocode import geocode
+from . import http
 from .base import Retailer, Store, StockResult
 
 REDSKY_KEY = os.getenv("TARGET_API_KEY", "9f36aeafbe60771e321a7cc95a78140772ab3e96")
@@ -40,8 +41,9 @@ class Target(Retailer):
         return "OUT"
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
-        resp = requests.get(
+        resp = http.get(
             "https://redsky.target.com/redsky_aggregations/v1/web/nearby_stores_v1",
+            retailer="target",
             params={
                 "key": REDSKY_KEY,
                 "limit": 20,
@@ -132,8 +134,9 @@ class Target(Retailer):
         include_out: bool = False,
     ) -> StockResult | None:
         try:
-            resp = requests.get(
+            resp = http.get(
                 "https://redsky.target.com/redsky_aggregations/v1/web/product_fulfillment_v1",
+                retailer="target",
                 params={
                     "key": REDSKY_KEY,
                     "tcin": tcin,

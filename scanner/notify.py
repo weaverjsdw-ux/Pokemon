@@ -3,9 +3,24 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import dataclass
 
 import requests
+
+
+def _ago(ts: int | None) -> str:
+    """Compact human delta like '3m', '2h', '4d' for a unix timestamp."""
+    if not ts:
+        return ""
+    delta = max(0, int(time.time()) - int(ts))
+    if delta < 90:
+        return f"{delta}s"
+    if delta < 5400:
+        return f"{delta // 60}m"
+    if delta < 36 * 3600:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
 
 
 @dataclass
@@ -17,14 +32,34 @@ class StockAlert:
     status: str              # "IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"
     url: str
     price: str = ""
+    # Decision-support context (all optional; render only when present).
+    priority: str = ""               # "High priority" | "Standard"
+    msrp: str = ""                   # catalog MSRP, if known
+    image_url: str = ""              # catalog image, if known
+    first_seen: int | None = None    # unix ts this combo was first observed
+    seen_count: int | None = None    # how many distinct restocks we've logged
+
+    def _context_bits(self) -> list[str]:
+        bits: list[str] = []
+        if self.priority and self.priority != "Standard":
+            bits.append(self.priority)
+        if self.seen_count and self.seen_count > 1:
+            bits.append(f"seen {self.seen_count}x")
+        if self.first_seen:
+            bits.append(f"first seen {_ago(self.first_seen)} ago")
+        return bits
 
     def line(self) -> str:
         dist = f" ({self.distance_miles:.1f} mi)" if self.distance_miles is not None else ""
         price = f" — {self.price}" if self.price else ""
+        if self.msrp and self.price and self.price != self.msrp:
+            price += f" (MSRP {self.msrp})"
+        context = self._context_bits()
+        ctx_line = f"\n   {' · '.join(context)}" if context else ""
         return (
             f"[{self.retailer}] {self.status}: {self.product_name}{price}\n"
             f"   {self.store_label}{dist}\n"
-            f"   {self.url}"
+            f"   {self.url}{ctx_line}"
         )
 
 
@@ -60,7 +95,18 @@ class Notifier:
                 {"name": "Distance", "value": f"{alert.distance_miles:.1f} mi", "inline": True}
             )
         if alert.price:
-            embed["fields"].append({"name": "Price", "value": alert.price, "inline": True})
+            price_value = alert.price
+            if alert.msrp and alert.msrp != alert.price:
+                price_value += f" (MSRP {alert.msrp})"
+            embed["fields"].append({"name": "Price", "value": price_value, "inline": True})
+        if alert.priority and alert.priority != "Standard":
+            embed["fields"].append({"name": "Priority", "value": alert.priority, "inline": True})
+        if alert.seen_count and alert.seen_count > 1:
+            embed["fields"].append(
+                {"name": "Restocks seen", "value": str(alert.seen_count), "inline": True}
+            )
+        if alert.image_url:
+            embed["thumbnail"] = {"url": alert.image_url}
         try:
             requests.post(
                 self.discord_webhook,

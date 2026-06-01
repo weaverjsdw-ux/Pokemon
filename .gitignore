@@ -18,6 +18,9 @@ logs/
 __pycache__/
 .pytest_cache/
 .pytest_tmp/
+.tmp_pytest_*/
+pytest-cache-files-*/
+.tmp_web_*.log
 *.py[cod]
 *$py.class
 .venv/

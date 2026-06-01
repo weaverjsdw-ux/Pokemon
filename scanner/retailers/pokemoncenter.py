@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 import requests
 
+from . import http
 from .base import Retailer, StockResult, Store
 
 UA = (
@@ -39,33 +40,52 @@ class PokemonCenter(Retailer):
     def check(
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, include_out=False)
+
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, include_out=True)
+
+    def _iter_products(
+        self, products: dict[str, dict[str, Any]], include_out: bool
+    ) -> Iterable[StockResult]:
         for key, prod in products.items():
             slug = (prod.get("pokemoncenter_slug") or "").strip()
             if not slug:
                 continue
-            url = f"https://www.pokemoncenter.com/product/{slug}"
-            try:
-                resp = requests.get(
-                    f"https://www.pokemoncenter.com/products/{slug}.js",
-                    headers={"User-Agent": UA, "Accept": "application/json"},
-                    timeout=15,
-                )
-            except requests.RequestException:
-                continue
-            if resp.status_code != 200:
-                continue
-            try:
-                data = resp.json()
-            except ValueError:
-                continue
-            if not self._available_from_product_json(data):
-                continue
-            yield StockResult(
-                store=None,
-                product_key=key,
-                product_name=prod.get("name", key),
-                status="ONLINE_IN_STOCK",
-                url=url,
-                price=self._price_from_product_json(data),
-            )
+            result = self._check_one(slug, prod, key, include_out=include_out)
+            if result is not None:
+                yield result
             time.sleep(0.4)
+
+    def _check_one(
+        self, slug: str, prod: dict[str, Any], key: str, include_out: bool = False
+    ) -> StockResult | None:
+        url = f"https://www.pokemoncenter.com/product/{slug}"
+        try:
+            resp = http.get(
+                f"https://www.pokemoncenter.com/products/{slug}.js",
+                retailer="pokemoncenter",
+                headers={"User-Agent": UA, "Accept": "application/json"},
+                timeout=15,
+            )
+        except requests.RequestException:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            data = resp.json()
+        except ValueError:
+            return None
+        available = self._available_from_product_json(data)
+        if not available and not include_out:
+            return None
+        return StockResult(
+            store=None,
+            product_key=key,
+            product_name=prod.get("name", key),
+            status="ONLINE_IN_STOCK" if available else "ONLINE_OUT",
+            url=url,
+            price=self._price_from_product_json(data),
+        )

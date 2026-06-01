@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 import requests
 
+from . import http
 from .base import Retailer, StockResult, Store
 
 
@@ -18,6 +19,7 @@ class BestBuy(Retailer):
     name = "Best Buy"
     online_only = True
     product_id_fields = ("bestbuy_sku",)
+    api_key_required = True
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -29,25 +31,41 @@ class BestBuy(Retailer):
     def check(
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
-        if not self.api_key:
-            return []
+        yield from self._iter_products(products, include_out=False)
 
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, include_out=True)
+
+    def _iter_products(
+        self, products: dict[str, dict[str, Any]], include_out: bool
+    ) -> Iterable[StockResult]:
+        if not self.api_key:
+            return
         for key, prod in products.items():
             sku = str(prod.get("bestbuy_sku") or "").strip()
             if not sku:
                 continue
-            result = self._check_one(sku, prod, key)
+            result = self._check_one(sku, prod, key, include_out=include_out)
             if result is not None:
                 yield result
             time.sleep(0.4)
 
-    def _check_one(self, sku: str, prod: dict[str, Any], key: str) -> StockResult | None:
+    def _check_one(
+        self, sku: str, prod: dict[str, Any], key: str, include_out: bool = False
+    ) -> StockResult | None:
         try:
-            resp = requests.get(
+            resp = http.get(
                 f"https://api.bestbuy.com/v1/products/{sku}.json",
+                retailer="bestbuy",
                 params={
                     "apiKey": self.api_key,
-                    "show": "sku,name,salePrice,onlineAvailability,url,addToCartUrl",
+                    # Official, stable fields per the Best Buy Products API.
+                    "show": (
+                        "sku,name,salePrice,regularPrice,onlineAvailability,"
+                        "inStoreAvailability,inStorePickup,url,addToCartUrl"
+                    ),
                 },
                 timeout=15,
             )
@@ -61,17 +79,23 @@ class BestBuy(Retailer):
         except ValueError:
             return None
 
-        if not data.get("onlineAvailability"):
+        online = bool(data.get("onlineAvailability"))
+        in_store = bool(data.get("inStoreAvailability"))
+        available = online or in_store
+        if not available and not include_out:
             return None
 
-        price_raw = data.get("salePrice")
-        price = f"${price_raw:.2f}" if isinstance(price_raw, (int, float)) else ""
+        sale = data.get("salePrice")
+        regular = data.get("regularPrice")
+        price = f"${sale:.2f}" if isinstance(sale, (int, float)) else (
+            f"${regular:.2f}" if isinstance(regular, (int, float)) else ""
+        )
         url = data.get("url") or data.get("addToCartUrl") or f"https://www.bestbuy.com/site/{sku}.p"
         return StockResult(
             store=None,
             product_key=key,
             product_name=prod.get("name", data.get("name") or key),
-            status="ONLINE_IN_STOCK",
+            status="ONLINE_IN_STOCK" if available else "ONLINE_OUT",
             url=url,
             price=price,
         )

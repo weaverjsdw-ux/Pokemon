@@ -12,6 +12,7 @@ from typing import Any, Iterable
 
 import requests
 
+from . import http
 from .base import Retailer, Store, StockResult
 
 UA = (
@@ -32,8 +33,9 @@ class GameStop(Retailer):
 
     def find_stores(self, lat: float, lng: float, radius_miles: float) -> list[Store]:
         try:
-            resp = requests.get(
+            resp = http.get(
                 "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-FindStores",
+                retailer="gamestop",
                 params={
                     "latitude": lat,
                     "longitude": lng,
@@ -72,6 +74,19 @@ class GameStop(Retailer):
     def check(
         self, products: dict[str, dict[str, Any]], stores: list[Store]
     ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, stores, include_out=False)
+
+    def inventory(
+        self, products: dict[str, dict[str, Any]], stores: list[Store]
+    ) -> Iterable[StockResult]:
+        yield from self._iter_products(products, stores, include_out=True)
+
+    def _iter_products(
+        self,
+        products: dict[str, dict[str, Any]],
+        stores: list[Store],
+        include_out: bool,
+    ) -> Iterable[StockResult]:
         for key, prod in products.items():
             pid = (prod.get("gamestop_pid") or "").strip()
             if not pid:
@@ -79,8 +94,9 @@ class GameStop(Retailer):
             url = f"https://www.gamestop.com/p/{pid}"
             for store in stores:
                 try:
-                    resp = requests.get(
+                    resp = http.get(
                         "https://www.gamestop.com/on/demandware.store/Sites-gamestop-Site/default/Stores-InventorySearch",
+                        retailer="gamestop",
                         params={"pid": pid, "storeId": store.store_id},
                         headers={"User-Agent": UA, "Accept": "application/json"},
                         timeout=15,
@@ -89,15 +105,21 @@ class GameStop(Retailer):
                     continue
                 if resp.status_code != 200:
                     continue
-                # GameStop returns HTML fragment with availability text; fall
-                # back to a regex on the response body.
+                # GameStop returns an HTML fragment with availability text;
+                # fall back to a regex on the response body.
                 text = resp.text or ""
                 if self._inventory_text_in_stock(text):
+                    status = "IN_STOCK"
+                elif include_out:
+                    status = "OUT"
+                else:
+                    status = ""
+                if status:
                     yield StockResult(
                         store=store,
                         product_key=key,
                         product_name=prod.get("name", key),
-                        status="IN_STOCK",
+                        status=status,
                         url=url,
                     )
                 time.sleep(0.4)
