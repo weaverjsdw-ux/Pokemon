@@ -10,12 +10,20 @@ nothing is live right now."""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "state.db"
+RUNTIME_DB_PATH = (
+    Path(os.getenv("LOCALAPPDATA") or tempfile.gettempdir())
+    / "PokemonScanner"
+    / "state.runtime.db"
+)
 
 # Statuses that count as "you could buy this right now".
 POSITIVE_STATUSES = frozenset({"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"})
@@ -28,10 +36,34 @@ class State:
         db_path: str | Path | None = None,
     ):
         self.cooldown = cooldown_seconds
-        path = Path(db_path) if db_path is not None else DB_PATH
+        env_path = os.getenv("POKEMON_SCANNER_STATE_DB")
+        path = Path(db_path) if db_path is not None else Path(env_path) if env_path else DB_PATH
+        self.db_path = path
+        try:
+            self.db = self._connect(path)
+        except sqlite3.OperationalError as exc:
+            if db_path is not None or env_path:
+                raise
+            fallback = RUNTIME_DB_PATH
+            print(
+                f"  ! state db open failed ({exc}); using {fallback}",
+                file=sys.stderr,
+            )
+            self.db_path = fallback
+            self.db = self._connect(fallback)
+
+    def _connect(self, path: Path) -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
-        self.db.execute(
+        db = sqlite3.connect(path, timeout=30)
+        try:
+            self._init_schema(db)
+        except Exception:
+            db.close()
+            raise
+        return db
+
+    def _init_schema(self, db: sqlite3.Connection) -> None:
+        db.execute(
             """
             CREATE TABLE IF NOT EXISTS last_alert (
                 retailer TEXT NOT NULL,
@@ -43,7 +75,7 @@ class State:
             )
             """
         )
-        self.db.execute(
+        db.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_history (
                 retailer TEXT NOT NULL,
@@ -59,7 +91,7 @@ class State:
             )
             """
         )
-        self.db.execute(
+        db.execute(
             """
             CREATE TABLE IF NOT EXISTS source_health (
                 slug TEXT PRIMARY KEY,
@@ -68,7 +100,7 @@ class State:
             )
             """
         )
-        self.db.commit()
+        db.commit()
 
     def should_alert(
         self, retailer: str, store_id: str, product_key: str, status: str

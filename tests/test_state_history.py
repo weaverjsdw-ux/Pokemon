@@ -1,6 +1,9 @@
 """Restock memory: stock_history accumulation in State."""
 from __future__ import annotations
 
+from pathlib import Path
+
+from scanner import state as state_mod
 from scanner.state import State
 
 
@@ -71,3 +74,52 @@ def test_source_health_snapshot_persists_between_state_instances(tmp_path):
 
     fresh = _state(tmp_path)
     assert fresh.source_health_snapshot() == [row]
+
+
+def test_default_state_falls_back_when_primary_db_cannot_open(tmp_path, monkeypatch):
+    primary = tmp_path / "state.db"
+    runtime = tmp_path / "state.runtime.db"
+    real_connect = state_mod.sqlite3.connect
+
+    def fake_connect(path, *args, **kwargs):
+        if Path(path) == primary:
+            raise state_mod.sqlite3.OperationalError("disk I/O error")
+        return real_connect(path, *args, **kwargs)
+
+    monkeypatch.setattr(state_mod, "DB_PATH", primary)
+    monkeypatch.setattr(state_mod, "RUNTIME_DB_PATH", runtime)
+    monkeypatch.setattr(state_mod.sqlite3, "connect", fake_connect)
+
+    s = State()
+
+    assert s.db_path == runtime
+    s.record_observation("target", "123", "booster", "OUT", ts=1000)
+    assert s.history_for("target", "123", "booster")["lastStatus"] == "OUT"
+
+
+def test_default_state_falls_back_when_primary_schema_init_fails(tmp_path, monkeypatch):
+    primary = tmp_path / "state.db"
+    runtime = tmp_path / "state.runtime.db"
+    real_connect = state_mod.sqlite3.connect
+
+    class FailingConnection:
+        def execute(self, *args, **kwargs):
+            raise state_mod.sqlite3.OperationalError("disk I/O error")
+
+        def close(self):
+            pass
+
+    def fake_connect(path, *args, **kwargs):
+        if Path(path) == primary:
+            return FailingConnection()
+        return real_connect(path, *args, **kwargs)
+
+    monkeypatch.setattr(state_mod, "DB_PATH", primary)
+    monkeypatch.setattr(state_mod, "RUNTIME_DB_PATH", runtime)
+    monkeypatch.setattr(state_mod.sqlite3, "connect", fake_connect)
+
+    s = State()
+
+    assert s.db_path == runtime
+    s.record_observation("target", "123", "booster", "OUT", ts=1000)
+    assert s.history_for("target", "123", "booster")["lastStatus"] == "OUT"
