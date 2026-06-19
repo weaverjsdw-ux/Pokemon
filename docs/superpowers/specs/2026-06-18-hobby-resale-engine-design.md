@@ -60,13 +60,13 @@ The naive read of an alert is a trap. Illustrative Costco Prismatic bundle (numb
 
 | | Value |
 |---|---|
-| Buy (incl. ~7% tax) | $43.00 |
+| Buy (incl. 7% tax) | $43.00 |
 | eBay sale price | $60.00 |
-| eBay fee (~13.5%, incl. payment processing) | −$8.10 |
+| eBay final value fee (13.25%, incl. payment processing) | −$7.95 |
 | eBay fixed per-order fee | −$0.40 |
-| Shipping (~2 lb) | −$8.00 |
-| **Net proceeds** | **$43.50** |
-| **Actual margin** | **~$0.50 (breakeven, not a flip)** |
+| Shipping (~2 lb, seller-paid) | −$8.00 |
+| **Net proceeds** | **$43.65** |
+| **Actual margin** | **~$0.65 (breakeven, not a flip)** |
 
 The gap between gross and net is the entire reason Phase 1 exists.
 
@@ -74,9 +74,9 @@ The gap between gross and net is the entire reason Phase 1 exists.
 
 **`scanner/market.py` — price-data backbone.**
 Implements the **PokemonPriceTracker API** as a price client conforming to the *existing* `resale.py` client interface:
-`estimate(product_key: str, product: dict, checked_at: int) -> dict` returning the same quote-row shape (`status`, value, confidence tier, source label) that `EbayResaleClient` / `PublicFallbackResaleClient` already produce (`resale.py:618-735`). It slots into `resale_client_from_config` (`resale.py:738`) as the preferred client, with the existing eBay/PriceCharting clients kept as fallback. Caching, staleness, and refresh cadence reuse **`ResalePriceCache`** (`scanner/resale.py:744`, instantiated in `web.py:55`) and `DEFAULT_INTERVAL_SECONDS` (`resale.py:17`).
+`estimate(product_key: str, product: dict, checked_at: int) -> dict` returning the same quote-row shape (`status`, value, confidence tier, source label) that `EbayResaleClient` / `PublicFallbackResaleClient` already produce (`resale.py:618-735`). It slots into `resale_client_from_config` (`resale.py:738`) as an **optional preferred client** — used when configured and within quota — with the existing eBay/PriceCharting clients always kept as fallback so scanning never depends on it. Caching, staleness, and refresh cadence reuse **`ResalePriceCache`** (`scanner/resale.py:744`, instantiated in `web.py:55`) and `DEFAULT_INTERVAL_SECONDS` (`resale.py:17`).
 
-*Vendor capabilities (verify exact limits at implementation):* PokemonPriceTracker provides **daily-updated** (≈24h cadence, not real-time) TCGplayer + eBay-sold comps, native **PSA/CGC/BGS graded comps**, and a **Parse-Title API**. The graded data and title parsing are required by Phase 3, so adopting it now avoids a later migration. CardMarket (EUR) data is Beta and paid-plan-only — not used in Phase 1. The **free tier is ~100 credits/day**, which is likely insufficient to poll the full catalog across multiple retailers; sizing request volume against the free-tier ceiling is a planning prerequisite (§7), and a paid tier may be required.
+*Vendor capabilities (verify exact limits at implementation):* PokemonPriceTracker provides **daily-updated** (≈24h cadence, not real-time) TCGplayer + eBay-sold comps, native **PSA/CGC/BGS graded comps**, and a **Parse-Title API**. The graded data and title parsing are required by Phase 3, so adopting it now avoids a later migration. CardMarket (EUR) data is Beta and paid-plan-only — not used in Phase 1. The **free tier is ~100 credits/day** — below full-catalog need: 22 products × 6 refreshes/day (the current 4-hour `DEFAULT_INTERVAL_SECONDS` cadence) = **132 calls/day**, before any Parse-Title calls. So on the free tier either (a) raise the market-cache TTL to **24h** (≤22 calls/day) and treat PPT as a **canary/test source on a few products**, or (b) move to a paid Standard tier to use it as the full-catalog preferred source. PPT is **optional-preferred, not required**: scanning must run fully without it.
 
 *Product-key → API-query mapping (load-bearing — resolved here, not deferred):* each catalog product gains an optional `ppt_query` (or `ppt_id`) field, provenance-gated like other retailer IDs. Resolution order in `market.py`: (1) use `ppt_query`/`ppt_id` if present; (2) else attempt the Parse-Title API against the existing `resale_query`; (3) on a low-confidence parse or no match, downgrade the confidence tier and fall through to the existing scrape path. This makes the comp behavior deterministic for both a mapped and an unmappable product.
 
@@ -84,21 +84,21 @@ Implements the **PokemonPriceTracker API** as a price client conforming to the *
 
 **`scanner/margin.py` — fee-adjusted margin math (pure).**
 `net_margin(cost_incl_tax, comp, channel, est_shipping) -> MarginResult` where `MarginResult` carries net proceeds, dollar margin, % ROI, and breakeven price. Channel fee models:
-- **eBay:** ~13–14% all-in (eBay's final value fee, which already includes payment processing) plus the fixed per-order fee (~$0.40). Parameterized.
-- **Local (LGS / FB Marketplace):** 0% platform fee, zero shipping. Phase 1 has **no independent local comp feed** — Local is the online comp minus a configured haircut, labeled as a *derived estimate* (local sells below online comp).
-Fee/haircut/shipping/tax constants live in config so they can be tuned without code edits. Pure functions, fully unit-testable, no I/O.
+- **eBay:** default **13.25% final value fee** (trading-card/CCG category, already includes payment processing) **+ $0.40 fixed per-order fee**. Shipping is explicit: **seller-paid shipping is a cost**; **buyer-paid shipping increases the FVF base** (eBay charges the fee on item + shipping + tax).
+- **Local (LGS / FB Marketplace):** 0% platform fee, zero shipping. Phase 1 has **no independent local comp feed** — Local is the online comp minus a configured haircut, labeled as a *derived estimate* (local sells below online comp), and is **always capped at THIN** in the verdict until a real local comp source exists.
+All fee/haircut/shipping/tax numbers live in config so they can be tuned without code edits — none hardcoded. Pure functions, fully unit-testable, no I/O.
 
 **`scanner/verdict.py` — fused buy verdict (pure).**
 `buy_verdict(product, observed_price, comp, source_state) -> Verdict` fusing three existing signals with an explicit, non-ambiguous rule:
-- **Margin determines the tier.** Two config constants define the bands: below `skip_floor` → **SKIP**; between `skip_floor` and `buy_floor` → **THIN**; above `buy_floor` → **BUY**. (Cutoffs are evaluated on net dollar margin; % ROI is displayed alongside. Whether ROI also gates is a config flag, default off.)
+- **Margin determines the tier, gated on BOTH net dollars AND % ROI** (ROI gate on by default). A product is **BUY** only if net margin ≥ `buy_floor_net` **and** ROI ≥ `buy_floor_roi`; **SKIP** if net < `skip_floor_net` **or** ROI < `skip_floor_roi`; otherwise **THIN**. Defaults: `skip_floor_net 5.00`, `buy_floor_net 15.00`, `roi_gate_enabled true`, `skip_floor_roi 10`, `buy_floor_roi 20`. (Set `roi_gate_enabled false` to gate on net dollars only.)
 - **Priority/hype** (`product_priority`, `priority.py:32`) affects **only within-tier ranking** — it never promotes a product across a margin tier.
-- **Confidence** (`confidence.py` source health + the comp's own tier) affects the **displayed label and caps the tier**: a comp below a configured confidence floor **cannot produce BUY** — it is capped at THIN and labeled with its tier. This is where "demote-never-hide" meets the truthfulness rule.
+- **Confidence** (`confidence.py` source health + the comp's own tier) **caps the tier and sets the label**: a comp below `min_buy_confidence` (default `medium`) **cannot produce BUY** — capped at THIN, labeled with its tier. **Local/FB derived comps are always capped at THIN** (no real local comp feed exists in Phase 1). This is where "demote-never-hide" meets the truthfulness rule.
 
-Verdict policy is **demote-never-hide**: below-floor and low-confidence alerts still appear, ranked low and labeled, never suppressed. Emits the tier plus the headline number (e.g. "BUY · +$18 net, 42% ROI" or "THIN · +$1 net (low-confidence comp)").
+Verdict policy is **demote-never-hide**: below-floor and low-confidence alerts still appear, ranked low and labeled, never suppressed. Emits the tier plus the headline number (e.g. "BUY · +$18 net, 42% ROI" or "THIN · +$1 net (low-confidence comp)"). All thresholds live in config.
 
 ### 3.3 Integration points (grounded in current code)
 
-- **Alert construction** (`scanner/main.py:361-374`): after building the `StockAlert`, compute the comp via the market cache and attach a `verdict` to the alert. The `prod` dict and `result.price` are already in scope. **Cost basis for the margin calc = scraped observed price × (1 + `tax_rate`)**, where `tax_rate` is a single global config constant. Per-purchase tax/actual-cost capture is deferred to the Phase 2 ledger.
+- **Alert construction** (`scanner/main.py:361-374`): after building the `StockAlert`, compute the comp via the market cache and attach a `verdict` to the alert. The `prod` dict and `result.price` are already in scope. **Cost basis for the margin calc = scraped observed price × (1 + `tax_rate`)**, where `tax_rate` is a single global config constant (**default `0.07`** — Indiana's 7% retail sales-tax rate; configurable per operator location). Per-purchase tax/actual-cost capture is deferred to the Phase 2 ledger.
 - **Alert rendering — two touch points** (`scanner/notify.py`):
   - Add an optional `verdict: str = ""` field to the `StockAlert` dataclass (`notify.py:26-40`), rendered only when present — the same pattern `priority` follows.
   - Surface it in `_context_bits()` (`notify.py:42-50`) → this covers **console** and the **ntfy** body (both go through `StockAlert.line()`, posted at `notify.py:124`).
@@ -123,6 +123,41 @@ All new IDs flow through the existing verify → provenance gate; no unverified 
 5. Below-floor and low-confidence alerts are demoted and labeled, never hidden.
 6. Doctrine v2 committed (`DOCTRINE.md`, `ADVISOR_ROLE.md` updated).
 7. Full existing test suite stays green; new modules (`market`, `margin`, `verdict`) have their own tests.
+
+### 3.6 Phase 1 config defaults (consolidated)
+
+All tunable; these are the starting values (operator-reviewed 2026-06-15).
+
+| Key | Default | Notes |
+|---|---|---|
+| `tax_rate` | `0.07` | Indiana 7% retail sales tax; cost-basis multiplier |
+| `ebay_fvf_pct` | `0.1325` | Trading-card/CCG final value fee (incl. payment processing) |
+| `ebay_fixed_fee` | `0.40` | Per-order fixed fee |
+| `local_haircut_pct` | configurable | Local comp = online comp × (1 − haircut); derived, capped at THIN |
+| `skip_floor_net` | `5.00` | Net margin below → SKIP |
+| `buy_floor_net` | `15.00` | Net margin at/above (with ROI) → BUY |
+| `roi_gate_enabled` | `true` | Gate on % ROI in addition to net dollars |
+| `skip_floor_roi` | `10` | % ROI below → SKIP |
+| `buy_floor_roi` | `20` | % ROI at/above (with net) → BUY |
+| `min_buy_confidence` | `medium` | Comps below this cap at THIN, never BUY |
+| `market.preferred` | `false` | PPT optional-preferred; off until key/quota confirmed |
+| `market.cache_ttl` | `24h` on free tier | Or paid Standard for 4h full-catalog cadence |
+
+### 3.7 Implementation order (TDD) & worktree
+
+Build order, test-first at each step:
+1. Config schema + defaults (§3.6).
+2. `margin.py` (pure: fees, tax, shipping, haircut, breakeven).
+3. `verdict.py` (pure: dual-gate tiers, confidence cap, Local→THIN cap).
+4. `market.py` against a **mocked PPT API** (key→query mapping resolution, graceful fallback, quota guard).
+5. Alert integration (`main.py:361-374`): attach verdict + cost-basis.
+6. Discord field (`notify._discord`) + console/ntfy (`_context_bits`).
+7. Web payload + rendering (`web.py`, `web_assets/`).
+8. Retailer activation checks (Best Buy enable-when-key; Costco/PC ID seeding as a separate enumerated task).
+9. Docs + Doctrine v2 update.
+10. Full suite green.
+
+**Worktree warning (verified 2026-06-18):** the spec is committed at `a1b951a`, but the working tree is **dirty** — 40 pre-existing modified/untracked files unrelated to this work. Phase 1 implementation must run on a **dedicated branch or git worktree**, and begin by explicitly **preserving all existing uncommitted edits** (no stash-drop, no revert). This plan and spec change must not touch those files.
 
 ---
 
@@ -164,11 +199,11 @@ External prerequisites to obtain **early** so the plan can sequence around them:
 - **PokemonPriceTracker API key** and **Best Buy API key** (both free-tier to start). Both degrade gracefully if absent, but acquiring them unblocks AC3/AC4.
 
 Details to confirm during planning:
-- PokemonPriceTracker exact endpoints, auth, rate limits, and free-tier credit ceiling vs. expected request volume (decides free vs. paid tier; gates whether it can be the *preferred* client).
-- eBay fee model precision: confirm current all-in rate and whether to model store-subscription vs. casual-seller rates.
+- PokemonPriceTracker exact endpoints, auth, and credit cost per call (the free-tier vs. paid decision is already framed: free tier → 24h TTL / canary products; paid Standard → 4h full-catalog preferred — see §3.2/§3.6).
+- eBay fee precision: whether to also model store-subscription vs. casual-seller rates (default casual rate is set in §3.6).
 - Costco/PC item-ID discovery method (manual seeding vs. semi-automated within the verify pipeline) and the **enumerated target list** of catalog keys to seed.
 
-(Resolved and therefore removed from this list: the product-key → API-query mapping is specified in §3.2; the cost-basis/tax-rate rule is specified in §3.3.)
+(Resolved and therefore removed from this list: product-key → API-query mapping is specified in §3.2; cost-basis/tax-rate rule in §3.3; verdict thresholds, fee model, and tier defaults in §3.6.)
 
 ---
 
