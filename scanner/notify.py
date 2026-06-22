@@ -38,6 +38,7 @@ class StockAlert:
     image_url: str = ""              # catalog image, if known
     first_seen: int | None = None    # unix ts this combo was first observed
     seen_count: int | None = None    # how many distinct restocks we've logged
+    verdict: str = ""                # "BUY · +$18 net, 42% ROI" | "" when no comp
 
     def _context_bits(self) -> list[str]:
         bits: list[str] = []
@@ -47,6 +48,8 @@ class StockAlert:
             bits.append(f"seen {self.seen_count}x")
         if self.first_seen:
             bits.append(f"first seen {_ago(self.first_seen)} ago")
+        if self.verdict:
+            bits.append(self.verdict)
         return bits
 
     def line(self) -> str:
@@ -75,7 +78,7 @@ class Notifier:
         if self.ntfy_topic:
             self._ntfy(alert)
 
-    def _discord(self, alert: StockAlert) -> None:
+    def _build_embed(self, alert: StockAlert) -> dict:
         color = {
             "IN_STOCK": 0x2ECC71,
             "LIMITED": 0xF1C40F,
@@ -105,8 +108,16 @@ class Notifier:
             embed["fields"].append(
                 {"name": "Restocks seen", "value": str(alert.seen_count), "inline": True}
             )
+        if alert.verdict:
+            embed["fields"].append(
+                {"name": "Verdict", "value": alert.verdict, "inline": False}
+            )
         if alert.image_url:
             embed["thumbnail"] = {"url": alert.image_url}
+        return embed
+
+    def _discord(self, alert: StockAlert) -> None:
+        embed = self._build_embed(alert)
         try:
             requests.post(
                 self.discord_webhook,

@@ -73,3 +73,35 @@ def test_discord_embed_carries_priority_and_thumbnail(monkeypatch):
     assert "Priority" in field_names
     assert "Restocks seen" in field_names
     assert embed["thumbnail"]["url"] == "https://img/x.png"
+
+
+def _alert(**kw):
+    base = dict(
+        retailer="Best Buy", product_name="Prismatic ETB",
+        store_label="Online", distance_miles=None, status="ONLINE_IN_STOCK",
+        url="https://example.com", price="$49.99",
+    )
+    base.update(kw)
+    return StockAlert(**base)
+
+
+def test_verdict_renders_in_line_when_present():
+    line = _alert(verdict="BUY · +$18.00 net, 42% ROI").line()
+    assert "BUY · +$18.00 net, 42% ROI" in line
+
+
+def test_no_verdict_means_no_verdict_text():
+    line = _alert().line()
+    assert "BUY" not in line and "ROI" not in line
+
+
+def test_verdict_added_to_discord_embed_fields():
+    alert = _alert(verdict="SKIP · +$0.50 net, 1% ROI")
+    embed = Notifier(discord_webhook="x")._build_embed(alert)
+    verdict_fields = [f for f in embed["fields"] if f["name"] == "Verdict"]
+    assert verdict_fields and verdict_fields[0]["value"] == "SKIP · +$0.50 net, 1% ROI"
+
+
+def test_no_verdict_means_no_verdict_embed_field():
+    embed = Notifier(discord_webhook="x")._build_embed(_alert())
+    assert not any(f["name"] == "Verdict" for f in embed["fields"])
