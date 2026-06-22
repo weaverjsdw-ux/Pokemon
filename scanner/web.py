@@ -631,6 +631,7 @@ def _stock_board_payload(
     inventory_checked: bool = True,
     comp_lookup=None,
 ) -> list[dict[str, Any]]:
+    from .main import verdict_for_alert  # local import avoids a cycle at module load
     product_payload = _product_payload(cfg)
     products = {product["key"]: product for product in product_payload}
     confidence_rows = confidence_mod.confidence_report(
@@ -719,7 +720,6 @@ def _stock_board_payload(
                     status_reason = ""
                     price = result.price
                     url = result.url
-                from .main import verdict_for_alert  # local import avoids a cycle at module load
                 product_data = cfg.products.get(product["key"], {})
                 comp_row = comp_lookup(product["key"]) if comp_lookup else None
                 row_verdict = verdict_for_alert(cfg, product_data, price, comp_row) or None

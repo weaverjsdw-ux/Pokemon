@@ -490,11 +490,6 @@ def test_stock_board_payload_explains_missing_result_from_blocked_source():
     web.health.reset()
 
 
-def _web_cfg():
-    from scanner import config as cfg_mod
-    return cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
-
-
 def test_board_row_includes_verdict_field(monkeypatch):
     cfg = _cfg()
     snapshot = {"products": {"booster": {
