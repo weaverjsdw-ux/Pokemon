@@ -44,27 +44,33 @@ Every task implicitly includes these. Values copied verbatim from spec `2026-06-
 
 ---
 
-## Task 0: Branch + dirty-state preservation
+## Task 0: Branch from clean baseline
 
 **Files:** none (git only)
 
+**Context:** The previously-dirty 40 files (including the load-bearing untracked
+modules `scanner/resale.py`, `confidence.py`, `workqueue.py`, `provenance.py`,
+`verify_ids.py`) were committed as a baseline snapshot on `main` at **`cf23e2b`**
+(operator-chosen option A). The tree is now clean and the full suite is green
+(172 passed). Phase 1 builds on top of that clean baseline.
+
 **Interfaces:**
-- Produces: an isolated working context where the 40 pre-existing dirty files are preserved and untouched.
+- Produces: a dedicated branch off clean `main` for isolated Phase 1 review diffs.
 
-- [ ] **Step 1: Record current dirty state**
+- [ ] **Step 1: Confirm clean baseline**
 
-Run: `git status --porcelain > /tmp/phase1-dirty-before.txt && git rev-parse HEAD`
-Expected: HEAD is `25de402...`; the file lists ~40 ` M`/`??` entries.
+Run: `git status --porcelain | wc -l && git log --oneline -1`
+Expected: `0` dirty files; HEAD at `cf23e2b Snapshot prior sprint + service-plan work` (or a later commit if more baseline work landed).
 
-- [ ] **Step 2: Create a dedicated branch without disturbing the working tree**
+- [ ] **Step 2: Confirm the suite is green before changing anything**
+
+Run: `python -m pytest -q 2>&1 | tail -1`
+Expected: `172 passed` (or more). This is the regression baseline for every later task.
+
+- [ ] **Step 3: Create the feature branch**
 
 Run: `git switch -c phase1-deal-intelligence`
-Expected: "Switched to a new branch 'phase1-deal-intelligence'". `git status --porcelain` still shows the same 40 entries (branch switch keeps uncommitted changes in place).
-
-- [ ] **Step 3: Verify preservation**
-
-Run: `git status --porcelain | wc -l`
-Expected: `40` (unchanged). Do not `git add` or `git stash` any of these files. Throughout this plan, only `git add` the exact files each task names.
+Expected: "Switched to a new branch 'phase1-deal-intelligence'". `git status --porcelain` shows `0` (clean). Each later task commits only the exact files it names, so the branch diff stays pure Phase 1.
 
 ---
 
