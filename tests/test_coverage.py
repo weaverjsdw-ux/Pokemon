@@ -51,11 +51,23 @@ def test_id_present_but_retailer_disabled_is_not_actionable():
 
 def test_unsupported_retailer_ids_do_not_count():
     cfg = _cfg(
-        {"costco": RetailerCfg(enabled=True)},
-        {"a": {"name": "A", "costco_item_id": "1"}},
+        {"samsclub": RetailerCfg(enabled=True)},
+        {"a": {"name": "A", "samsclub_item_id": "1"}},
     )
     report = coverage_report(cfg)
     assert report["actionableProducts"] == 0
+
+
+def test_supported_costco_ids_count_when_enabled():
+    cfg = _cfg(
+        {"costco": RetailerCfg(enabled=True)},
+        {"a": {"name": "A", "costco_item_id": "4000313298"}},
+    )
+    report = coverage_report(cfg)
+    costco = next(r for r in report["retailers"] if r["slug"] == "costco")
+    assert costco["withId"] == 1
+    assert costco["ready"] is True
+    assert report["actionableProducts"] == 1
 
 
 def test_api_key_retailer_without_key_is_not_actionable():

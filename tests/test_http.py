@@ -50,6 +50,21 @@ def test_retries_on_transient_5xx(monkeypatch):
     assert len(slept) == 1
 
 
+def test_post_retries_on_transient_5xx(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(url, **kwargs):
+        calls["n"] += 1
+        return FakeResp(503) if calls["n"] == 1 else FakeResp(200)
+
+    monkeypatch.setattr("scanner.retailers.http.requests.post", fake_post)
+    slept = []
+    resp = http.post("http://x", json={"a": 1}, backoff=0.01, sleep=slept.append)
+    assert resp.status_code == 200
+    assert calls["n"] == 2
+    assert len(slept) == 1
+
+
 def test_does_not_retry_on_404(monkeypatch):
     calls = _sequence(monkeypatch, [FakeResp(404)])
     slept = []

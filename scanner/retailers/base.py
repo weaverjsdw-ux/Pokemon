@@ -13,6 +13,10 @@ class Store:
     lat: float
     lng: float
     distance_miles: float | None = None  # filled in after route filter
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    postal_code: str = ""
 
     def label(self) -> str:
         return self.name

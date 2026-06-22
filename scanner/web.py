@@ -24,9 +24,13 @@ from urllib.parse import urlparse
 
 import yaml
 
+from . import confidence as confidence_mod
 from . import config as cfg_mod
 from . import coverage as coverage_mod
 from . import health
+from . import provenance
+from . import resale
+from . import workqueue
 from .identifiers import extract_id, field_for_slug, set_product_id
 from .main import (
     build_corridor,
@@ -48,6 +52,7 @@ ASSETS_DIR = Path(__file__).resolve().parent / "web_assets"
 EXAMPLE_CONFIG_PATH = cfg_mod.ROOT / "config.example.yaml"
 POSITIVE_STATUSES = {"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"}
 LAST_STORE_DIAGNOSTICS: list[dict[str, Any]] = []
+RESALE_PRICES = resale.ResalePriceCache()
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -114,9 +119,14 @@ def _retailer_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     return retailers
 
 
-def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
+def _product_payload(
+    cfg: cfg_mod.Config,
+    resale_rows: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     selected = _selected_products_or_empty(cfg)
     selected_keys = set(selected)
+    resale_rows = resale_rows or {}
+    prov = provenance.load()
     products: list[dict[str, Any]] = []
     for key, product in cfg.products.items():
         priority, priority_score = product_priority(product)
@@ -129,6 +139,14 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
                 for field in fields
                 if str(product.get(field) or "").strip()
             }
+            id_provenance = {
+                field: prov.get(provenance.key(key, field))
+                for field in ids
+                if prov.get(provenance.key(key, field))
+            }
+            id_suspect = any(
+                provenance.is_suspect(entry) for entry in id_provenance.values()
+            )
             rcfg = cfg.retailers.get(slug, cfg_mod.RetailerCfg())
             supported = bool(getattr(cls, "supported", True))
             missing_api_key = _api_key_missing(cls, rcfg)
@@ -159,6 +177,8 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
                     "supported": supported,
                     "onlineOnly": bool(getattr(cls, "online_only", False)),
                     "ids": ids,
+                    "idProvenance": id_provenance,
+                    "idSuspect": id_suspect,
                     "active": active,
                     "missingApiKey": missing_api_key,
                     "blockedReason": blocked_reason,
@@ -172,8 +192,12 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
             {
                 "key": key,
                 "name": product.get("name", key),
+                "game": product.get("game", ""),
                 "set": product.get("set", ""),
                 "type": product.get("type", ""),
+                "msrp": product.get("msrp", ""),
+                "releaseDate": product.get("release_date", ""),
+                "resale": resale_rows.get(key),
                 "selected": selected_for_scan,
                 "scanned": bool(active_retailers),
                 "priority": priority,
@@ -185,22 +209,44 @@ def _product_payload(cfg: cfg_mod.Config) -> list[dict[str, Any]]:
     return products
 
 
-def _config_summary(cfg: cfg_mod.Config, config_missing: bool) -> dict[str, Any]:
+def _private_field_status(value: str) -> str:
+    return "set (redacted)" if str(value or "").strip() else "missing"
+
+
+def _config_summary(
+    cfg: cfg_mod.Config,
+    config_missing: bool,
+    *,
+    public_safe: bool = False,
+) -> dict[str, Any]:
     selected = _selected_products_or_empty(cfg)
-    return {
+    payload = {
         "configMissing": config_missing,
-        "homeAddress": cfg.home_address,
-        "workAddress": cfg.work_address,
+        "homeAddress": (
+            _private_field_status(cfg.home_address) if public_safe else cfg.home_address
+        ),
+        "workAddress": (
+            _private_field_status(cfg.work_address) if public_safe else cfg.work_address
+        ),
         "routeRadiusMiles": cfg.route_radius_miles,
         "routingEngine": cfg.routing_engine,
         "googleApiKeySet": bool(cfg.google_api_key),
         "pollIntervalSeconds": cfg.poll_interval_seconds,
         "discordWebhookSet": bool(cfg.discord_webhook),
         "ntfyTopicSet": bool(cfg.ntfy_topic),
+        "resalePriceEnabled": bool(cfg.resale_price_enabled),
+        "resalePriceIntervalSeconds": resale.interval_seconds(
+            cfg.resale_price_interval_seconds
+        ),
+        "ebayResaleAuthSet": resale.auth_configured(cfg),
+        "ebayMarketplaceId": cfg.ebay_marketplace_id,
         "productsFilter": cfg.products_filter,
         "productsSelected": len(selected),
         "productsTotal": len(cfg.products),
     }
+    if public_safe:
+        payload["publicSafe"] = True
+    return payload
 
 
 def _recent_restocks_payload(cfg: cfg_mod.Config, limit: int = 10) -> list[dict[str, Any]]:
@@ -227,6 +273,26 @@ def _health_payload() -> list[dict[str, Any]]:
         return []
 
 
+def _id_suspect_by_slug(products: list[dict[str, Any]]) -> dict[str, bool]:
+    """Per-retailer: does any selected product carry a verification-flagged ID?"""
+    suspect: dict[str, bool] = {}
+    for product in products:
+        for entry in product.get("retailers", []):
+            if entry.get("idSuspect"):
+                suspect[entry["slug"]] = True
+    return suspect
+
+
+def _confidence_payload(
+    coverage: dict[str, Any],
+    health_rows: list[dict[str, Any]],
+    products: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return confidence_mod.confidence_report(
+        coverage, health_rows, _id_suspect_by_slug(products)
+    )
+
+
 def _summary_payload(
     cfg: cfg_mod.Config,
     coverage: dict[str, Any],
@@ -235,6 +301,8 @@ def _summary_payload(
     health_rows: list[dict[str, Any]],
     recent_restocks: list[dict[str, Any]],
     runner: dict[str, Any],
+    confidence: list[dict[str, Any]] | None = None,
+    work_queue: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compact dashboard summary derived from the detailed API payloads."""
     health_by_slug = {row.get("slug"): row for row in health_rows}
@@ -267,6 +335,11 @@ def _summary_payload(
             if retailer.get("queryReady")
         ),
         "sourceHealth": health_counts,
+        "workingSources": sum(
+            1 for row in (confidence or []) if row.get("state") == confidence_mod.WORKING
+        ),
+        "openTasks": len(work_queue or []),
+        "topTask": (work_queue or [{}])[0].get("title", "") if work_queue else "",
         "stockHits": stock_hits,
         "recentRestocks": len(recent_restocks),
         "lastScanAt": runner.get("lastScanAt"),
@@ -284,10 +357,15 @@ def status_payload() -> dict[str, Any]:
         errors = config_errors(cfg)
         coverage = coverage_mod.coverage_report(cfg)
         retailers = _retailer_payload(cfg)
-        products = _product_payload(cfg)
+        resale_payload = RESALE_PRICES.snapshot(cfg)
+        products = _product_payload(cfg, resale_payload.get("products") or {})
+        if not config_missing:
+            RESALE_PRICES.refresh_due_async(cfg)
         health_rows = _health_payload()
         recent_restocks = _recent_restocks_payload(cfg)
         runner = RUNNER.snapshot()
+        confidence = _confidence_payload(coverage, health_rows, products)
+        work_queue = workqueue.build(confidence, products)
         status = HTTPStatus.OK
         payload: dict[str, Any] = {
             "ok": not errors and not config_missing,
@@ -295,10 +373,14 @@ def status_payload() -> dict[str, Any]:
             "coverage": coverage,
             "retailers": retailers,
             "products": products,
+            "resalePrices": resale_payload,
             "health": health_rows,
+            "confidence": confidence,
+            "workQueue": work_queue,
             "recentRestocks": recent_restocks,
             "summary": _summary_payload(
-                cfg, coverage, retailers, products, health_rows, recent_restocks, runner
+                cfg, coverage, retailers, products, health_rows, recent_restocks, runner,
+                confidence=confidence, work_queue=work_queue,
             ),
             "errors": errors,
             "runner": runner,
@@ -358,12 +440,16 @@ def _normalize_config(raw: dict[str, Any], payload: dict[str, Any]) -> dict[str,
             current["enabled"] = False
 
     products = payload.get("products")
-    if products == "all_sealed" or products is None:
-        raw["products"] = raw.get("products", "all_sealed")
+    if products is None:
+        raw["products"] = raw.get("products", "all_tcg")
+    elif isinstance(products, str) and products.strip().lower() in (
+        cfg_mod.ALL_PRODUCT_FILTERS | cfg_mod.POKEMON_FILTERS | cfg_mod.MAGIC_FILTERS
+    ):
+        raw["products"] = products.strip().lower()
     elif isinstance(products, list):
         raw["products"] = products
     else:
-        raise ValueError("products must be all_sealed or a list of product keys")
+        raise ValueError("products must be all_tcg, all_sealed, pokemon, magic, or a list of product keys")
 
     return raw
 
@@ -410,6 +496,14 @@ def save_product_id_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "errors": [str(exc).strip('"')]}
     except OSError as exc:
         return {"ok": False, "errors": [_safe_error_text(str(exc))]}
+
+    # Record the source URL (when one was pasted) so the ID can later be verified
+    # against where it came from. Never fatal.
+    if "/" in url_or_id:
+        try:
+            provenance.record(product_key, field, source_url=url_or_id)
+        except OSError:
+            pass
 
     return {
         "ok": True,
@@ -525,8 +619,19 @@ def _stock_board_payload(
     stores_by_retailer: dict[str, list[Store]],
     results: list[StockResult],
     checked_at: int | None = None,
+    store_diagnostics: list[dict[str, Any]] | None = None,
+    inventory_checked: bool = True,
 ) -> list[dict[str, Any]]:
-    products = {product["key"]: product for product in _product_payload(cfg)}
+    product_payload = _product_payload(cfg)
+    products = {product["key"]: product for product in product_payload}
+    confidence_rows = confidence_mod.confidence_report(
+        coverage_mod.coverage_report(cfg), _health_payload(),
+        _id_suspect_by_slug(product_payload),
+    )
+    confidence_by_slug = {row["slug"]: row for row in confidence_rows}
+    if store_diagnostics is None:
+        store_diagnostics = _get_store_diagnostics()
+    diag_by_slug = {row.get("slug"): row for row in (store_diagnostics or [])}
     result_map = {
         (
             result.retailer_slug,
@@ -537,6 +642,8 @@ def _stock_board_payload(
     }
 
     def missing_status(slug: str) -> tuple[str, str]:
+        if not inventory_checked:
+            return "SCOPED", "Store is in scope; inventory has not been checked yet."
         row = health.get(slug) or {}
         last_status = row.get("last_status") or ""
         detail = str(row.get("last_detail") or "")
@@ -582,7 +689,7 @@ def _stock_board_payload(
             retailer_rows.append(
                 {
                     "storeId": "",
-                    "storeLabel": "No route stores found",
+                    "storeLabel": _no_stores_label(slug, diag_by_slug.get(slug)),
                     "distanceMiles": None,
                     "inStockCount": 0,
                     "products": [],
@@ -633,6 +740,7 @@ def _stock_board_payload(
                 row["storeLabel"],
             )
         )
+        conf_row = confidence_by_slug.get(slug, {})
         board.append(
             {
                 "retailerSlug": slug,
@@ -641,9 +749,60 @@ def _stock_board_payload(
                 "activeProductCount": len(active_products),
                 "locations": retailer_rows,
                 "checkedAt": checked_at,
+                "inventoryChecked": inventory_checked,
+                "state": conf_row.get("state", ""),
+                "stateLabel": conf_row.get("label", ""),
+                "verdict": _board_verdict(RClass.name, conf_row, diag_by_slug.get(slug)),
             }
         )
     return board
+
+
+def _no_stores_label(slug: str, diag: dict[str, Any] | None) -> str:
+    """Tell 'blocked' apart from 'genuinely no stores in corridor' - they used
+    to both render as 'No route stores found', which reads as a lie when the
+    real cause was a 403 during discovery."""
+    status = (diag or {}).get("status", "")
+    if status == "blocked":
+        return "Store discovery blocked"
+    if status == "filtered_out":
+        return "Stores found, none in route corridor"
+    if status == "empty":
+        return "No stores returned for this area"
+    hrow = health.get(slug) or {}
+    if hrow.get("last_status") == "DISCOVERY_FAILED":
+        return "Store discovery failed"
+    return "No route stores found"
+
+
+def _board_verdict(
+    name: str, conf_row: dict[str, Any], diag: dict[str, Any] | None
+) -> str:
+    """One decision-ready line per source: what's wrong and what to do.
+
+    Successful/working sources get no verdict (the stock chips speak for
+    themselves); only sources that need a decision are narrated."""
+    state = conf_row.get("state", "")
+    if state in ("", confidence_mod.WORKING, confidence_mod.READY):
+        # Still surface a discovery block even when config-state looks fine.
+        if (diag or {}).get("status") == "blocked":
+            return f"{name} store discovery is blocked right now; it will retry. Online sources are unaffected."
+        return ""
+    detail = conf_row.get("detail", "")
+    action = conf_row.get("action", "")
+    if state == confidence_mod.NEEDS_ID:
+        return f"{name} is ready, but has 0 IDs. Add product IDs to activate it."
+    if state == confidence_mod.NEEDS_API_KEY:
+        return f"{name}: {detail}. {action}."
+    if state == confidence_mod.BLOCKED:
+        return f"{name} {detail}. {action}."
+    if state == confidence_mod.PARSER_SUSPECT:
+        return f"{name} {detail} - likely a parser break that needs a code fix."
+    if state == confidence_mod.ID_SUSPECT:
+        return f"{name}: {detail}."
+    if state == confidence_mod.DEGRADED:
+        return f"{name} is degraded: {detail}."
+    return f"{name}: {detail}".strip().rstrip(":")
 
 
 def _online_only_diagnostic(cfg: cfg_mod.Config, slug: str) -> dict[str, Any]:
@@ -712,12 +871,20 @@ def dry_run_payload() -> dict[str, Any]:
     safe_stdout = _safe_log_text(stdout)
     safe_stderr = _safe_log_text(stderr)
     stores_payload = _stores_payload(stores)
+    scoped_board = _stock_board_payload(
+        cfg,
+        stores,
+        [],
+        checked_at=None,
+        store_diagnostics=store_diagnostics,
+        inventory_checked=False,
+    )
     RUNNER._update(
         stores=stores_payload,
         warnings=warnings,
         stdout=safe_stdout,
         stderr=safe_stderr,
-        stockBoard=[],
+        stockBoard=scoped_board,
         lastResults=[],
         lastAlerts=[],
         storeDiagnostics=store_diagnostics,
@@ -731,6 +898,7 @@ def dry_run_payload() -> dict[str, Any]:
     runner = RUNNER.snapshot()
     return {
         "ok": True,
+        "config": _config_summary(cfg, config_missing, public_safe=True),
         "coverage": coverage,
         "health": health_rows,
         "recentRestocks": recent_restocks,
@@ -739,6 +907,7 @@ def dry_run_payload() -> dict[str, Any]:
         ),
         "retailers": retailers,
         "stores": stores_payload,
+        "stockBoard": scoped_board,
         "storeDiagnostics": store_diagnostics,
         "warnings": warnings,
         "stdout": safe_stdout,
@@ -762,7 +931,7 @@ def safe_demo_payload() -> dict[str, Any]:
         return {"ok": False, "errors": [_safe_error_text(str(exc))]}
 
     stores_payload = _stores_payload(stores)
-    stock_board = _stock_board_payload(cfg, stores, results, checked_at)
+    stock_board = _stock_board_payload(cfg, stores, results, checked_at, store_diagnostics)
     last_results = [_result_payload(result, checked_at) for result in results]
     warnings = [
         "Safe demo only: synthetic stores and out-of-stock rows; no geocoding, routing, retailer, or alert network calls were made."
@@ -789,6 +958,7 @@ def safe_demo_payload() -> dict[str, Any]:
     runner = RUNNER.snapshot()
     return {
         "ok": True,
+        "config": _config_summary(cfg, config_missing, public_safe=True),
         "coverage": coverage,
         "health": health_rows,
         "recentRestocks": recent_restocks,
@@ -843,7 +1013,7 @@ def scan_once_payload(notify: bool = False) -> dict[str, Any]:
         return {"ok": False, "errors": [_safe_error_text(str(exc))]}
 
     stores_payload = _stores_payload(stores)
-    stock_board = _stock_board_payload(cfg, stores, results, checked_at)
+    stock_board = _stock_board_payload(cfg, stores, results, checked_at, store_diagnostics)
     last_results = [_result_payload(result, checked_at) for result in results]
     alerts = [_alert_payload(alert) for alert in notifier.alerts]
     warnings = _warning_lines(setup_stderr + scan_stderr)
@@ -953,7 +1123,7 @@ class ScannerRunner:
             self._thread = threading.Thread(
                 target=self._run,
                 args=(notify,),
-                name="pokemon-scanner",
+                name="tcg-msrp-scanner",
                 daemon=True,
             )
             self._thread.start()
@@ -1001,7 +1171,7 @@ class ScannerRunner:
                     lastResults=[
                         _result_payload(result, now) for result in results
                     ],
-                    stockBoard=_stock_board_payload(cfg, stores, results, now),
+                    stockBoard=_stock_board_payload(cfg, stores, results, now, store_diagnostics),
                     warnings=_warning_lines(setup_stderr + scan_stderr),
                     stdout=_safe_log_text(setup_stdout + scan_stdout),
                     stderr=_safe_log_text(setup_stderr + scan_stderr),
@@ -1037,7 +1207,7 @@ def _should_autostart() -> bool:
 
 
 class WebHandler(BaseHTTPRequestHandler):
-    server_version = "PokemonScannerUI/1.0"
+    server_version = "TcgMsrpScannerUI/1.0"
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -1132,7 +1302,7 @@ def serve(
     autostart: bool = True,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), WebHandler)
-    print(f"Pokemon scanner UI: http://{host}:{server.server_port}", flush=True)
+    print(f"TCG MSRP scanner UI: http://{host}:{server.server_port}", flush=True)
     if autostart and _should_autostart():
         RUNNER.start(notify=True)
         print("Interval scanner: started", flush=True)
@@ -1141,7 +1311,7 @@ def serve(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the local Pokemon scanner UI")
+    parser = argparse.ArgumentParser(description="Run the local TCG MSRP scanner UI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(

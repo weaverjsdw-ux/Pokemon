@@ -10,15 +10,25 @@ from scanner import web
 
 
 def _write_fixture_files(tmp_path, monkeypatch):
+    for name in (
+        "EBAY_BROWSE_API_TOKEN",
+        "EBAY_OAUTH_TOKEN",
+        "EBAY_CLIENT_ID",
+        "EBAY_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
     products_path = tmp_path / "products.yaml"
     products_path.write_text(
         yaml.safe_dump(
             {
                 "booster": {
                     "name": "Booster",
+                    "msrp": "$26.94",
+                    "resale_query": "Pokemon TCG Booster sealed",
                     "target_tcin": "123",
                     "walmart_item_id": "456",
                     "bestbuy_sku": "",
+                    "costco_item_id": "789",
                     "pokemoncenter_slug": "",
                     "gamestop_pid": "",
                 }
@@ -74,6 +84,7 @@ def _cfg():
 
 def test_status_payload_reports_missing_config_but_loads_example(tmp_path, monkeypatch):
     _write_fixture_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(web, "_health_payload", lambda: [])
 
     payload = web.status_payload()
 
@@ -81,6 +92,8 @@ def test_status_payload_reports_missing_config_but_loads_example(tmp_path, monke
     assert payload["config"]["configMissing"] is True
     assert payload["config"]["productsSelected"] == 1
     assert payload["products"][0]["key"] == "booster"
+    assert payload["products"][0]["msrp"] == "$26.94"
+    assert payload["products"][0]["resale"]["status"] == "pending"
     assert payload["products"][0]["scanned"] is True
     assert payload["products"][0]["activeRetailers"] == ["target", "walmart"]
     assert payload["coverage"]["score"] == 100
@@ -88,6 +101,8 @@ def test_status_payload_reports_missing_config_but_loads_example(tmp_path, monke
     assert payload["summary"]["actionableProducts"] == 1
     assert payload["summary"]["activeSources"] == 2
     assert payload["summary"]["sourceHealth"]["unknown"] == 2
+    assert "confidence" in payload
+    assert "workQueue" in payload
     assert "health" in payload
     assert "recentRestocks" in payload
     assert {retailer["slug"] for retailer in payload["retailers"]} == set(web.RETAILER_REGISTRY)
@@ -133,6 +148,43 @@ def test_product_payload_marks_exact_active_retailer_ids():
     assert walmart["active"] is False
 
 
+def test_product_payload_includes_catalog_and_resale_prices():
+    payload = web._product_payload(
+        Config(
+            home_address="1 Home St",
+            work_address="2 Work Ave",
+            route_radius_miles=4,
+            routing_engine="osrm",
+            google_api_key="",
+            retailers={"target": RetailerCfg(enabled=True)},
+            poll_interval_seconds=180,
+            discord_webhook="",
+            ntfy_topic="",
+            products_filter="all_sealed",
+            products={
+                "booster": {
+                    "name": "Booster",
+                    "msrp": "$26.94",
+                    "release_date": "2026-06-26",
+                    "target_tcin": "123",
+                }
+            },
+        ),
+        {
+            "booster": {
+                "status": "ok",
+                "estimate": "$72.50",
+                "low": "$65.00",
+                "high": "$80.00",
+            }
+        },
+    )
+
+    assert payload[0]["msrp"] == "$26.94"
+    assert payload[0]["releaseDate"] == "2026-06-26"
+    assert payload[0]["resale"]["estimate"] == "$72.50"
+
+
 def test_product_payload_blocks_bestbuy_without_api_key():
     payload = web._product_payload(
         Config(
@@ -166,6 +218,7 @@ def test_product_payload_blocks_bestbuy_without_api_key():
 
 def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
     _write_fixture_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(web.RESALE_PRICES, "refresh_due_async", lambda cfg: None)
 
     payload = web.save_config_payload(
         {
@@ -188,7 +241,7 @@ def test_save_config_payload_writes_local_config(tmp_path, monkeypatch):
     assert saved["discord_webhook"] == "https://discord.test/hook"
     assert saved["retailers"]["target"]["enabled"] is True
     assert saved["retailers"]["walmart"]["enabled"] is False
-    assert saved["retailers"]["costco"]["enabled"] is False
+    assert saved["retailers"]["costco"]["enabled"] is True
 
 
 def test_save_product_id_payload_updates_catalog(tmp_path, monkeypatch):
@@ -209,11 +262,29 @@ def test_save_product_id_payload_updates_catalog(tmp_path, monkeypatch):
     assert saved["booster"]["target_tcin"] == "93954435"
 
 
+def test_save_product_id_payload_updates_costco_catalog_id(tmp_path, monkeypatch):
+    _write_fixture_files(tmp_path, monkeypatch)
+
+    payload = web.save_product_id_payload(
+        {
+            "retailer": "costco",
+            "productKey": "booster",
+            "urlOrId": "https://www.costco.com/foo.product.4000313298.html",
+        }
+    )
+
+    assert payload["ok"] is True
+    assert payload["field"] == "costco_item_id"
+    assert payload["value"] == "4000313298"
+    saved = yaml.safe_load((tmp_path / "products.yaml").read_text(encoding="utf-8"))
+    assert saved["booster"]["costco_item_id"] == "4000313298"
+
+
 def test_save_product_id_payload_rejects_placeholder_retailer(tmp_path, monkeypatch):
     _write_fixture_files(tmp_path, monkeypatch)
 
     payload = web.save_product_id_payload(
-        {"retailer": "costco", "productKey": "booster", "urlOrId": "12345"}
+        {"retailer": "samsclub", "productKey": "booster", "urlOrId": "12345"}
     )
 
     assert payload["ok"] is False
@@ -273,6 +344,12 @@ def test_dry_run_payload_returns_discovered_stores(monkeypatch):
     assert payload["storeDiagnostics"] == []
     assert payload["stores"]["target"][0]["name"] == "Target #123"
     assert payload["stores"]["target"][0]["distanceMiles"] == 1.2
+    assert payload["stockBoard"][0]["retailerSlug"] == "target"
+    assert payload["stockBoard"][0]["inventoryChecked"] is False
+    location = payload["stockBoard"][0]["locations"][0]
+    assert location["storeLabel"] == "Target #123"
+    assert location["products"][0]["status"] == "SCOPED"
+    assert "not been checked" in location["products"][0]["statusReason"]
 
 
 def test_warning_lines_sanitizes_and_dedupes_target_403_urls():
@@ -363,6 +440,19 @@ def test_safe_demo_payload_uses_synthetic_rows_without_route_setup(monkeypatch):
     assert payload["storeDiagnostics"][0]["demo"] is True
     assert payload["stockBoard"][0]["locations"][0]["products"][0]["status"] == "OUT"
     assert payload["stores"]["target"][0]["storeId"] == "_demo_store_"
+
+
+def test_safe_demo_payload_redacts_config_addresses(monkeypatch):
+    monkeypatch.setattr(web, "_load_current_config", lambda: (_cfg(), False))
+
+    payload = web.safe_demo_payload()
+
+    assert payload["ok"] is True
+    assert payload["config"]["publicSafe"] is True
+    assert payload["config"]["homeAddress"] == "set (redacted)"
+    assert payload["config"]["workAddress"] == "set (redacted)"
+    assert "1 Home St" not in str(payload["config"])
+    assert "2 Work Ave" not in str(payload["config"])
 
 
 def test_stock_board_payload_groups_products_under_store_statuses():

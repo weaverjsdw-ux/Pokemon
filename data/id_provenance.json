@@ -1,0 +1,193 @@
+{
+  "booster.costco_item_id": {
+    "sourceUrl": "https://www.costco.com/foo.product.4000313298.html"
+  },
+  "booster.target_tcin": {
+    "sourceUrl": "https://www.target.com/p/-/A-93954435"
+  },
+  "crown_zenith_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "destined_rivals_booster_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "destined_rivals_booster_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "destined_rivals_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "journey_together_booster_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "journey_together_booster_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "journey_together_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "journey_together_etb.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_lorwyn_eclipsed_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_lorwyn_eclipsed_collector_booster.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_lorwyn_eclipsed_draft_night.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_beginner_box.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_beginner_box.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_collector_booster.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_collector_booster.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_draft_night.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_draft_night.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_jumpstart_2pack.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_play_booster_box.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "mtg_marvel_super_heroes_play_booster_box.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "paldean_fates_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "paldean_fates_etb.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_booster_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_booster_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_etb.target_tcin": {
+    "detail": "Target TCIN is usually 7-9 digits, got 10",
+    "status": "SUSPECT_FORMAT",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_etb.walmart_item_id": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_surprise_box.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "prismatic_evolutions_surprise_box.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "scarlet_violet_151_booster_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "scarlet_violet_151_booster_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "scarlet_violet_151_etb.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "surging_sparks_booster_bundle.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "surging_sparks_booster_bundle.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "surging_sparks_etb.bestbuy_sku": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  },
+  "surging_sparks_etb.target_tcin": {
+    "detail": "format ok; not network-verified",
+    "status": "UNCHECKED",
+    "verifiedAt": 1781501624
+  }
+}

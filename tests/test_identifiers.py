@@ -22,6 +22,11 @@ def test_extract_bestbuy_sku_from_url():
     assert extract_id("bestbuy", url) == "6566943"
 
 
+def test_extract_costco_item_id_from_url():
+    url = "https://www.costco.com/pokemon-tcg-charizard.product.4000313298.html"
+    assert extract_id("costco", url) == "4000313298"
+
+
 def test_extract_gamestop_slug_from_url():
     url = "https://www.gamestop.com/p/pokemon-tcg-foo?lang=en"
     assert extract_id("gamestop", url) == "pokemon-tcg-foo"
@@ -45,7 +50,7 @@ def test_extract_returns_none_for_unmatched_or_empty():
 def test_field_for_slug():
     assert field_for_slug("target") == "target_tcin"
     assert field_for_slug("TARGET") == "target_tcin"
-    assert field_for_slug("costco") is None
+    assert field_for_slug("costco") == "costco_item_id"
 
 
 CATALOG = (

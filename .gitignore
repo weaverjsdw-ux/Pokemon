@@ -18,6 +18,8 @@ logs/
 __pycache__/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
+.tmp_costco_*
 .tmp_pytest_*/
 pytest-cache-files-*/
 .tmp_web_*.log
@@ -27,6 +29,13 @@ pytest-cache-files-*/
 venv/
 .python-version
 *.egg-info/
+
+# Backups & local scratch (added 2026-06-14 — service-plan Phase 0)
+*.bak
+*.orig
+sprint*.txt
+iddoctor_offline.txt
+test_baseline.txt
 
 # Editor
 .vscode/

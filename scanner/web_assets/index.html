@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pokemon Scanner</title>
+    <title>TCG MSRP Scanner</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
     <main class="app">
       <section class="topbar">
         <div>
-          <h1>Pokemon Scanner</h1>
+          <h1>TCG MSRP Scanner</h1>
           <p id="statusText">Loading scanner status...</p>
         </div>
         <div class="actions">
@@ -44,6 +44,24 @@
           <strong id="summaryLastScan">none</strong>
           <small id="summaryLastScanSub">idle</small>
         </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Action Queue</h2>
+            <span id="workQueueCount" class="pill">0 open</span>
+          </div>
+          <div id="workQueue" class="work-queue"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Price Watch</h2>
+            <span id="marketCount" class="pill">0 watched</span>
+          </div>
+          <div id="marketWatch" class="market-watch"></div>
+        </section>
       </section>
 
       <section class="panel">

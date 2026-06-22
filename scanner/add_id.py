@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from . import config as cfg_mod
+from . import provenance
 from .identifiers import FIELD_BY_SLUG, extract_id, set_product_id
 from .retailers import ALL as RETAILER_REGISTRY
 
@@ -71,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     path.write_text(updated, encoding="utf-8")
+    # Record where this ID came from (only when a URL was pasted, not a bare id),
+    # so the ID Doctor and work queue have provenance to work with. Best-effort:
+    # only when writing the bundled catalog, and never fatal.
+    if "/" in args.url_or_id and args.products is None:
+        try:
+            provenance.record(args.product_key, field, source_url=args.url_or_id)
+        except OSError:
+            pass
     print(f"{path.name}: set {args.product_key}.{field} = {value}")
     return 0
 

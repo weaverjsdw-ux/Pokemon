@@ -1,12 +1,20 @@
-# Pokémon TCG Restock Scanner
+# TCG MSRP Restock Scanner
 
-Polls retailer stock endpoints for sealed Pokémon TCG product and fires a
-Discord alert when something pops at a store along your home↔work commute.
+This project exists because I rip packs for a hobby. I buy sealed Pokemon TCG
+and Magic: The Gathering products to open them, play, collect, and enjoy the
+release cycle. The point of tracking MSRP is protection from inflated resale
+pricing, not resale optimization.
+
+See [DOCTRINE.md](DOCTRINE.md) and [ADVISOR_ROLE.md](ADVISOR_ROLE.md) before
+making roadmap, pricing, or product-coverage decisions.
+
+Polls retailer stock endpoints for sealed TCG product and fires a Discord alert
+when something pops at a store along your home/work commute.
 
 **Scope of this build**
-- Route-aware store checks: Target (GameStop adapter available after you add `gamestop_pid` IDs and enable it)
-- Online checks: Walmart by default; Best Buy with an API key; Pokémon Center after you add `pokemoncenter_slug` IDs and enable it
-- Placeholders: Costco and Sam's are listed in config but disabled because live checks are not implemented yet
+- Route-aware store checks: Target, Costco after you add `costco_item_id` IDs, and GameStop after you add `gamestop_pid` IDs and enable it
+- Online checks: Walmart by default; Best Buy with an API key; Pokemon Center after you add `pokemoncenter_slug` IDs and enable it
+- Placeholders: Sam's is listed in config but disabled because live checks are not implemented yet
 - Route-aware mode only alerts for supported store retailers within N miles of your driving route, not just radial from one point
 - Polite by default: 3-minute poll interval with jitter, identifies itself with a real User-Agent, dedupes via SQLite so you don't get hammered with the same alert
 - Local-first: addresses + webhook live in `config.yaml` which is gitignored
@@ -69,7 +77,7 @@ Open `config.yaml` and fill in:
 1. Open Discord and pick a server you own. If you don't have one, click the **+** button in the server list and "Create My Own → For me and my friends" (takes 10 seconds).
 2. **Right-click the channel** you want alerts in → **Edit Channel**.
 3. Left sidebar → **Integrations** → **Webhooks** → **New Webhook**.
-4. Give it a name (e.g. "Pokémon Scanner"), optionally a picture.
+4. Give it a name (e.g. "TCG MSRP Scanner"), optionally a picture.
 5. Click **Copy Webhook URL**.
 6. Paste that URL into `config.yaml` as `discord_webhook`.
 
@@ -160,6 +168,12 @@ nothing is live:
   many route sample centers were queried, how many candidate stores came back,
   how many survived the corridor filter, and which enabled sources ignore
   radius because they are online-only.
+- **MSRP + resale confidence** — product cards show catalog MSRP plus a cached
+  rough resale estimate. The cache refreshes every four hours by default. The
+  dashboard labels each estimate by source confidence, shows the premium over
+  MSRP when available, and adds `*` when the number needs manual verification.
+  Official eBay credentials are preferred for active listing asks; fallback
+  estimates can use public eBay search or PriceCharting market summaries.
 - **Recently in stock** — restock memory per product/store: when it was last
   seen in stock and how many distinct restocks have been logged.
 - **Add Product ID** — paste a retailer product URL or bare ID and the UI writes
@@ -209,8 +223,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-task.ps1 -Rem
 - **Target**: open the product page on target.com, find the URL like `/p/.../A-93954435`. The number after `A-` is the `target_tcin`.
 - **Walmart**: open the product page on walmart.com, URL like `/ip/.../15433520586`. The trailing number is `walmart_item_id`. Skip third-party marketplace listings unless you explicitly want scalper-price alerts.
 - **Best Buy**: SKU is the digits in the URL `/site/.../6566943.p`. Prefer products sold by Best Buy; marketplace seller SKUs can point at inflated third-party listings.
+- **Costco**: parent item number is in URLs like `/pokemon-foo.product.4000313298.html`. The number after `.product.` is `costco_item_id`. The adapter resolves child item numbers before checking warehouse inventory.
 - **GameStop**: URL like `/p/pokemon-tcg-...`. The slug after `/p/` is `gamestop_pid`.
-- **Pokémon Center**: URL like `pokemoncenter.com/product/...`. The path after `/product/` is `pokemoncenter_slug`.
+- **Pokemon Center**: URL like `pokemoncenter.com/product/...`. The path after `/product/` is `pokemoncenter_slug`.
 
 Or skip the copy/paste: paste the product-page URL and let the scanner pull the
 id out and write it into `data/products.yaml` for you (comments and formatting
@@ -224,6 +239,21 @@ python -m scanner.add_id walmart prismatic_evolutions_etb 15433520586   # a bare
 Leave fields blank to skip that retailer for that product. `--check-config`
 fails if you enable a retailer but the selected products have no IDs for it,
 so either fill in the IDs or keep that retailer disabled.
+
+Use `products: all_tcg` or `products: all_sealed` to track every catalog row,
+`products: pokemon` for Pokemon-only, `products: magic` for Magic-only, or an
+explicit list of product keys when you want a tight watchlist.
+
+Each product can also carry pricing context:
+
+- `msrp` is the static retail reference shown in the dashboard and alerts.
+- `resale_query` is the market search phrase used for the rough resale estimate.
+  The scanner prefers the official eBay Browse API when you set either
+  `resale_prices.ebay.browse_api_token` or `resale_prices.ebay.client_id` plus
+  `client_secret` in your gitignored `config.yaml`. Browse API results are
+  active fixed-price asking comps, not completed sales. Without credentials it
+  tries public eBay search and PriceCharting fallback rows, and the API/UI label
+  low-confidence or high-premium results with a verification `*`.
 
 ---
 
@@ -254,14 +284,15 @@ Each retailer is a self-contained module in `scanner/retailers/`. To add a new r
 - **Coverage gaps**: Walmart's per-store stock API is unreliable; this build surfaces Walmart **online** restocks instead, which is still useful (you can ship-to-store for free). When their store API works again, the Walmart adapter is the place to add it.
 - **Local game stores (LGS)**: not auto-discoverable — every LGS uses a different POS (Square, Crystal Commerce, BinderPOS, Shopify). The cleanest path is to follow your local stores on Instagram/Discord directly; auto-scraping them is high-effort, low-yield, and antagonizes the store owners you actually want to be friendly with.
 - **Best Buy**: free developer API at https://developer.bestbuy.com — get a key, set `retailers.bestbuy.api_key`, fill `bestbuy_sku` values in `data/products.yaml`, then flip `enabled: true`.
-- **Costco / Sam's Club**: disabled placeholders only. If you enable either one, `--check-config` fails until a real adapter is implemented.
+- **Costco**: route-aware warehouse checks are implemented through Costco's warehouse locator, product summary, and inventory availability endpoints. Add real `costco_item_id` values before enabling it; `--check-config` fails if Costco is enabled with no Costco IDs.
+- **Sam's Club**: disabled placeholder only. If you enable it, `--check-config` fails until a real adapter is implemented.
 - **What to do when something hits**: alerts include a direct URL — tap it, add to cart, check out. That's the entire workflow. No bot will do this faster than a person who's already at their phone.
 
 ---
 
 ## Why this approach (and not a "leaked" tool)
 
-Every successful Pokémon restock tracker (BrickSeek, HotStock, NowInStock, the major Discords) does some combination of these four things:
+Every successful TCG restock tracker (BrickSeek, HotStock, NowInStock, the major Discords) does some combination of these four things:
 
 1. **Poll documented or de-facto-public retailer stock endpoints by SKU + zip/store** — exactly what this scanner does.
 2. **Watch product-page state changes** for online drops.

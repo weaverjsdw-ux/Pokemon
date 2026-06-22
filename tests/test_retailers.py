@@ -8,7 +8,6 @@ import yaml
 
 from scanner.retailers import ALL
 from scanner.retailers.bestbuy import BestBuy
-from scanner.retailers.costco import Costco
 from scanner.retailers.gamestop import GameStop
 from scanner.retailers.samsclub import SamsClub
 from scanner.retailers.base import Retailer
@@ -58,15 +57,13 @@ def test_disabled_placeholder_adapters_are_noop():
     products = {
         "foo": {
             "name": "Foo",
-            "costco_item_id": "12345",
             "samsclub_item_id": "67890",
         }
     }
 
-    for cls in (Costco, SamsClub):
-        retailer = cls()
-        assert retailer.find_stores(39.0, -86.0, 10) == []
-        assert list(retailer.check(products, [])) == []
+    retailer = SamsClub()
+    assert retailer.find_stores(39.0, -86.0, 10) == []
+    assert list(retailer.check(products, [])) == []
 
 
 def test_target_uses_in_store_stock_when_pickup_is_out(monkeypatch):

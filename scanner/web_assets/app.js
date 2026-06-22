@@ -143,8 +143,119 @@ function renderRunner(runner = {}, config = {}) {
 }
 
 function formatMiles(value) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+  if (typeof value !== "number" || Number.isNaN(value)) return "not measured";
   return `${value.toFixed(value % 1 ? 1 : 0)} mi`;
+}
+
+function renderPriceMetric(parent, label, value, detail = "", url = "", options = {}) {
+  const item = document.createElement("div");
+  item.className = "price-metric";
+  for (const className of options.classNames || []) item.classList.add(className);
+  if (options.title) item.title = options.title;
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  const valueEl = url ? document.createElement("a") : document.createElement("strong");
+  valueEl.textContent = value || "Not set";
+  if (url) {
+    valueEl.href = url;
+    valueEl.target = "_blank";
+    valueEl.rel = "noreferrer";
+  }
+  item.append(labelEl, valueEl);
+  if (detail) {
+    const detailEl = document.createElement("small");
+    detailEl.textContent = detail;
+    item.appendChild(detailEl);
+  }
+  parent.appendChild(item);
+}
+
+function formatPremiumRatio(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "";
+  return `${value.toFixed(value >= 10 ? 1 : 2).replace(/\.?0+$/, "")}x MSRP`;
+}
+
+function resaleConfidenceClasses(row = {}) {
+  const classes = [];
+  const confidence = row.confidence || "none";
+  classes.push(`price-confidence-${confidence}`);
+  if (row.needsVerification || row.asterisk) classes.push("price-needs-verification");
+  return classes;
+}
+
+function resalePriceDetail(row = {}) {
+  if (!row || !row.status) return "waiting for resale refresh";
+  if (row.status === "ok") {
+    const bits = [];
+    if (row.confidenceLabel) bits.push(row.confidenceLabel);
+    const ratio = formatPremiumRatio(row.premiumRatio);
+    if (ratio) bits.push(ratio);
+    if (row.needsVerification || row.asterisk) bits.push("verify before acting");
+    if (row.low && row.high && row.low !== row.high) bits.push(`${row.low}-${row.high} middle range`);
+    if (row.basis) bits.push(row.basis);
+    if (row.sampleSize && !String(row.source || "").includes("PriceCharting")) bits.push(`${row.sampleSize} listings`);
+    if (row.source) bits.push(row.source);
+    if (row.checkedAt) bits.push(`checked ${formatAgo(row.checkedAt)}`);
+    return bits.join(" | ");
+  }
+  if (row.status === "needs_auth") return "eBay API not configured";
+  if (row.status === "pending") return "waiting for resale refresh";
+  if (row.status === "no_matches") return "no matching resale source";
+  if (row.status === "no_market") return row.detail || "No reliable resale market yet; use MSRP.";
+  if (row.status === "not_released") return row.detail || "MSRP only until release/preorder data appears.";
+  if (row.status === "disabled") return "resale checks disabled";
+  return row.detail || "resale source unavailable; use MSRP.";
+}
+
+function resaleDisplayValue(row = {}) {
+  if (row.estimate) return `${row.estimate}${row.asterisk ? "*" : ""}`;
+  const status = row.status || "";
+  if (status === "not_released") return "MSRP only";
+  if (status === "no_market" || status === "no_matches") return "MSRP only";
+  if (status === "pending") return "Checking";
+  if (status === "needs_auth") return "Needs eBay auth";
+  if (status === "disabled") return "Off";
+  if (status === "error") return "MSRP only";
+  return "Checking";
+}
+
+function resaleStatusLabel(row = {}) {
+  const status = row.status || "";
+  if (status === "ok") return row.asterisk ? "verify" : "priced";
+  if (status === "not_released") return "not released";
+  if (status === "no_market" || status === "no_matches") return "MSRP only";
+  if (status === "needs_auth") return "needs auth";
+  if (status === "disabled") return "off";
+  if (status === "error") return "source issue";
+  return "checking";
+}
+
+function resaleStatusClass(row = {}) {
+  const status = row.status || "";
+  if (status === "ok" && !row.asterisk) return "market-ok";
+  if (status === "ok") return "market-verify";
+  if (status === "pending") return "market-pending";
+  if (status === "error" || status === "needs_auth") return "market-warning";
+  return "market-msrp";
+}
+
+function renderProductPrices(parent, product) {
+  const row = document.createElement("div");
+  row.className = "price-row";
+  renderPriceMetric(row, "MSRP", product.msrp || "MSRP not set");
+  const resale = product.resale || {};
+  renderPriceMetric(
+    row,
+    "Resale",
+    resaleDisplayValue(resale),
+    resalePriceDetail(resale),
+    resale.url || "",
+    {
+      classNames: resaleConfidenceClasses(resale),
+      title: resale.confidenceReason || resale.detail || "",
+    },
+  );
+  parent.appendChild(row);
 }
 
 function renderStoreDiagnostics(rows = [], config = {}) {
@@ -240,7 +351,7 @@ function renderProducts(products = []) {
     name.textContent = product.name;
     const meta = document.createElement("div");
     meta.className = "meta";
-    const parts = [product.key, product.set, product.type].filter(Boolean);
+    const parts = [product.key, product.game, product.set, product.type].filter(Boolean);
     meta.textContent = parts.join(" | ");
     text.append(name, meta);
 
@@ -281,8 +392,184 @@ function renderProducts(products = []) {
       tags.appendChild(tag);
     }
 
-    card.append(header, tags);
+    card.appendChild(header);
+    renderProductPrices(card, product);
+    card.appendChild(tags);
     list.appendChild(card);
+  }
+}
+
+function queueActionButtonLabel(oneClick = {}) {
+  if (oneClick.type === "add-id") return "Fill Add ID";
+  if (oneClick.type === "settings") return "Open Settings";
+  return "";
+}
+
+function applyQueueAction(oneClick = {}) {
+  if (oneClick.type === "add-id") {
+    const retailer = qs("#idRetailer");
+    const product = qs("#idProduct");
+    if (oneClick.retailer && [...retailer.options].some((option) => option.value === oneClick.retailer)) {
+      retailer.value = oneClick.retailer;
+    }
+    if (oneClick.productKey && [...product.options].some((option) => option.value === oneClick.productKey)) {
+      product.value = oneClick.productKey;
+    }
+    qs("#productIdForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    qs("#idValue").focus();
+    qs("#idSaveStatus").textContent = "Paste the product URL or retailer ID, then Add ID.";
+    return;
+  }
+  if (oneClick.type === "settings") {
+    qs("#configForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function renderActionQueue(items = []) {
+  const root = qs("#workQueue");
+  clear(root);
+  qs("#workQueueCount").textContent = `${items.length} open`;
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    appendTextBlock(
+      empty,
+      "No setup blockers",
+      "Enabled sources either have usable IDs or are waiting on the next scan.",
+    );
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = "work-card";
+
+    const head = document.createElement("div");
+    head.className = "work-card-title";
+    const title = document.createElement("strong");
+    title.textContent = item.title || item.action || item.slug;
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = item.action || item.state || "next";
+    head.append(title, pill);
+
+    const detail = document.createElement("div");
+    detail.className = "meta";
+    detail.textContent = item.detail || "";
+
+    const facts = document.createElement("div");
+    facts.className = "work-facts";
+    for (const [label, value] of [
+      ["Unlocks", item.count ? `${item.count} products` : ""],
+      ["Source", item.retailerName || item.slug],
+    ]) {
+      if (!value) continue;
+      const fact = document.createElement("span");
+      fact.textContent = `${label}: ${value}`;
+      facts.appendChild(fact);
+    }
+
+    const products = document.createElement("div");
+    products.className = "mini-products";
+    for (const product of (item.products || []).slice(0, 3)) {
+      const chip = document.createElement("span");
+      chip.textContent = product.name || product.key;
+      products.appendChild(chip);
+    }
+    if ((item.products || []).length > 3) {
+      const chip = document.createElement("span");
+      chip.textContent = `+${item.products.length - 3} more`;
+      products.appendChild(chip);
+    }
+
+    card.append(head, detail);
+    if (facts.childElementCount) card.appendChild(facts);
+    if (products.childElementCount) card.appendChild(products);
+
+    const label = queueActionButtonLabel(item.oneClick || {});
+    if (label) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary compact";
+      button.textContent = label;
+      button.addEventListener("click", () => applyQueueAction(item.oneClick || {}));
+      card.appendChild(button);
+    }
+    root.appendChild(card);
+  }
+}
+
+function formatReleaseDate(value) {
+  if (!value) return "";
+  return `releases ${value}`;
+}
+
+function renderMarketWatch(products = []) {
+  const root = qs("#marketWatch");
+  clear(root);
+  const watched = products
+    .filter((product) => product.selected)
+    .sort((a, b) => {
+      if ((b.priorityScore || 0) !== (a.priorityScore || 0)) {
+        return (b.priorityScore || 0) - (a.priorityScore || 0);
+      }
+      return String(a.name).localeCompare(String(b.name));
+    });
+  const priced = watched.filter((product) => product.resale?.status === "ok").length;
+  qs("#marketCount").textContent = `${priced}/${watched.length} priced`;
+
+  if (!watched.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    appendTextBlock(empty, "No watched products", "Select products in config.yaml to track MSRP and resale.");
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const product of watched) {
+    const resale = product.resale || {};
+    const card = document.createElement("article");
+    card.className = `market-card ${resaleStatusClass(resale)}`;
+
+    const head = document.createElement("div");
+    head.className = "market-card-title";
+    const title = document.createElement("strong");
+    title.textContent = product.name;
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = resaleStatusLabel(resale);
+    head.append(title, pill);
+
+    const prices = document.createElement("div");
+    prices.className = "market-prices";
+    const msrp = document.createElement("div");
+    appendTextBlock(msrp, product.msrp || "MSRP not set", "MSRP");
+    const estimate = document.createElement("div");
+    appendTextBlock(estimate, resaleDisplayValue(resale), "resale");
+    prices.append(msrp, estimate);
+
+    const detail = document.createElement("div");
+    detail.className = "meta";
+    const bits = [
+      product.set,
+      product.type,
+      formatReleaseDate(product.releaseDate),
+      resalePriceDetail(resale),
+    ].filter(Boolean);
+    detail.textContent = bits.join(" | ");
+
+    card.append(head, prices, detail);
+    if (resale.url) {
+      const link = document.createElement("a");
+      link.href = resale.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.className = "source-link";
+      link.textContent = "Open price source";
+      card.appendChild(link);
+    }
+    root.appendChild(card);
   }
 }
 
@@ -328,6 +615,7 @@ function stockClass(status) {
   if (status === "IN_STOCK" || status === "ONLINE_IN_STOCK") return "stock-in";
   if (status === "LIMITED") return "stock-limited";
   if (status === "OUT" || status === "ONLINE_OUT") return "stock-out";
+  if (status === "SCOPED") return "stock-scoped";
   if (status === "BLOCKED" || status === "SOURCE_ERROR" || status === "DISCOVERY_FAILED") return "stock-error";
   return "stock-unknown";
 }
@@ -344,6 +632,7 @@ function stockLabel(status) {
     NO_DATA: "No data",
     DISCOVERY_FAILED: "Store discovery failed",
     NOT_CHECKED: "Not checked",
+    SCOPED: "Scoped",
     UNKNOWN: "Unknown",
   };
   return labels[status] || status || "Unknown";
@@ -352,11 +641,22 @@ function stockLabel(status) {
 function renderStockBoard(board = []) {
   const root = qs("#stockBoard");
   clear(root);
-  if (!board.length) return;
+  if (!board.length) {
+    const note = document.createElement("div");
+    note.className = "discovery-note";
+    appendTextBlock(
+      note,
+      "No scoped inventory board yet",
+      "Run Check Stores to list route stores and products, or Scan Once to check inventory now.",
+    );
+    root.appendChild(note);
+    return;
+  }
 
   for (const retailer of board) {
     const section = document.createElement("section");
     section.className = "stock-retailer";
+    const inventoryChecked = retailer.inventoryChecked !== false;
 
     const title = document.createElement("div");
     title.className = "stock-retailer-title";
@@ -365,13 +665,23 @@ function renderStockBoard(board = []) {
     name.textContent = retailer.retailerName;
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = `${retailer.onlineOnly ? "Online checks" : "Route store checks"} | ${retailer.activeProductCount} products`;
+    meta.textContent = [
+      retailer.onlineOnly ? "Online checks" : inventoryChecked ? "Route inventory checks" : "Scoped route stores",
+      `${retailer.activeProductCount} products`,
+      inventoryChecked ? "inventory checked" : "ready for Scan Once",
+    ].join(" | ");
     titleText.append(name, meta);
     const checked = document.createElement("span");
     checked.className = "pill";
-    checked.textContent = retailer.checkedAt ? `checked ${formatTimestamp(retailer.checkedAt)}` : "not checked";
+    checked.textContent = inventoryChecked && retailer.checkedAt ? `checked ${formatTimestamp(retailer.checkedAt)}` : "scoped";
     title.append(titleText, checked);
     section.appendChild(title);
+    if (retailer.verdict) {
+      const verdict = document.createElement("div");
+      verdict.className = "notice";
+      verdict.textContent = retailer.verdict;
+      section.appendChild(verdict);
+    }
 
     for (const location of retailer.locations || []) {
       const card = document.createElement("article");
@@ -389,7 +699,9 @@ function renderStockBoard(board = []) {
       storeText.append(storeName, storeMeta);
       const count = document.createElement("span");
       count.className = "pill";
-      count.textContent = `${location.inStockCount || 0} hits`;
+      count.textContent = inventoryChecked
+        ? `${location.inStockCount || 0} in stock`
+        : "scoped";
       head.append(storeText, count);
       card.appendChild(head);
 
@@ -411,12 +723,13 @@ function renderStockBoard(board = []) {
       if (!(location.products || []).length) {
         const chip = document.createElement("div");
         chip.className = "stock-chip stock-unknown";
-        const noStores = String(location.storeLabel || "").toLowerCase().includes("no route stores");
+        const label = String(location.storeLabel || "").toLowerCase();
+        const noStores = label.includes("no route stores") || label.includes("blocked") || label.includes("failed");
         appendTextBlock(
           chip,
           noStores ? "No store products checked" : "No tracked products checked",
           noStores
-            ? "No route stores were discovered for this retailer on the last scan."
+            ? "No scoped stores are available for this retailer right now."
             : "No active product IDs for this scanner/store.",
         );
         products.appendChild(chip);
@@ -672,12 +985,14 @@ function renderStatus(payload) {
   const okLabel = payload.ok ? "ready" : "needs attention";
   qs("#statusText").textContent = `${okLabel} | ${configLabel}`;
   renderSummary(payload.summary || {}, payload.coverage || {});
+  renderActionQueue(payload.workQueue || []);
   renderCoverage(payload.coverage || {});
   renderHealth(payload.health || [], payload.retailers || []);
   renderRecentRestocks(payload.recentRestocks || []);
   renderRunner(runner, config);
   renderStoreDiagnostics(runner.storeDiagnostics || [], config);
   renderProducts(payload.products || []);
+  renderMarketWatch(payload.products || []);
   renderProductIdOptions(payload.retailers || [], payload.products || []);
   const runnerBoard = runner.stockBoard || [];
   renderStockBoard(runnerBoard);
@@ -736,6 +1051,12 @@ async function runAction(path, body = {}, refreshAfter = true) {
     renderLog(payload);
     if (payload.coverage) renderCoverage(payload.coverage);
     if (payload.summary || payload.coverage) renderSummary(payload.summary || {}, payload.coverage || {});
+    if (payload.workQueue) renderActionQueue(payload.workQueue);
+    if (payload.products) {
+      renderProducts(payload.products);
+      renderMarketWatch(payload.products);
+      renderProductIdOptions(payload.retailers || Object.values(state.retailers), payload.products);
+    }
     if (payload.storeDiagnostics || payload.runner?.storeDiagnostics) {
       renderStoreDiagnostics(payload.storeDiagnostics || payload.runner?.storeDiagnostics || [], {
         routeRadiusMiles: Number(qs("#routeRadiusMiles").value),

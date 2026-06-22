@@ -12,7 +12,7 @@ from pathlib import Path
 import requests
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "geocode.cache.json"
-USER_AGENT = "pokemon-restock-scanner/0.1 (personal use)"
+USER_AGENT = "tcg-msrp-restock-scanner/0.1 (personal use)"
 
 
 def _load_cache() -> dict[str, list[float]]:

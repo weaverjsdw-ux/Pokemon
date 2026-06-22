@@ -30,8 +30,14 @@ class Config:
     poll_interval_seconds: int
     discord_webhook: str
     ntfy_topic: str
-    products_filter: Any  # "all_sealed" or list[str]
+    products_filter: Any  # "all_sealed"/"all_tcg", "pokemon", "magic", or list[str]
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
+    resale_price_enabled: bool = True
+    resale_price_interval_seconds: int = 14400
+    ebay_marketplace_id: str = "EBAY_US"
+    ebay_browse_api_token: str = ""
+    ebay_client_id: str = ""
+    ebay_client_secret: str = ""
 
 
 def load(path: Path | None = None) -> Config:
@@ -81,6 +87,19 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: poll_interval_seconds must be an integer.")
 
+    resale_raw = raw.get("resale_prices") or {}
+    if not isinstance(resale_raw, dict):
+        raise SystemExit("config.yaml: resale_prices must be a mapping.")
+    ebay_raw = resale_raw.get("ebay") or {}
+    if not isinstance(ebay_raw, dict):
+        raise SystemExit("config.yaml: resale_prices.ebay must be a mapping.")
+    try:
+        resale_price_interval_seconds = int(
+            resale_raw.get("interval_seconds", 14400)
+        )
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: resale_prices.interval_seconds must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -93,13 +112,58 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         ntfy_topic=str(raw.get("ntfy_topic", "") or os.getenv("NTFY_TOPIC", "")),
         products_filter=raw.get("products", "all_sealed"),
         products=products,
+        resale_price_enabled=bool(resale_raw.get("enabled", True)),
+        resale_price_interval_seconds=resale_price_interval_seconds,
+        ebay_marketplace_id=str(
+            ebay_raw.get("marketplace_id") or os.getenv("EBAY_MARKETPLACE_ID", "EBAY_US")
+        ),
+        ebay_browse_api_token=str(
+            ebay_raw.get("browse_api_token")
+            or os.getenv("EBAY_BROWSE_API_TOKEN", "")
+            or os.getenv("EBAY_OAUTH_TOKEN", "")
+        ),
+        ebay_client_id=str(ebay_raw.get("client_id") or os.getenv("EBAY_CLIENT_ID", "")),
+        ebay_client_secret=str(
+            ebay_raw.get("client_secret") or os.getenv("EBAY_CLIENT_SECRET", "")
+        ),
     )
+
+
+ALL_PRODUCT_FILTERS = {"all", "all_sealed", "all_tcg", "all_products"}
+MAGIC_FILTERS = {"magic", "mtg", "magic_the_gathering"}
+POKEMON_FILTERS = {"pokemon", "pokemon_tcg", "pkmn"}
+
+
+def product_game_key(product: dict[str, Any]) -> str:
+    raw = str(product.get("game") or product.get("tcg") or product.get("brand") or "").lower()
+    if "magic" in raw or "mtg" in raw:
+        return "magic"
+    if "pokemon" in raw or "pokémon" in raw:
+        return "pokemon"
+    # Existing catalog rows predate the game field and are Pokemon products.
+    return "pokemon"
 
 
 def selected_products(cfg: Config) -> dict[str, dict[str, Any]]:
     """Return the product subset the user opted into."""
-    if cfg.products_filter == "all_sealed" or cfg.products_filter is None:
+    if cfg.products_filter is None:
         return cfg.products
+    if isinstance(cfg.products_filter, str):
+        filter_key = cfg.products_filter.strip().lower()
+        if filter_key in ALL_PRODUCT_FILTERS:
+            return cfg.products
+        if filter_key in POKEMON_FILTERS:
+            return {
+                key: product
+                for key, product in cfg.products.items()
+                if product_game_key(product) == "pokemon"
+            }
+        if filter_key in MAGIC_FILTERS:
+            return {
+                key: product
+                for key, product in cfg.products.items()
+                if product_game_key(product) == "magic"
+            }
     if isinstance(cfg.products_filter, list):
         missing = [k for k in cfg.products_filter if k not in cfg.products]
         if missing:

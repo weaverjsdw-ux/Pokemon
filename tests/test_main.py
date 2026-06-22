@@ -39,14 +39,14 @@ def _cfg(**overrides):
 
 
 def test_config_errors_reject_enabled_unsupported_retailer():
-    cfg = _cfg(retailers={"costco": RetailerCfg(enabled=True)})
+    cfg = _cfg(retailers={"samsclub": RetailerCfg(enabled=True)})
     errors = config_errors(cfg)
 
-    assert any("unsupported" in error and "costco" in error for error in errors)
+    assert any("unsupported" in error and "samsclub" in error for error in errors)
 
 
 def test_config_errors_allow_disabled_unsupported_retailer():
-    cfg = _cfg(retailers={"costco": RetailerCfg(enabled=False)})
+    cfg = _cfg(retailers={"samsclub": RetailerCfg(enabled=False)})
 
     assert config_errors(cfg) == []
 
@@ -83,6 +83,17 @@ def test_check_config_returns_nonzero_for_errors(capsys):
 
     assert check_config(cfg) == 1
     assert "configuration errors" in capsys.readouterr().out
+
+
+def test_check_config_redacts_private_addresses(capsys):
+    cfg = _cfg(products={"foo": {"name": "Foo", "target_tcin": "1"}})
+
+    assert check_config(cfg) == 0
+    out = capsys.readouterr().out
+    assert "1 Home St" not in out
+    assert "2 Work Ave" not in out
+    assert "home:  set (redacted)" in out
+    assert "work:  set (redacted)" in out
 
 
 def test_main_dry_run_prints_online_only_retailer(monkeypatch, capsys):
@@ -144,9 +155,9 @@ def test_enabled_retailer_slugs_ignores_unsupported_enabled_retailers():
     cfg = _cfg(
         retailers={
             "target": RetailerCfg(enabled=True),
-            "costco": RetailerCfg(enabled=True),
+            "samsclub": RetailerCfg(enabled=True),
         },
-        products={"foo": {"name": "Foo", "target_tcin": "1"}},
+        products={"foo": {"name": "Foo", "target_tcin": "1", "samsclub_item_id": "2"}},
     )
 
     assert enabled_retailer_slugs(cfg) == ["target"]

@@ -9,6 +9,7 @@ ID locations (mirrors the README "Adding products" section):
   - target:        ``/p/.../A-<digits>``      -> target_tcin
   - walmart:       ``/ip/.../<digits>``        -> walmart_item_id
   - bestbuy:       ``/site/.../<digits>.p``    -> bestbuy_sku
+  - costco:        ``.product.<digits>.html``  -> costco_item_id
   - gamestop:      ``/p/<slug>``               -> gamestop_pid
   - pokemoncenter: ``/product/<slug>``         -> pokemoncenter_slug
 """
@@ -21,6 +22,7 @@ FIELD_BY_SLUG = {
     "target": "target_tcin",
     "walmart": "walmart_item_id",
     "bestbuy": "bestbuy_sku",
+    "costco": "costco_item_id",
     "gamestop": "gamestop_pid",
     "pokemoncenter": "pokemoncenter_slug",
 }
@@ -30,6 +32,7 @@ _URL_PATTERNS = {
     "target": r"A-(\d+)",
     "walmart": r"/ip/(?:[^/?#]+/)*(\d+)",
     "bestbuy": r"/(\d+)\.p(?:\b|$)",
+    "costco": r"(?:\.product\.|/product/)(\d+)(?:\.html)?(?:\b|$)",
     "gamestop": r"/p/([^/?#]+)",
     "pokemoncenter": r"/product/([^/?#]+)",
 }

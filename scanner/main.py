@@ -444,14 +444,18 @@ def safe_demo_results(
     return results
 
 
+def _private_field_status(value: str) -> str:
+    return "set (redacted)" if str(value or "").strip() else "missing"
+
+
 def check_config(cfg: cfg_mod.Config) -> int:
     """Validate config + product catalog without making any network calls.
 
     Useful as a first sanity check after install - confirms config.yaml parses,
     addresses are set, retailers are wired, and the product catalog loads."""
     print("config.yaml: OK")
-    print(f"  home:  {cfg.home_address}")
-    print(f"  work:  {cfg.work_address}")
+    print(f"  home:  {_private_field_status(cfg.home_address)}")
+    print(f"  work:  {_private_field_status(cfg.work_address)}")
     print(f"  route_radius_miles: {cfg.route_radius_miles}")
     print(f"  routing engine: {cfg.routing_engine}")
     print(f"  poll_interval_seconds: {cfg.poll_interval_seconds}")

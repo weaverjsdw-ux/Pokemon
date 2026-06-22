@@ -16,6 +16,12 @@ PRIORITY_KEYWORDS = (
     "mega evolution",
     "booster bundle",
     "booster box",
+    "play booster",
+    "collector booster",
+    "jumpstart booster",
+    "draft night",
+    "gift bundle",
+    "bundle",
     "elite trainer box",
     "ultra-premium",
     "premium collection",
@@ -26,7 +32,7 @@ PRIORITY_KEYWORDS = (
 def product_priority(product: dict[str, Any]) -> tuple[str, int]:
     """Return (label, score). Higher score sorts first."""
     text = " ".join(
-        str(product.get(field, "")) for field in ("name", "set", "type")
+        str(product.get(field, "")) for field in ("name", "game", "set", "type")
     ).lower()
     if any(keyword in text for keyword in PRIORITY_KEYWORDS):
         return "High priority", 100

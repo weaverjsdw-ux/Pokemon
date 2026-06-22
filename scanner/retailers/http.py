@@ -6,10 +6,11 @@ A single 429 or transient 5xx shouldn't silently drop a stock check for a
 whole poll cycle, so this helper retries those with exponential backoff,
 honoring a `Retry-After` header when the server sends one.
 
-Read-only GET only - this never mutates remote state, matching the
-scanner's no-purchase/no-cart contract.
+GET/POST here are stock-query requests only - they never mutate cart or
+purchase state, matching the scanner's no-purchase/no-cart contract.
 
-Adapters call ``http.get(...)`` instead of ``requests.get(...)``. The call
+Adapters call ``http.get(...)`` / ``http.post(...)`` instead of direct
+``requests`` calls. The call
 goes through the module-level ``requests`` object at call time, so tests
 that ``monkeypatch.setattr("scanner.retailers.<mod>.requests.get", ...)``
 still intercept it (they mutate the shared ``requests`` module).
@@ -55,7 +56,8 @@ def _retry_after_seconds(resp: Any, attempt: int, backoff: float) -> float:
     return backoff * (2 ** attempt)
 
 
-def get(
+def _request(
+    method: str,
     url: str,
     *,
     retailer: str = "",
@@ -64,19 +66,19 @@ def get(
     sleep: Callable[[float], None] = time.sleep,
     **kwargs: Any,
 ) -> requests.Response:
-    """GET ``url`` with retry/backoff on rate-limit and transient 5xx.
+    """Request ``url`` with retry/backoff on rate-limit and transient 5xx.
 
     Returns the final :class:`requests.Response` (the caller still inspects
     ``status_code`` / calls ``raise_for_status`` as before). If every attempt
     fails at the transport layer, re-raises the last ``requests`` exception.
 
-    ``kwargs`` are forwarded to ``requests.get`` (params, headers, timeout).
+    ``kwargs`` are forwarded to the selected ``requests`` method.
     """
     last_exc: requests.RequestException | None = None
     resp: requests.Response | None = None
     for attempt in range(max_retries + 1):
         try:
-            resp = requests.get(url, **kwargs)
+            resp = getattr(requests, method)(url, **kwargs)
         except requests.RequestException as exc:
             last_exc = exc
             if attempt >= max_retries:
@@ -102,3 +104,45 @@ def get(
         raise last_exc
     assert resp is not None
     return resp
+
+
+def get(
+    url: str,
+    *,
+    retailer: str = "",
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    backoff: float = DEFAULT_BACKOFF,
+    sleep: Callable[[float], None] = time.sleep,
+    **kwargs: Any,
+) -> requests.Response:
+    """GET ``url`` with retry/backoff on rate-limit and transient 5xx."""
+    return _request(
+        "get",
+        url,
+        retailer=retailer,
+        max_retries=max_retries,
+        backoff=backoff,
+        sleep=sleep,
+        **kwargs,
+    )
+
+
+def post(
+    url: str,
+    *,
+    retailer: str = "",
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    backoff: float = DEFAULT_BACKOFF,
+    sleep: Callable[[float], None] = time.sleep,
+    **kwargs: Any,
+) -> requests.Response:
+    """POST ``url`` with retry/backoff on rate-limit and transient 5xx."""
+    return _request(
+        "post",
+        url,
+        retailer=retailer,
+        max_retries=max_retries,
+        backoff=backoff,
+        sleep=sleep,
+        **kwargs,
+    )

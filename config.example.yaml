@@ -27,12 +27,27 @@ retailers:
   bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
   pokemoncenter: { enabled: false }                 # Enable after adding pokemoncenter_slug IDs
   gamestop:      { enabled: false }                 # Enable after adding gamestop_pid IDs
-  costco:        { enabled: false }                 # Placeholder; no live checks yet
+  costco:        { enabled: false }                 # Enable after adding costco_item_id IDs
   samsclub:      { enabled: false }                 # Placeholder; no live checks yet
 
 # Poll interval (seconds) per retailer. Jitter is added automatically.
 # Don't crank this too low — these are public site APIs, be polite.
 poll_interval_seconds: 180
+
+# Rough resale estimates shown on the product cards. The scanner refreshes
+# cached estimates every 4 hours by default and flags low-confidence/high-premium
+# numbers with an asterisk in the UI. eBay API credentials are optional: with
+# credentials it uses the official Browse API for active asking-price comps;
+# without credentials it tries public eBay search and PriceCharting fallback rows,
+# which may be blocked or less consistent.
+resale_prices:
+  enabled: true
+  interval_seconds: 14400
+  ebay:
+    marketplace_id: EBAY_US
+    browse_api_token: ""   # or EBAY_BROWSE_API_TOKEN / EBAY_OAUTH_TOKEN
+    client_id: ""          # or EBAY_CLIENT_ID
+    client_secret: ""      # or EBAY_CLIENT_SECRET
 
 # Discord webhook URL. See README for the 30-second setup walkthrough.
 # Leave blank for console-only output.
@@ -42,7 +57,7 @@ discord_webhook: ""
 # https://ntfy.sh — just pick a unique topic name and subscribe on your phone.
 ntfy_topic: ""
 
-# Which Pokémon TCG products to track. "all_sealed" is the default and
-# covers every SKU in data/products.yaml. You can override with an explicit
-# list of product keys (see data/products.yaml).
-products: all_sealed
+# Which TCG products to track. "all_tcg" and "all_sealed" both cover every SKU
+# in data/products.yaml. Use "pokemon", "magic", or an explicit list of product
+# keys when you only want part of the catalog.
+products: all_tcg

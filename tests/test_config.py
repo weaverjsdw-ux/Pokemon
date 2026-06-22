@@ -53,9 +53,39 @@ def test_valid_config_loads_with_defaults(monkeypatch, tmp_path):
     assert cfg.route_radius_miles == 4.0  # default
     assert cfg.routing_engine == "osrm"   # default
     assert cfg.poll_interval_seconds == 180
+    assert cfg.resale_price_enabled is True
+    assert cfg.resale_price_interval_seconds == 14400
+    assert cfg.ebay_marketplace_id == "EBAY_US"
     assert cfg.retailers["target"].enabled is True
     assert cfg.retailers["walmart"].enabled is False
     assert "foo" in cfg.products
+
+
+def test_resale_price_config_loads(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations:\n"
+        "  home: '1 Home St'\n"
+        "  work: '2 Work Ave'\n"
+        "resale_prices:\n"
+        "  enabled: true\n"
+        "  interval_seconds: 7200\n"
+        "  ebay:\n"
+        "    marketplace_id: EBAY_US\n"
+        "    browse_api_token: token-1\n"
+        "    client_id: client-1\n"
+        "    client_secret: secret-1\n",
+    )
+    _write(products_path, "foo:\n  name: 'Foo'\n")
+    cfg = cfg_mod.load()
+
+    assert cfg.resale_price_enabled is True
+    assert cfg.resale_price_interval_seconds == 7200
+    assert cfg.ebay_marketplace_id == "EBAY_US"
+    assert cfg.ebay_browse_api_token == "token-1"
+    assert cfg.ebay_client_id == "client-1"
+    assert cfg.ebay_client_secret == "secret-1"
 
 
 def test_selected_products_all_sealed(monkeypatch, tmp_path):
@@ -67,6 +97,48 @@ def test_selected_products_all_sealed(monkeypatch, tmp_path):
     _write(products_path, "a: {name: A}\nb: {name: B}\n")
     cfg = cfg_mod.load()
     assert set(cfg_mod.selected_products(cfg)) == {"a", "b"}
+
+
+def test_selected_products_all_tcg_alias(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\nproducts: all_tcg\n",
+    )
+    _write(products_path, "a: {name: A}\nb: {name: B, game: 'Magic: The Gathering'}\n")
+    cfg = cfg_mod.load()
+    assert set(cfg_mod.selected_products(cfg)) == {"a", "b"}
+
+
+def test_selected_products_magic_filter(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\nproducts: magic\n",
+    )
+    _write(
+        products_path,
+        "pokemon_a: {name: A}\n"
+        "magic_a: {name: B, game: 'Magic: The Gathering'}\n"
+        "mtg_a: {name: C, game: MTG}\n",
+    )
+    cfg = cfg_mod.load()
+    assert set(cfg_mod.selected_products(cfg)) == {"magic_a", "mtg_a"}
+
+
+def test_selected_products_pokemon_filter_keeps_legacy_rows(monkeypatch, tmp_path):
+    cfg_path, products_path = _patch_paths(monkeypatch, tmp_path)
+    _write(
+        cfg_path,
+        "locations: { home: h, work: w }\nproducts: pokemon\n",
+    )
+    _write(
+        products_path,
+        "legacy_pokemon: {name: Legacy Pokemon Row}\n"
+        "magic_a: {name: B, game: 'Magic: The Gathering'}\n",
+    )
+    cfg = cfg_mod.load()
+    assert set(cfg_mod.selected_products(cfg)) == {"legacy_pokemon"}
 
 
 def test_selected_products_explicit_list(monkeypatch, tmp_path):
