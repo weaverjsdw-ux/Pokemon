@@ -251,22 +251,12 @@ from scanner.notify import StockAlert
 
 def _mini_cfg():
     from scanner import config as cfg_mod
-    return cfg_mod.from_mapping({
-        "locations": {"home": "A", "work": "B"},
-        "deal_intelligence": {
-            "verdict": {
-                "buy_floor_net": 5.0,
-                "buy_floor_roi": 10.0,
-                "skip_floor_net": 2.0,
-                "skip_floor_roi": 5.0,
-            }
-        },
-    })
+    return cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
 
 
-def test_verdict_for_alert_buy(monkeypatch):
-    # comp row: $80 sealed, high confidence; product msrp $50; observed $50.
-    row = {"status": "ok", "estimate": "$80.00", "confidence": "high"}
+def test_verdict_for_alert_buy():
+    # $120 comp on a $50 item clears default thresholds (net $42.20, 78.9% ROI) -> BUY.
+    row = {"status": "ok", "estimate": "$120.00", "confidence": "high"}
     v = main_mod.verdict_for_alert(
         cfg=_mini_cfg(), product={"msrp": "$49.99"},
         observed_price="$50.00", comp_row=row,
