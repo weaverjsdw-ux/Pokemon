@@ -12,6 +12,15 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.yaml"
 PRODUCTS_PATH = ROOT / "data" / "products.yaml"
 
+VALID_CONFIDENCE = {"none", "low", "medium", "high"}
+
+
+def _num(mapping: dict[str, Any], key: str, default: float, label: str) -> float:
+    try:
+        return float(mapping.get(key, default))
+    except (TypeError, ValueError):
+        raise SystemExit(f"config.yaml: {label} must be a number.")
+
 
 @dataclass
 class RetailerCfg:
@@ -38,6 +47,21 @@ class Config:
     ebay_browse_api_token: str = ""
     ebay_client_id: str = ""
     ebay_client_secret: str = ""
+    # --- Phase 1 deal intelligence ---
+    tax_rate: float = 0.07
+    ebay_fvf_pct: float = 0.1325
+    ebay_fixed_fee: float = 0.40
+    ebay_est_shipping: float = 8.0
+    local_haircut_pct: float = 0.15
+    skip_floor_net: float = 5.0
+    buy_floor_net: float = 15.0
+    roi_gate_enabled: bool = True
+    skip_floor_roi: float = 10.0
+    buy_floor_roi: float = 20.0
+    min_buy_confidence: str = "medium"
+    market_preferred: bool = False
+    market_api_key: str = ""
+    market_cache_ttl_seconds: int = 86400
 
 
 def load(path: Path | None = None) -> Config:
@@ -100,6 +124,25 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: resale_prices.interval_seconds must be an integer.")
 
+    di_raw = raw.get("deal_intelligence") or {}
+    if not isinstance(di_raw, dict):
+        raise SystemExit("config.yaml: deal_intelligence must be a mapping.")
+    fees_raw = di_raw.get("fees") or {}
+    verdict_raw = di_raw.get("verdict") or {}
+    market_raw = raw.get("market") or {}
+    if not isinstance(market_raw, dict):
+        raise SystemExit("config.yaml: market must be a mapping.")
+    min_conf = str(verdict_raw.get("min_buy_confidence", "medium")).lower()
+    if min_conf not in VALID_CONFIDENCE:
+        raise SystemExit(
+            "config.yaml: deal_intelligence.verdict.min_buy_confidence must be one of "
+            + ", ".join(sorted(VALID_CONFIDENCE))
+        )
+    try:
+        market_cache_ttl = int(market_raw.get("cache_ttl_seconds", 86400))
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: market.cache_ttl_seconds must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -126,6 +169,20 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         ebay_client_secret=str(
             ebay_raw.get("client_secret") or os.getenv("EBAY_CLIENT_SECRET", "")
         ),
+        tax_rate=_num(di_raw, "tax_rate", 0.07, "deal_intelligence.tax_rate"),
+        ebay_fvf_pct=_num(fees_raw, "ebay_fvf_pct", 0.1325, "deal_intelligence.fees.ebay_fvf_pct"),
+        ebay_fixed_fee=_num(fees_raw, "ebay_fixed_fee", 0.40, "deal_intelligence.fees.ebay_fixed_fee"),
+        ebay_est_shipping=_num(fees_raw, "ebay_est_shipping", 8.0, "deal_intelligence.fees.ebay_est_shipping"),
+        local_haircut_pct=_num(fees_raw, "local_haircut_pct", 0.15, "deal_intelligence.fees.local_haircut_pct"),
+        skip_floor_net=_num(verdict_raw, "skip_floor_net", 5.0, "deal_intelligence.verdict.skip_floor_net"),
+        buy_floor_net=_num(verdict_raw, "buy_floor_net", 15.0, "deal_intelligence.verdict.buy_floor_net"),
+        roi_gate_enabled=bool(verdict_raw.get("roi_gate_enabled", True)),
+        skip_floor_roi=_num(verdict_raw, "skip_floor_roi", 10.0, "deal_intelligence.verdict.skip_floor_roi"),
+        buy_floor_roi=_num(verdict_raw, "buy_floor_roi", 20.0, "deal_intelligence.verdict.buy_floor_roi"),
+        min_buy_confidence=min_conf,
+        market_preferred=bool(market_raw.get("preferred", False)),
+        market_api_key=str(market_raw.get("api_key", "") or os.getenv("PPT_API_KEY", "")),
+        market_cache_ttl_seconds=market_cache_ttl,
     )
 
 

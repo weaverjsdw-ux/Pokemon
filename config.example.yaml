@@ -49,6 +49,31 @@ resale_prices:
     client_id: ""          # or EBAY_CLIENT_ID
     client_secret: ""      # or EBAY_CLIENT_SECRET
 
+# --- Phase 1 deal intelligence: fee-adjusted BUY/THIN/SKIP verdicts on alerts ---
+# Resale comps are context for MSRP-protection decisions, never a scalping target.
+deal_intelligence:
+  tax_rate: 0.07            # cost-basis sales-tax multiplier (Indiana default)
+  fees:
+    ebay_fvf_pct: 0.1325    # eBay trading-card final value fee (incl. payment processing)
+    ebay_fixed_fee: 0.40    # eBay per-order fixed fee
+    ebay_est_shipping: 8.00 # seller-paid shipping estimate per sealed item (~2lb); per-product 'est_shipping' overrides
+    local_haircut_pct: 0.15 # local/FB sells below online comp by this fraction
+  verdict:
+    skip_floor_net: 5.00
+    buy_floor_net: 15.00
+    roi_gate_enabled: true
+    skip_floor_roi: 10
+    buy_floor_roi: 20
+    min_buy_confidence: medium   # comps weaker than this never show BUY
+
+# Optional PokemonPriceTracker market source. Optional-preferred, never required:
+# scanning runs fully without it. Free tier ~100 credits/day < full-catalog need,
+# so keep preferred:false + 24h TTL on free tier, or pay Standard for 4h cadence.
+market:
+  preferred: false
+  api_key: ""               # or PPT_API_KEY env var
+  cache_ttl_seconds: 86400  # 24h on free tier; lower only on a paid tier
+
 # Discord webhook URL. See README for the 30-second setup walkthrough.
 # Leave blank for console-only output.
 discord_webhook: ""

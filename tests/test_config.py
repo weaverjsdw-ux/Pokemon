@@ -186,3 +186,53 @@ def test_retailer_config_must_be_mapping(monkeypatch, tmp_path):
     _write(products_path, "a: {name: A}\n")
     with pytest.raises(SystemExit, match="retailers.target"):
         cfg_mod.load()
+
+
+def test_deal_intelligence_defaults_when_absent():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+    })
+    assert cfg.tax_rate == 0.07
+    assert cfg.ebay_fvf_pct == 0.1325
+    assert cfg.ebay_fixed_fee == 0.40
+    assert cfg.ebay_est_shipping == 8.0
+    assert cfg.local_haircut_pct == 0.15
+    assert cfg.skip_floor_net == 5.0
+    assert cfg.buy_floor_net == 15.0
+    assert cfg.roi_gate_enabled is True
+    assert cfg.skip_floor_roi == 10.0
+    assert cfg.buy_floor_roi == 20.0
+    assert cfg.min_buy_confidence == "medium"
+    assert cfg.market_preferred is False
+    assert cfg.market_cache_ttl_seconds == 86400
+
+
+def test_deal_intelligence_overrides_parse():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "deal_intelligence": {
+            "tax_rate": 0.0,
+            "fees": {"ebay_fvf_pct": 0.10, "ebay_fixed_fee": 0.30, "local_haircut_pct": 0.2},
+            "verdict": {
+                "skip_floor_net": 2, "buy_floor_net": 20,
+                "roi_gate_enabled": False, "skip_floor_roi": 5, "buy_floor_roi": 30,
+                "min_buy_confidence": "high",
+            },
+        },
+        "market": {"preferred": True, "api_key": "k", "cache_ttl_seconds": 3600},
+    })
+    assert cfg.tax_rate == 0.0
+    assert cfg.ebay_fvf_pct == 0.10
+    assert cfg.roi_gate_enabled is False
+    assert cfg.min_buy_confidence == "high"
+    assert cfg.market_preferred is True
+    assert cfg.market_api_key == "k"
+    assert cfg.market_cache_ttl_seconds == 3600
+
+
+def test_invalid_min_buy_confidence_rejected():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({
+            "locations": {"home": "A", "work": "B"},
+            "deal_intelligence": {"verdict": {"min_buy_confidence": "ludicrous"}},
+        })
