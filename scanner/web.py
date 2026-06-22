@@ -28,6 +28,7 @@ from . import confidence as confidence_mod
 from . import config as cfg_mod
 from . import coverage as coverage_mod
 from . import health
+from . import market
 from . import provenance
 from . import resale
 from . import workqueue
@@ -52,7 +53,14 @@ ASSETS_DIR = Path(__file__).resolve().parent / "web_assets"
 EXAMPLE_CONFIG_PATH = cfg_mod.ROOT / "config.example.yaml"
 POSITIVE_STATUSES = {"IN_STOCK", "LIMITED", "ONLINE_IN_STOCK"}
 LAST_STORE_DIAGNOSTICS: list[dict[str, Any]] = []
-RESALE_PRICES = resale.ResalePriceCache()
+RESALE_PRICES = resale.ResalePriceCache(client_factory=market.market_client_from_config)
+
+
+def build_comp_lookup(cfg: cfg_mod.Config):
+    """One snapshot per pass; return a per-key cached-row lookup."""
+    snapshot = RESALE_PRICES.snapshot(cfg)
+    products = snapshot.get("products", {})
+    return lambda key: products.get(key)
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -621,6 +629,7 @@ def _stock_board_payload(
     checked_at: int | None = None,
     store_diagnostics: list[dict[str, Any]] | None = None,
     inventory_checked: bool = True,
+    comp_lookup=None,
 ) -> list[dict[str, Any]]:
     product_payload = _product_payload(cfg)
     products = {product["key"]: product for product in product_payload}
@@ -710,6 +719,10 @@ def _stock_board_payload(
                     status_reason = ""
                     price = result.price
                     url = result.url
+                from .main import verdict_for_alert  # local import avoids a cycle at module load
+                product_data = cfg.products.get(product["key"], {})
+                comp_row = comp_lookup(product["key"]) if comp_lookup else None
+                row_verdict = verdict_for_alert(cfg, product_data, price, comp_row) or None
                 statuses.append(
                     {
                         "productKey": product["key"],
@@ -720,6 +733,7 @@ def _stock_board_payload(
                         "statusReason": status_reason,
                         "price": price,
                         "url": url,
+                        "verdict": row_verdict,
                     }
                 )
             retailer_rows.append(
@@ -1005,15 +1019,16 @@ def scan_once_payload(notify: bool = False) -> dict[str, Any]:
         )
         notifier = CapturingNotifier(cfg, forward=notify)
         state = State()
+        comp_lookup = build_comp_lookup(cfg)
         results, scan_stdout, scan_stderr = _capture_output(
-            lambda: run_pass(cfg, stores, state, notifier)
+            lambda: run_pass(cfg, stores, state, notifier, comp_lookup=comp_lookup)
         )
         checked_at = int(time.time())
     except Exception as exc:
         return {"ok": False, "errors": [_safe_error_text(str(exc))]}
 
     stores_payload = _stores_payload(stores)
-    stock_board = _stock_board_payload(cfg, stores, results, checked_at, store_diagnostics)
+    stock_board = _stock_board_payload(cfg, stores, results, checked_at, store_diagnostics, comp_lookup=comp_lookup)
     last_results = [_result_payload(result, checked_at) for result in results]
     alerts = [_alert_payload(alert) for alert in notifier.alerts]
     warnings = _warning_lines(setup_stderr + scan_stderr)
@@ -1158,8 +1173,9 @@ class ScannerRunner:
             scan_count = 0
             while not self._stop.is_set():
                 self._update(phase="scanning", nextScanAt=None)
+                comp_lookup = build_comp_lookup(cfg)
                 results, scan_stdout, scan_stderr = _capture_output(
-                    lambda: run_pass(cfg, stores, state, notifier)
+                    lambda: run_pass(cfg, stores, state, notifier, comp_lookup=comp_lookup)
                 )
                 scan_count += 1
                 now = int(time.time())
@@ -1171,7 +1187,7 @@ class ScannerRunner:
                     lastResults=[
                         _result_payload(result, now) for result in results
                     ],
-                    stockBoard=_stock_board_payload(cfg, stores, results, now, store_diagnostics),
+                    stockBoard=_stock_board_payload(cfg, stores, results, now, store_diagnostics, comp_lookup=comp_lookup),
                     warnings=_warning_lines(setup_stderr + scan_stderr),
                     stdout=_safe_log_text(setup_stdout + scan_stdout),
                     stderr=_safe_log_text(setup_stderr + scan_stderr),

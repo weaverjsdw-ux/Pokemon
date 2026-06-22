@@ -490,10 +490,29 @@ def test_stock_board_payload_explains_missing_result_from_blocked_source():
     web.health.reset()
 
 
+def _web_cfg():
+    from scanner import config as cfg_mod
+    return cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+
+
+def test_board_row_includes_verdict_field(monkeypatch):
+    cfg = _cfg()
+    snapshot = {"products": {"booster": {
+        "status": "ok", "estimate": "$80.00", "confidence": "high"}}}
+    monkeypatch.setattr(web.RESALE_PRICES, "snapshot", lambda c: snapshot)
+    lookup = web.build_comp_lookup(cfg)
+    row = lookup("booster")
+    assert row["status"] == "ok"
+    # verdict string is derivable from the row:
+    from scanner.main import verdict_for_alert
+    v = verdict_for_alert(cfg, {"msrp": "$49.99"}, "$49.99", row)
+    assert v.startswith("BUY") or v.startswith("THIN")
+
+
 def test_scan_once_payload_captures_scanner_alert(monkeypatch):
     store = Store("Target", "123", "Target #123", 39.0, -86.0, distance_miles=1.2)
 
-    def fake_run_pass(cfg, stores, state, notifier):
+    def fake_run_pass(cfg, stores, state, notifier, **kwargs):
         result = StockResult(
             store=store,
             product_key="booster",

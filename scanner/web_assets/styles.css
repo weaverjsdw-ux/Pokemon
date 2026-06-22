@@ -820,3 +820,8 @@ button.compact {
     grid-template-columns: 1fr;
   }
 }
+
+.verdict { font-weight: 600; margin-left: 0.5rem; }
+.verdict-buy { color: #2ecc71; }
+.verdict-thin { color: #f1c40f; }
+.verdict-skip { color: #95a5a6; }

@@ -718,6 +718,13 @@ function renderStockBoard(board = []) {
         const reason = item.statusReason ? ` | ${item.statusReason}` : "";
         itemMeta.textContent = `${stockLabel(item.status)} | ${item.priority}${price}${reason}`;
         chip.append(productName, itemMeta);
+        if (item.verdict) {
+          const v = document.createElement('span');
+          const tier = item.verdict.split(' ')[0].toLowerCase(); // buy|thin|skip
+          v.className = 'verdict verdict-' + tier;
+          v.textContent = item.verdict;
+          chip.appendChild(v);
+        }
         products.appendChild(chip);
       }
       if (!(location.products || []).length) {
