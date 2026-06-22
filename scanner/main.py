@@ -18,6 +18,9 @@ from typing import Any
 from . import config as cfg_mod
 from . import coverage as coverage_mod
 from . import health
+from . import margin as margin_mod
+from . import market as market_mod
+from . import verdict as verdict_mod
 from .geo import distance_to_polyline_miles, haversine_miles
 from .geocode import geocode
 from .notify import Notifier, StockAlert
@@ -329,11 +332,51 @@ def _record_empty_query_health(slug: str) -> None:
         health.record_failure(slug, "NO_DATA", "queried but returned no inventory rows")
 
 
+def _price_to_float(text: str) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"\d[\d,]*\.?\d*", str(text))  # re already imported at main.py top
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _shipping_for(product, cfg) -> float:
+    """Per-product seller-paid shipping override, else the configured default."""
+    try:
+        return float(product.get("est_shipping"))
+    except (TypeError, ValueError):
+        return cfg.ebay_est_shipping
+
+
+def verdict_for_alert(cfg, product, observed_price, comp_row) -> str:
+    """Headline verdict string for an alert, or '' when no usable comp/price."""
+    comp, confidence = market_mod.comp_from_row(comp_row or {})
+    observed = _price_to_float(observed_price)
+    if comp is None or observed is None:
+        return ""
+    fees = margin_mod.FeeModel(
+        ebay_fvf_pct=cfg.ebay_fvf_pct,
+        ebay_fixed_fee=cfg.ebay_fixed_fee,
+        local_haircut_pct=cfg.local_haircut_pct,
+    )
+    cost = margin_mod.cost_basis(observed, cfg.tax_rate)
+    ebay = margin_mod.net_margin(cost, comp, "ebay", _shipping_for(product, cfg), fees)
+    v = verdict_mod.buy_verdict(
+        ebay, confidence, verdict_mod.thresholds_from_config(cfg)
+    )
+    return v.headline
+
+
 def run_pass(
     cfg: cfg_mod.Config,
     stores_by_retailer: dict[str, list[Store]],
     state: State,
     notifier: Notifier,
+    comp_lookup: Any = None,
 ) -> list[StockResult]:
     products = cfg_mod.selected_products(cfg)
     results: list[StockResult] = []
@@ -358,6 +401,7 @@ def run_pass(
                     continue
                 prod = products.get(result.product_key, {})
                 hist = state.history_for(slug, store_id, result.product_key) or {}
+                comp_row = comp_lookup(result.product_key) if comp_lookup else None
                 alert = StockAlert(
                     retailer=retailer.name,
                     product_name=result.product_name,
@@ -371,6 +415,7 @@ def run_pass(
                     image_url=str(prod.get("image") or ""),
                     first_seen=hist.get("firstSeen"),
                     seen_count=hist.get("inStockCount"),
+                    verdict=verdict_for_alert(cfg, prod, result.price, comp_row),
                 )
                 notifier.send(alert)
         except Exception as exc:
