@@ -82,7 +82,7 @@ Expected: "Switched to a new branch 'phase1-deal-intelligence'". `git status --p
 - Test: `tests/test_config.py`
 
 **Interfaces:**
-- Produces: `Config` gains fields — `tax_rate: float = 0.07`; `ebay_fvf_pct: float = 0.1325`; `ebay_fixed_fee: float = 0.40`; `local_haircut_pct: float = 0.15`; `skip_floor_net: float = 5.0`; `buy_floor_net: float = 15.0`; `roi_gate_enabled: bool = True`; `skip_floor_roi: float = 10.0`; `buy_floor_roi: float = 20.0`; `min_buy_confidence: str = "medium"`; `market_preferred: bool = False`; `market_api_key: str = ""`; `market_cache_ttl_seconds: int = 86400`. Parsed from a top-level `deal_intelligence:` mapping (with nested `fees:`, `verdict:`) and a `market:` mapping.
+- Produces: `Config` gains fields — `tax_rate: float = 0.07`; `ebay_fvf_pct: float = 0.1325`; `ebay_fixed_fee: float = 0.40`; `ebay_est_shipping: float = 8.0`; `local_haircut_pct: float = 0.15`; `skip_floor_net: float = 5.0`; `buy_floor_net: float = 15.0`; `roi_gate_enabled: bool = True`; `skip_floor_roi: float = 10.0`; `buy_floor_roi: float = 20.0`; `min_buy_confidence: str = "medium"`; `market_preferred: bool = False`; `market_api_key: str = ""`; `market_cache_ttl_seconds: int = 86400`. Parsed from a top-level `deal_intelligence:` mapping (with nested `fees:`, `verdict:`) and a `market:` mapping.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -98,6 +98,7 @@ def test_deal_intelligence_defaults_when_absent():
     assert cfg.tax_rate == 0.07
     assert cfg.ebay_fvf_pct == 0.1325
     assert cfg.ebay_fixed_fee == 0.40
+    assert cfg.ebay_est_shipping == 8.0
     assert cfg.local_haircut_pct == 0.15
     assert cfg.skip_floor_net == 5.0
     assert cfg.buy_floor_net == 15.0
@@ -155,6 +156,7 @@ In `scanner/config.py`, append to the `Config` dataclass (after `ebay_client_sec
     tax_rate: float = 0.07
     ebay_fvf_pct: float = 0.1325
     ebay_fixed_fee: float = 0.40
+    ebay_est_shipping: float = 8.0
     local_haircut_pct: float = 0.15
     skip_floor_net: float = 5.0
     buy_floor_net: float = 15.0
@@ -209,6 +211,7 @@ Then add these keyword arguments to the `return Config(...)` call:
         tax_rate=_num(di_raw, "tax_rate", 0.07, "deal_intelligence.tax_rate"),
         ebay_fvf_pct=_num(fees_raw, "ebay_fvf_pct", 0.1325, "deal_intelligence.fees.ebay_fvf_pct"),
         ebay_fixed_fee=_num(fees_raw, "ebay_fixed_fee", 0.40, "deal_intelligence.fees.ebay_fixed_fee"),
+        ebay_est_shipping=_num(fees_raw, "ebay_est_shipping", 8.0, "deal_intelligence.fees.ebay_est_shipping"),
         local_haircut_pct=_num(fees_raw, "local_haircut_pct", 0.15, "deal_intelligence.fees.local_haircut_pct"),
         skip_floor_net=_num(verdict_raw, "skip_floor_net", 5.0, "deal_intelligence.verdict.skip_floor_net"),
         buy_floor_net=_num(verdict_raw, "buy_floor_net", 15.0, "deal_intelligence.verdict.buy_floor_net"),
@@ -238,6 +241,7 @@ deal_intelligence:
   fees:
     ebay_fvf_pct: 0.1325    # eBay trading-card final value fee (incl. payment processing)
     ebay_fixed_fee: 0.40    # eBay per-order fixed fee
+    ebay_est_shipping: 8.00 # seller-paid shipping estimate per sealed item (~2lb); per-product 'est_shipping' overrides
     local_haircut_pct: 0.15 # local/FB sells below online comp by this fraction
   verdict:
     skip_floor_net: 5.00
@@ -887,19 +891,18 @@ def test_no_verdict_means_no_verdict_text():
 def test_verdict_added_to_discord_embed_fields():
     from scanner.notify import Notifier
     alert = _alert(verdict="SKIP · +$0.50 net, 1% ROI")
-    embed_fields = []
+    embed = Notifier(discord_webhook="x")._build_embed(alert)
+    verdict_fields = [f for f in embed["fields"] if f["name"] == "Verdict"]
+    assert verdict_fields and verdict_fields[0]["value"] == "SKIP · +$0.50 net, 1% ROI"
 
-    class _N(Notifier):
-        def _discord(self, a):  # capture the embed the real method would build
-            return super()._discord(a)
 
-    # Build the embed inline to assert structure (mirror _discord field logic):
-    n = Notifier(discord_webhook="")  # no webhook -> send() won't POST
-    # Directly assert the field-building contract:
-    assert alert.verdict == "SKIP · +$0.50 net, 1% ROI"
+def test_no_verdict_means_no_verdict_embed_field():
+    from scanner.notify import Notifier
+    embed = Notifier(discord_webhook="x")._build_embed(_alert())
+    assert not any(f["name"] == "Verdict" for f in embed["fields"])
 ```
 
-> Note: the third test asserts the field value is present on the alert; the embed-field wiring is verified by the assertion in Step 3's code review and the `test_web`/manual spot-check. Keep unit tests free of live HTTP.
+> The embed dict is built by a pure `_build_embed` helper (Step 3) so it is unit-testable without any live HTTP POST.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -921,14 +924,41 @@ In `_context_bits`, append before `return bits`:
             bits.append(self.verdict)
 ```
 
-In `_discord`, after the `priority` field block (around `notify.py:103`), add:
+Refactor `_discord` to build its embed via a new pure method `_build_embed`, so the
+embed is testable without an HTTP POST. Extract the existing embed-construction
+body of `_discord` (the `color`, `embed = {...}`, and all the `if alert.*:` field
+appends) into `_build_embed(self, alert) -> dict` that returns `embed`; then
+`_discord` becomes:
+
+```python
+    def _discord(self, alert: StockAlert) -> None:
+        embed = self._build_embed(alert)
+        try:
+            requests.post(
+                self.discord_webhook,
+                data=json.dumps({"embeds": [embed]}),
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            print(f"  ! discord webhook failed: {exc}", file=sys.stderr)
+```
+
+Inside `_build_embed`, after the `priority` field block (the existing
+`if alert.priority ...` around `notify.py:103`), add the verdict field and return:
 
 ```python
         if alert.verdict:
             embed["fields"].append(
                 {"name": "Verdict", "value": alert.verdict, "inline": False}
             )
+        if alert.image_url:
+            embed["thumbnail"] = {"url": alert.image_url}
+        return embed
 ```
+
+(The `image_url`/`thumbnail` block moves into `_build_embed` as part of the
+extraction; do not leave it behind in `_discord`.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1004,16 +1034,23 @@ Add this helper near the other module-level helpers (e.g. above `run_pass`):
 
 ```python
 def _price_to_float(text: str) -> float | None:
-    import re as _re
     if not text:
         return None
-    match = _re.search(r"\d[\d,]*\.?\d*", str(text))
+    match = re.search(r"\d[\d,]*\.?\d*", str(text))  # re already imported at main.py top
     if not match:
         return None
     try:
         return float(match.group(0).replace(",", ""))
     except ValueError:
         return None
+
+
+def _shipping_for(product, cfg) -> float:
+    """Per-product seller-paid shipping override, else the configured default."""
+    try:
+        return float(product.get("est_shipping"))
+    except (TypeError, ValueError):
+        return cfg.ebay_est_shipping
 
 
 def verdict_for_alert(cfg, product, observed_price, comp_row) -> str:
@@ -1028,17 +1065,16 @@ def verdict_for_alert(cfg, product, observed_price, comp_row) -> str:
         local_haircut_pct=cfg.local_haircut_pct,
     )
     cost = margin_mod.cost_basis(observed, cfg.tax_rate)
-    ebay = margin_mod.net_margin(cost, comp, "ebay", _est_shipping(product), fees)
+    ebay = margin_mod.net_margin(cost, comp, "ebay", _shipping_for(product, cfg), fees)
     v = verdict_mod.buy_verdict(
         ebay, confidence, verdict_mod.thresholds_from_config(cfg)
     )
     return v.headline
-
-
-def _est_shipping(product) -> float:
-    """Flat seller-paid shipping estimate; configurable later. Sealed ~2lb."""
-    return 8.0
 ```
+
+(`re` is already imported at `main.py:12`; do not add a local import. `_shipping_for`
+reads the configured `ebay_est_shipping`, with an optional per-product `est_shipping`
+override — no hardcoded shipping number.)
 
 - [ ] **Step 4: Thread `comp_lookup` into `run_pass`**
 
@@ -1231,25 +1267,20 @@ git commit -m "feat(web): inject market client and show verdict on the board"
 
 ```python
 # tests/test_main.py  (add)
-def test_missing_costco_pc_ids_do_not_break_run_pass(monkeypatch):
+def test_missing_costco_pc_ids_do_not_break_run_pass(tmp_path):
     """Engine must run with zero Costco/PC IDs (graceful, not an exception)."""
     from scanner import config as cfg_mod
-    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
-    # No retailers enabled -> run_pass returns [] without raising.
     from scanner.state import State
     from scanner.notify import Notifier
-    state = State(":memory:") if _state_accepts_memory() else State()
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    # No retailers enabled -> run_pass returns [] without raising.
+    state = State(db_path=tmp_path / "state.db")
     results = main_mod.run_pass(cfg, {}, state, Notifier())
     assert results == []
-
-
-def _state_accepts_memory():
-    import inspect
-    from scanner.state import State
-    return "path" in inspect.signature(State.__init__).parameters
 ```
 
-> If `State()` cannot take `:memory:`, use the existing test's standard `State` construction pattern from the current `tests/test_main.py` instead of the `:memory:` branch.
+> `State(db_path=tmp_path / "state.db")` is the construction pattern used by
+> `tests/test_state_history.py:11`. `tmp_path` is a built-in pytest fixture.
 
 - [ ] **Step 2: Run test to verify it passes (this is a guard, may already pass)**
 
