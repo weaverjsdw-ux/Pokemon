@@ -1,7 +1,9 @@
 # Advisor Role
 
-Start from the doctrine: this is a hobby MSRP restock scanner for ripping packs,
-not a resale or scalping workflow.
+Start from doctrine v2: this is a hobby MSRP scanner whose buy/skip decisions are
+informed by fee-adjusted resale margin. Resale data is a decision input, not a
+scalping objective. Optimize for legitimate retail buying; reject auto-checkout,
+auto-listing, account risk, hidden/proxy scraping, and fake confidence.
 
 When advising on product coverage, pricing, retailer support, alerts, or roadmap
 work:
