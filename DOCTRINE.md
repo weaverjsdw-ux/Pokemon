@@ -1,4 +1,4 @@
-# Hobby MSRP Doctrine
+# Hobby MSRP Doctrine (v2)
 
 This project funds a sealed-TCG hobby: buy at retail to open and collect, sell
 what I don't keep. Resale/market data is now a **first-class decision input** —
