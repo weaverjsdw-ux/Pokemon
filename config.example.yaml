@@ -24,7 +24,7 @@ routing:
 retailers:
   target:        { enabled: true }
   walmart:       { enabled: true }                   # Online-only signal in this build
-  bestbuy:       { enabled: false, api_key: "" }   # Free key: https://developer.bestbuy.com
+  bestbuy:       { enabled: false, api_key: "" }   # 17/22 SKUs ready. Set enabled:true + free key (https://developer.bestbuy.com). Absent key => stays disabled, never errors.
   pokemoncenter: { enabled: false }                 # Enable after adding pokemoncenter_slug IDs
   gamestop:      { enabled: false }                 # Enable after adding gamestop_pid IDs
   costco:        { enabled: false }                 # Enable after adding costco_item_id IDs

@@ -270,3 +270,15 @@ def test_verdict_for_alert_no_comp_returns_empty():
         observed_price="$50.00", comp_row=None,
     )
     assert v == ""
+
+
+def test_missing_costco_pc_ids_do_not_break_run_pass(tmp_path):
+    """Engine must run with zero Costco/PC IDs (graceful, not an exception)."""
+    from scanner import config as cfg_mod
+    from scanner.state import State
+    from scanner.notify import Notifier
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    # No retailers enabled -> run_pass returns [] without raising.
+    state = State(db_path=tmp_path / "state.db")
+    results = main_mod.run_pass(cfg, {}, state, Notifier())
+    assert results == []
