@@ -48,9 +48,13 @@ advises; the human transacts. (`DOCTRINE.md` v2, `ADVISOR_ROLE.md`.)
 2. **All three asset classes** — sealed, raw singles, and graded slabs are all
    eligible for discovery, each **gated on a verified comp for its own class**. A
    row renders as a *deal* only when its margin is real ("IF the prices are truly
-   worth it"). Sealed ships verified now; raw + graded ride along as their comp
-   sources are confirmed, degrading to labeled `EST` (never a confirmed steal)
-   until then.
+   worth it"). Sealed is expected to clear the gate first; raw + graded ride along
+   as their comp sources are confirmed. **Whether sealed itself yields a
+   verified-tier comp in the current repo state is a Phase-0 check (§13.0), not an
+   assumption** — PPT is `preferred=false` by default and its key is an unobtained
+   prereq, so if the only live source is the low-confidence public fallback, even
+   sealed renders `EST` until the key/quota lands. Nothing renders as a confirmed
+   steal without a verified comp.
 3. **Backbone-anchored hybrid comps** — `scanner.market`/`scanner.resale`
    (PokemonPriceTracker + eBay-sold) is the source of truth wherever it has
    coverage, so the dashboard matches the scanner's verdicts. In-session AI research
@@ -116,6 +120,10 @@ auto-launches a budget-spending sweep. Reserved verbs are the only paths that sp
 WebSearch budget or write state; a question that merely mentions "deals" is
 answered in Expert mode with an *offer* to scan.
 
+`check`'s **BUY/WAIT/SKIP** is a *timing* call (buy now vs wait for a better price),
+deliberately distinct from the scanner's **BUY/THIN/SKIP** margin *tier*; when the
+item is a catalog SKU, `check` surfaces the scanner's verdict alongside its own call.
+
 ### 3.3 Asset-class gating (the "worth it" rule, made literal)
 
 The discovery engine is asset-class-agnostic. A candidate becomes a rendered
@@ -133,9 +141,14 @@ A row failing the gate is NOT rendered as a confirmed deal:
   - no usable comp -> excluded from deal rows (may appear in "needs comp" note)
 ```
 
-Sealed has backbone coverage today. Raw and graded render as confirmed deals only
-once their comp source is confirmed trustworthy during the build; until then they
-surface EST-labeled or are held back — never fluently bluffed.
+Sealed is **expected** to have backbone coverage, but that is a Phase-0
+verification (§13.0), not a given: confirm a sealed product yields a *verified-tier*
+comp end-to-end through `scanner.market`/`resale` in the current repo state. If the
+only live source today is the low-confidence `PublicFallbackResaleClient` (PPT
+`preferred=false`, key unobtained), even sealed renders `EST` until the PPT
+key/quota lands. Raw and graded render as confirmed deals only once their comp
+source is confirmed trustworthy during the build; until then they surface
+EST-labeled or are held back — never fluently bluffed.
 
 ---
 
@@ -295,8 +308,11 @@ Runs post-render every sweep; parses the rendered HTML. **HARD FAIL on:**
 - Missing a required section: **Top Steals**, **Watch Out**, **Sources**.
 - Total deal rows below a configurable floor (`poke.min_rows`, default 10) —
   "likely acquisition failure; do not trust."
-- Forbidden wording: MSRP presented as market price; any phrasing that presents an
-  estimated/AI-derived comp as verified.
+- **Structural provenance invariant** (the mechanically-checkable version): every
+  row marked `verified` carries a non-empty `data-source-url` + `data-captured-at`;
+  every `EST` row carries an `EST` badge element; no row places MSRP in the
+  market-comp position. (Detecting an EST comp *semantically* presented as verified
+  is the STOP GATE's job on the **data**, §6 — not something an HTML test can see.)
 
 **WARN (render with banner) on:** an event-expected section (per `tcg_events.md`)
 absent; item-count drop >30% vs the prior comparable sweep; any seed source that
@@ -428,12 +444,29 @@ equivalent weight is **authenticity and value-trap discipline**:
 
 ## 13. Open items for the implementation plan
 
-External/empirical prerequisites to resolve early so the plan can sequence:
+### 13.0 Phase 0 spike — run before the full plan
+
+Two empirical unknowns are **load-bearing**: either can invalidate a fixed
+decision, so they are resolved first as a short spike, not buried assumptions.
+
+- **Comp-verification probe (gates decision #2).** Does a *sealed* product yield a
+  **verified-tier** comp end-to-end through `scanner.market`/`scanner.resale` in the
+  current repo state? PPT is `preferred=false` by default with an unobtained key; if
+  the only live source is the low-confidence `PublicFallbackResaleClient`, then under
+  the §3.3 render gate even sealed renders `EST`, not STEAL — which reshapes the
+  dashboard's character and the "sealed ships verified" promise. Resolve the PPT
+  key/quota question here. **Output:** a yes/no on verified-tier sealed comps today,
+  and the plan branch each answer implies.
+- **Source-fetchability probe (shapes DISCOVER).** Playwright/WebFetch each candidate
+  source in `sources.md`; record fetchable vs Cloudflare-blocked from live evidence.
+  If fetchable TCG deal feeds are thin (no gun.deals-equivalent firehose), DISCOVER
+  shifts from aggregator-led toward direct eBay/TCGplayer marketplace scanning, and
+  the dashboard leans more on marketplace mispricings than curated sale pages.
+
+### 13.1 Details to confirm during planning
+
 - **PokemonPriceTracker** graded + singles endpoint shapes and credit cost (the
   free-tier vs paid framing is inherited from the Phase-1 spec §3.2/§3.6).
-- **Source fetchability probe** — Playwright/WebFetch probe of each candidate
-  source in `sources.md`; record fetchable vs Cloudflare-blocked tiers from live
-  evidence, not assumption.
 - **Exact lens strong-signal cutoffs** — pin the numeric thresholds (e.g. INV
   appreciation basis, PLY meta-relevance source) during planning.
 - **Template adaptation** — port the gun `template.html` structure, swapping
