@@ -236,3 +236,30 @@ def test_invalid_min_buy_confidence_rejected():
             "locations": {"home": "A", "work": "B"},
             "deal_intelligence": {"verdict": {"min_buy_confidence": "ludicrous"}},
         })
+
+
+def test_poke_defaults_when_absent():
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.poke.min_rows == 10
+    assert cfg.poke.staleness_days == 30
+    assert cfg.poke.steal_pct == 30.0
+    assert cfg.poke.min_discount_pct == 5.0
+    assert cfg.poke.grading_cost_all_in == 97.50
+
+
+def test_poke_overrides_parse():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"min_rows": 5, "staleness_days": 14, "steal_pct": 25,
+                 "min_discount_pct": 8, "grading_cost_all_in": 80},
+    })
+    assert cfg.poke.min_rows == 5
+    assert cfg.poke.staleness_days == 14
+    assert cfg.poke.steal_pct == 25.0
+    assert cfg.poke.min_discount_pct == 8.0
+    assert cfg.poke.grading_cost_all_in == 80.0
+
+
+def test_poke_must_be_mapping():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}, "poke": []})

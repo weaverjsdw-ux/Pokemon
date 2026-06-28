@@ -29,6 +29,15 @@ class RetailerCfg:
 
 
 @dataclass
+class PokeCfg:
+    min_rows: int = 10            # golden-test acquisition-failure floor
+    staleness_days: int = 30      # comp older than this is flagged stale
+    steal_pct: float = 30.0       # verified deal at/above this % off -> STEAL eligible
+    min_discount_pct: float = 5.0 # below this % off market -> not a deal row
+    grading_cost_all_in: float = 97.50  # live PSA tier all-in (config, value tiers paused 2026-06)
+
+
+@dataclass
 class Config:
     home_address: str
     work_address: str
@@ -62,6 +71,7 @@ class Config:
     market_preferred: bool = False
     market_api_key: str = ""
     market_cache_ttl_seconds: int = 86400
+    poke: PokeCfg = field(default_factory=PokeCfg)
 
 
 def load(path: Path | None = None) -> Config:
@@ -143,6 +153,22 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: market.cache_ttl_seconds must be an integer.")
 
+    poke_raw = raw.get("poke")
+    if poke_raw is None:
+        poke_raw = {}
+    if not isinstance(poke_raw, dict):
+        raise SystemExit("config.yaml: poke must be a mapping.")
+    try:
+        poke_cfg = PokeCfg(
+            min_rows=int(poke_raw.get("min_rows", 10)),
+            staleness_days=int(poke_raw.get("staleness_days", 30)),
+            steal_pct=_num(poke_raw, "steal_pct", 30.0, "poke.steal_pct"),
+            min_discount_pct=_num(poke_raw, "min_discount_pct", 5.0, "poke.min_discount_pct"),
+            grading_cost_all_in=_num(poke_raw, "grading_cost_all_in", 97.50, "poke.grading_cost_all_in"),
+        )
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days must be integers.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -183,6 +209,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         market_preferred=bool(market_raw.get("preferred", False)),
         market_api_key=str(market_raw.get("api_key", "") or os.getenv("PPT_API_KEY", "")),
         market_cache_ttl_seconds=market_cache_ttl,
+        poke=poke_cfg,
     )
 
 

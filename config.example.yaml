@@ -74,6 +74,15 @@ market:
   api_key: ""               # or PPT_API_KEY env var
   cache_ttl_seconds: 86400  # 24h on free tier; lower only on a paid tier
 
+# --- /poke AI deal-research pipeline (discovery sweeps) ---
+# Discovery is a sibling to the scanner; comps are anchored to the same backbone.
+poke:
+  min_rows: 10              # golden-test floor; a sweep below this is "likely acquisition failure"
+  staleness_days: 30        # a comp older than this is flagged stale, excluded from STEAL
+  steal_pct: 30             # a VERIFIED deal at/above this % off market is STEAL-eligible
+  min_discount_pct: 5       # below this % off market it is not a deal row
+  grading_cost_all_in: 97.50  # live PSA tier all-in (value tiers paused 2026-06; config, not hardcoded)
+
 # Discord webhook URL. See README for the 30-second setup walkthrough.
 # Leave blank for console-only output.
 discord_webhook: ""
