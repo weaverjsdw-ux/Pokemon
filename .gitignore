@@ -41,3 +41,6 @@ test_baseline.txt
 .vscode/
 .idea/
 .DS_Store
+
+# /poke rendered dashboards are build output (regenerate via `python -m scanner.discovery.render`)
+dashboards/

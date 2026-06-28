@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scanner.discovery.render import nav_anchors, element_ids, render_sweep
+from scanner.discovery.render import _safe_href, nav_anchors, element_ids, render_sweep
 from scanner.discovery.schema import StopGateError
 
 SWEEP = json.loads(Path("data/poke/fixtures/sample-sweep.json").read_text(encoding="utf-8"))
@@ -41,3 +41,21 @@ def test_stop_gate_blocks_render_on_bad_row():
     bad["deals"][0]["source_url"] = ""   # verified row missing source
     with pytest.raises(StopGateError):
         render_sweep(bad)
+
+
+def test_safe_href_allows_http_blocks_script_uris():
+    assert _safe_href("https://example.com/x") == "https://example.com/x"
+    assert _safe_href("http://example.com/x") == "http://example.com/x"
+    assert _safe_href("javascript:alert(1)") == ""
+    assert _safe_href("data:text/html,<script>alert(1)</script>") == ""
+    assert _safe_href("") == ""
+
+
+def test_render_drops_javascript_uri_from_href():
+    # An untrusted javascript: source_url must never become a clickable href.
+    # (deal_price is a string-ish javascript payload only in source_url; the row
+    #  is otherwise valid so it passes the STOP gate and reaches render.)
+    evil = json.loads(json.dumps(SWEEP))
+    evil["promo_codes"][0]["source_url"] = "javascript:alert(document.cookie)"
+    html = render_sweep(evil)
+    assert "javascript:alert" not in html

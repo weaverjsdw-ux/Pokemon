@@ -4,29 +4,282 @@
   "captured_window": "2026-06-27",
   "notes": "Hand-authored Phase-1 fixture (sealed-first). Illustrative prices.",
   "deals": [
-    {"item": "Prismatic Evolutions Elite Trainer Box", "set": "Prismatic Evolutions", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 39.99, "market_comp": 60.0, "pct_off": 33, "retailer": "Target", "source_url": "https://example.com/pe-etb", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": ["STEAL"], "lens_tags": ["INV", "FLP"], "stock_status": "in-stock", "stock_evidence": "page says in stock", "scanner_verdict": "BUY · +$16 net, 38% ROI"},
-    {"item": "Surging Sparks Elite Trainer Box", "set": "Surging Sparks", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 41.99, "market_comp": 55.0, "pct_off": 24, "retailer": "Best Buy", "source_url": "https://example.com/ss-etb", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": [], "lens_tags": ["INV"], "stock_status": "in-stock"},
-    {"item": "Journey Together Booster Bundle", "set": "Journey Together", "asset_class": "sealed", "category": "sealed-bundle", "deal_price": 22.99, "market_comp": 30.0, "pct_off": 23, "retailer": "Costco", "source_url": "https://example.com/jt-bundle", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "medium", "badges": [], "lens_tags": ["FLP"], "stock_status": "limited"},
-    {"item": "Destined Rivals Elite Trainer Box", "set": "Destined Rivals", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 38.0, "market_comp": 58.0, "pct_off": 34, "retailer": "Pokemon Center", "source_url": "https://example.com/dr-etb", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": ["STEAL"], "lens_tags": ["INV", "FLP"], "reprint_risk": false, "stock_status": "in-stock"},
-    {"item": "Scarlet & Violet 151 Booster Bundle", "set": "151", "asset_class": "sealed", "category": "sealed-bundle", "deal_price": 24.99, "market_comp": 34.0, "pct_off": 27, "retailer": "Target", "source_url": "https://example.com/151-bundle", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": [], "lens_tags": ["FLP"], "stock_status": "in-stock"},
-    {"item": "Paldean Fates Elite Trainer Box", "set": "Paldean Fates", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 44.99, "market_comp": 70.0, "pct_off": 36, "retailer": "Best Buy", "source_url": "https://example.com/pf-etb", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": ["STEAL"], "lens_tags": ["COL", "INV", "FLP"], "finite": true, "stock_status": "limited"},
-    {"item": "Crown Zenith Elite Trainer Box", "set": "Crown Zenith", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 49.99, "market_comp": 75.0, "pct_off": 33, "retailer": "GameStop", "source_url": "https://example.com/cz-etb", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "badges": ["STEAL"], "lens_tags": ["COL", "INV", "FLP"], "finite": true, "stock_status": "in-stock"},
-    {"item": "Prismatic Evolutions Booster Bundle", "set": "Prismatic Evolutions", "asset_class": "sealed", "category": "sealed-bundle", "deal_price": 23.99, "market_comp": 33.0, "pct_off": 27, "retailer": "Walmart", "source_url": "https://example.com/pe-bundle", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "medium", "badges": [], "lens_tags": ["FLP"], "stock_status": "in-stock"},
-    {"item": "Surging Sparks Booster Bundle", "set": "Surging Sparks", "asset_class": "sealed", "category": "sealed-bundle", "deal_price": 24.5, "market_comp": 31.0, "pct_off": 21, "retailer": "Target", "source_url": "https://example.com/ss-bundle", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "medium", "badges": [], "lens_tags": [], "stock_status": "in-stock"},
-    {"item": "151 Elite Trainer Box (est comp)", "set": "151", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 42.0, "market_comp": 64.0, "pct_off": 34, "retailer": "Local LGS", "source_url": "https://example.com/151-etb-est", "captured_at": "2026-06-27", "price_confidence": "est", "comp_confidence": "low", "derivation_method": "comp_inference", "confidence_detail": "inferred from nearby sold range; no direct sealed comp", "badges": ["EST"], "lens_tags": [], "stock_status": "unknown"},
-    {"item": "Prismatic Evolutions ETB (too-cheap, possible reseal)", "set": "Prismatic Evolutions", "asset_class": "sealed", "category": "sealed-etb", "deal_price": 24.0, "market_comp": 60.0, "pct_off": 60, "retailer": "Marketplace seller", "source_url": "https://example.com/pe-etb-suspect", "captured_at": "2026-06-27", "price_confidence": "verified", "comp_confidence": "high", "authenticity_risk": true, "warn_reason": "60% under market with no clearance/used explanation — possible reseal; verify factory seal", "badges": ["WARN"], "lens_tags": [], "stock_status": "unknown"}
+    {
+      "item": "Prismatic Evolutions Elite Trainer Box",
+      "set": "Prismatic Evolutions",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 39.99,
+      "market_comp": 60.0,
+      "pct_off": 33,
+      "retailer": "Target",
+      "source_url": "https://example.com/pe-etb",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [
+        "STEAL"
+      ],
+      "lens_tags": [
+        "PLY",
+        "INV"
+      ],
+      "stock_status": "in-stock",
+      "stock_evidence": "page says in stock",
+      "scanner_verdict": "SKIP · +$0.86 net, 2.00982% ROI"
+    },
+    {
+      "item": "Surging Sparks Elite Trainer Box",
+      "set": "Surging Sparks",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 41.99,
+      "market_comp": 55.0,
+      "pct_off": 24,
+      "retailer": "Best Buy",
+      "source_url": "https://example.com/ss-etb",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [],
+      "lens_tags": [
+        "PLY",
+        "INV"
+      ],
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "Journey Together Booster Bundle",
+      "set": "Journey Together",
+      "asset_class": "sealed",
+      "category": "sealed-bundle",
+      "deal_price": 22.99,
+      "market_comp": 30.0,
+      "pct_off": 23,
+      "retailer": "Costco",
+      "source_url": "https://example.com/jt-bundle",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "medium",
+      "badges": [],
+      "lens_tags": [
+        "INV"
+      ],
+      "stock_status": "limited"
+    },
+    {
+      "item": "Destined Rivals Elite Trainer Box",
+      "set": "Destined Rivals",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 38.0,
+      "market_comp": 58.0,
+      "pct_off": 34,
+      "retailer": "Pokemon Center",
+      "source_url": "https://example.com/dr-etb",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [
+        "STEAL"
+      ],
+      "lens_tags": [
+        "PLY",
+        "INV"
+      ],
+      "reprint_risk": false,
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "Scarlet & Violet 151 Booster Bundle",
+      "set": "151",
+      "asset_class": "sealed",
+      "category": "sealed-bundle",
+      "deal_price": 24.99,
+      "market_comp": 34.0,
+      "pct_off": 27,
+      "retailer": "Target",
+      "source_url": "https://example.com/151-bundle",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [],
+      "lens_tags": [
+        "INV"
+      ],
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "Paldean Fates Elite Trainer Box",
+      "set": "Paldean Fates",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 44.99,
+      "market_comp": 70.0,
+      "pct_off": 36,
+      "retailer": "Best Buy",
+      "source_url": "https://example.com/pf-etb",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [
+        "STEAL"
+      ],
+      "lens_tags": [
+        "COL",
+        "PLY",
+        "INV"
+      ],
+      "finite": true,
+      "stock_status": "limited"
+    },
+    {
+      "item": "Crown Zenith Elite Trainer Box",
+      "set": "Crown Zenith",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 49.99,
+      "market_comp": 75.0,
+      "pct_off": 33,
+      "retailer": "GameStop",
+      "source_url": "https://example.com/cz-etb",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "badges": [
+        "STEAL"
+      ],
+      "lens_tags": [
+        "COL",
+        "PLY",
+        "INV"
+      ],
+      "finite": true,
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "Prismatic Evolutions Booster Bundle",
+      "set": "Prismatic Evolutions",
+      "asset_class": "sealed",
+      "category": "sealed-bundle",
+      "deal_price": 23.99,
+      "market_comp": 33.0,
+      "pct_off": 27,
+      "retailer": "Walmart",
+      "source_url": "https://example.com/pe-bundle",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "medium",
+      "badges": [],
+      "lens_tags": [
+        "INV"
+      ],
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "Surging Sparks Booster Bundle",
+      "set": "Surging Sparks",
+      "asset_class": "sealed",
+      "category": "sealed-bundle",
+      "deal_price": 24.5,
+      "market_comp": 31.0,
+      "pct_off": 21,
+      "retailer": "Target",
+      "source_url": "https://example.com/ss-bundle",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "medium",
+      "badges": [],
+      "lens_tags": [
+        "INV"
+      ],
+      "stock_status": "in-stock"
+    },
+    {
+      "item": "151 Elite Trainer Box (est comp)",
+      "set": "151",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 42.0,
+      "market_comp": 64.0,
+      "pct_off": 34,
+      "retailer": "Local LGS",
+      "source_url": "https://example.com/151-etb-est",
+      "captured_at": "2026-06-27",
+      "price_confidence": "est",
+      "comp_confidence": "low",
+      "derivation_method": "comp_inference",
+      "confidence_detail": "inferred from nearby sold range; no direct sealed comp",
+      "badges": [
+        "EST"
+      ],
+      "lens_tags": [
+        "PLY"
+      ],
+      "stock_status": "unknown"
+    },
+    {
+      "item": "Prismatic Evolutions ETB (too-cheap, possible reseal)",
+      "set": "Prismatic Evolutions",
+      "asset_class": "sealed",
+      "category": "sealed-etb",
+      "deal_price": 24.0,
+      "market_comp": 60.0,
+      "pct_off": 60,
+      "retailer": "Marketplace seller",
+      "source_url": "https://example.com/pe-etb-suspect",
+      "captured_at": "2026-06-27",
+      "price_confidence": "verified",
+      "comp_confidence": "high",
+      "authenticity_risk": true,
+      "warn_reason": "60% under market with no clearance/used explanation — possible reseal; verify factory seal",
+      "badges": [
+        "WARN"
+      ],
+      "lens_tags": [],
+      "stock_status": "unknown"
+    }
   ],
   "promo_codes": [
-    {"code": "CIRCLE5", "desc": "5% Target Circle bonus on TCG", "retailer": "Target", "window": "Jun 22 - Jul 5", "source_url": "https://example.com/target-circle"}
+    {
+      "code": "CIRCLE5",
+      "desc": "5% Target Circle bonus on TCG",
+      "retailer": "Target",
+      "window": "Jun 22 - Jul 5",
+      "source_url": "https://example.com/target-circle"
+    }
   ],
   "bundled_offers": [
-    {"title": "$15 Target gift card with $50 TCG purchase", "window": "Jun 27 - Jul 3", "retailer": "Target", "source_url": "https://example.com/target-gc"}
+    {
+      "title": "$15 Target gift card with $50 TCG purchase",
+      "window": "Jun 27 - Jul 3",
+      "retailer": "Target",
+      "source_url": "https://example.com/target-gc"
+    }
   ],
   "watchlist_results": [
-    {"item": "Prismatic Evolutions ETB", "target_price": 42.0, "hit": true, "deal_price": 39.99, "retailer": "Target"}
+    {
+      "item": "Prismatic Evolutions ETB",
+      "target_price": 42.0,
+      "hit": true,
+      "deal_price": 39.99,
+      "retailer": "Target"
+    }
   ],
   "sources": [
-    {"name": "Target weekly", "category": "retailer", "tier": "fetchable", "status": "fetched", "note": ""},
-    {"name": "Brand X aggregator", "category": "aggregator", "tier": "blocked", "status": "blocked", "note": "Cloudflare challenge — not data"}
+    {
+      "name": "Target weekly",
+      "category": "retailer",
+      "tier": "fetchable",
+      "status": "fetched",
+      "note": ""
+    },
+    {
+      "name": "Brand X aggregator",
+      "category": "aggregator",
+      "tier": "blocked",
+      "status": "blocked",
+      "note": "Cloudflare challenge — not data"
+    }
   ]
 }

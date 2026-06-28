@@ -1,5 +1,8 @@
+import json
+from pathlib import Path
+
 from scanner import config as cfg_mod
-from scanner.discovery.schema import DealRow
+from scanner.discovery.schema import DealRow, row_from_dict
 from scanner.discovery.score import (
     assign_badges, compute_pct_off, dedup, fake_markdown_flags,
     flipper_is_buy, lens_tags, split_min_discount,
@@ -91,3 +94,24 @@ def test_split_min_discount_drops_thin_rows():
     thin = _row(deal_price=59.0, market_comp=60.0, pct_off=2)
     deals, below = split_min_discount([deal, thin], CFG)
     assert deal in deals and thin in below
+
+
+def test_fixture_baked_scores_match_the_scorer():
+    """dashboard == scanner: every fixture row's baked badges/lens_tags must equal
+    what score.py produces. Guards against a fabricated FLP/STEAL leaking into the
+    rendered dashboard (render.py reads these straight from the sweep dict)."""
+    data = json.loads(
+        Path("data/poke/fixtures/sample-sweep.json").read_text(encoding="utf-8")
+    )
+    for d in data["deals"]:
+        r = row_from_dict(d)
+        assert d.get("badges", []) == assign_badges(r, CFG), f"badges drift: {d['item']}"
+        assert d.get("lens_tags", []) == lens_tags(r, CFG), f"lens drift: {d['item']}"
+    # the fixture must not fabricate a flip the math doesn't support
+    assert not any("FLP" in d.get("lens_tags", []) for d in data["deals"])
+
+
+def test_authenticity_row_earns_no_lens_tags():
+    flagged = _row(deal_price=24.0, market_comp=60.0, pct_off=60,
+                   authenticity_risk=True)
+    assert lens_tags(flagged, CFG) == []

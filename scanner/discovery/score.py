@@ -73,6 +73,10 @@ def assign_badges(row: DealRow, cfg) -> list[str]:
 
 
 def lens_tags(row: DealRow, cfg) -> list[str]:
+    # A possible-fake/reseal earns NO positive lens recommendation, even if its
+    # nominal margin clears — never tell the operator to flip a flagged item.
+    if row.authenticity_risk:
+        return []
     tags: list[str] = []
     pct = row.pct_off if row.pct_off is not None else compute_pct_off(row.deal_price, row.market_comp)
     verified = row.price_confidence == "verified" and row.comp_confidence in {"high", "medium"}

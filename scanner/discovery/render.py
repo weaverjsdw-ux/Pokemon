@@ -10,6 +10,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .schema import assert_sweep, row_from_dict
 
@@ -18,6 +19,20 @@ TEMPLATE_PATH = Path(__file__).with_name("template.html")
 
 def _esc(value) -> str:
     return html_lib.escape(str(value), quote=True)
+
+
+def _safe_href(url) -> str:
+    """Escaped URL only when it is http(s); otherwise empty.
+
+    Sweep data is untrusted (web-scraped / AI-derived), so a `javascript:` or
+    `data:` source_url must never become a clickable href in the dashboard a
+    human opens. Scheme allowlist before emit.
+    """
+    try:
+        scheme = urlparse(str(url)).scheme.lower()
+    except ValueError:
+        return ""
+    return _esc(url) if scheme in ("http", "https") else ""
 
 
 def _badges_html(badges: list[str]) -> str:
@@ -43,7 +58,7 @@ def _deal_row_html(d: dict) -> str:
         f'{_badges_html(d.get("badges",[]))}</td>'
         f'<td class="deal-price">${_esc(d.get("deal_price",""))}</td>'
         f'<td>{comp_html}</td><td>{pct_html}</td>'
-        f'<td><a href="{_esc(d.get("source_url",""))}">{_esc(d.get("retailer",""))}</a> '
+        f'<td><a href="{_safe_href(d.get("source_url",""))}">{_esc(d.get("retailer",""))}</a> '
         f'<span class="muted">{_esc(d.get("captured_at",""))}</span></td>'
         f'<td>{_esc(d.get("scanner_verdict",""))}</td></tr>'
     )
@@ -101,19 +116,19 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
     promo_html = "".join(
         f'<div><strong>{_esc(p.get("code",""))}</strong> — {_esc(p.get("desc",""))} '
         f'@ {_esc(p.get("retailer",""))} '
-        f'(<a href="{_esc(p.get("source_url",""))}">src</a>)</div>' for p in promos
+        f'(<a href="{_safe_href(p.get("source_url",""))}">src</a>)</div>' for p in promos
     ) or '<div class="muted">None.</div>'
 
     bundles = sweep.get("bundled_offers", [])
     bundle_html = "".join(
         f'<div>{_esc(b.get("title",""))} @ {_esc(b.get("retailer",""))} '
-        f'(<a href="{_esc(b.get("source_url",""))}">src</a>)</div>' for b in bundles
+        f'(<a href="{_safe_href(b.get("source_url",""))}">src</a>)</div>' for b in bundles
     ) or '<div class="muted">None.</div>'
 
     watch_out_html = "".join(
         f'<div><strong>{_esc(d.get("item",""))}</strong> — '
         f'{_esc(d.get("warn_reason","flagged"))} '
-        f'(<a href="{_esc(d.get("source_url",""))}">src</a>)</div>' for d in watch_out
+        f'(<a href="{_safe_href(d.get("source_url",""))}">src</a>)</div>' for d in watch_out
     ) or '<div class="muted">Nothing flagged this sweep.</div>'
 
     sources = sweep.get("sources", [])
