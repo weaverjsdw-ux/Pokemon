@@ -62,3 +62,27 @@ renderer + golden test). The follow-on plan (written after these findings) cover
 1. **Obtain + configure the PokemonPriceTracker API key** (gates trustworthy sealed comps and is the
    only native source for raw/graded). Probe A confirmed it is not currently active.
 2. **Sign off on the exhaustive source-fetchability sweep** (Probe B was a representative sample).
+
+## Probe A addendum — confirmed PPT v2 API contract (2026-06-28, from operator-supplied docs)
+This closes spec §13.1 ("PPT graded/singles endpoint shapes + credit cost"). Build the follow-on on these:
+- **Base URL `https://www.pokemonpricetracker.com/api/v2`**, `Authorization: Bearer <key>`. Endpoints
+  include `/cards` (singles, incl. graded prices) and `/sealed-products` (ETBs/boxes/bundles).
+- **REQUIRED FIX:** committed `scanner/market.py` uses a **v1** URL (`/api/v1/prices?q=`). It must be
+  rewritten to the v2 `/sealed-products` (+ `/cards`) shape. This is almost certainly why Probe A fell
+  back to PriceCharting even though the call ran. Do this in the follow-on's comp-routing task (or a
+  small standalone fix) before `market.preferred=true` can work.
+- **BILLING TRAP (load-bearing):** requests bill on the requested `limit` (default 50), NOT results
+  returned — a default `/cards`/`/sealed-products` call = **50 credits**. **Always pass `limit=1`** for
+  single-product lookups -> 1 credit basic (+1 eBay data, +1 price history). Read the exact charge from
+  `metadata.apiCallsConsumed` / `X-API-Calls-Consumed`; balance from `X-RateLimit-Daily-Remaining`.
+- **Plans:** Free 100 credits/day (~50-100 single lookups with `limit=1`; history window only 3 days,
+  1 key) - API $9.99/mo 20,000 credits/day, 6-mo history, 5 keys - Business $99/mo 200k credits/day.
+  60 calls/min on Free+API, 500 on Business.
+- **Graded prices (PSA/CGC/BGS/SGC) are available on EVERY plan** (+1 credit/card) — graded can ship in
+  v1, contrary to the earlier "graded = Business" assumption. Only **eBay sold auction/BIN detail** and
+  **GemRate population data (2 credits, Phase-3 grade screen)** require Business.
+- **Parse-title costs 2 credits (+surcharges)** — too expensive on a 100/day budget; the follow-on
+  should resolve products via direct `limit=1` `/cards`/`/sealed-products` lookups keyed off our own
+  catalog, and reserve parse-title for genuinely unmapped items.
+- **Recommended tier:** start **Free** to validate + run small curated sweeps (with `limit=1`); move to
+  **API ($9.99)** for real coverage feeding both `/poke` sweeps and the scanner's background comp cache.
