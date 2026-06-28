@@ -1,7 +1,15 @@
-"""PokemonPriceTracker market source, behind the resale.py client contract.
+"""PokemonPriceTracker market source (API v2), behind the resale.py client contract.
 
-Optional-preferred, never required: a missing key, rate-limit, or quota all
-fall through to the existing resale/scrape client. Scanning never depends on it.
+Optional-preferred, never required: a missing key, rate-limit (429), quota, or any
+HTTP error all fall through to the existing resale/scrape client. Scanning never
+depends on it.
+
+v2 contract (see docs/poke/reference/ppt-v2-notes.md):
+- Sealed comp: GET /sealed-products?search=<name>&limit=1 -> data[].unopenedPrice
+  (TCGplayer market price). `limit=1` is REQUIRED to avoid the 50-credit default-limit bill.
+- The TCGplayer market price is treated as a medium-confidence single-source market
+  summary (resale.annotate_quote, same class as the PriceCharting fallback).
+Singles + graded (/cards with includeEbay) are the /poke follow-on, not wired here.
 """
 from __future__ import annotations
 
@@ -11,9 +19,9 @@ import requests
 
 from . import resale
 
-PPT_SEARCH_URL = "https://www.pokemonpricetracker.com/api/v1/prices"
-SOURCE_LABEL = "PokemonPriceTracker"
-BASIS = "sold comp median"
+PPT_BASE_URL = "https://www.pokemonpricetracker.com/api/v2"
+SOURCE_LABEL = resale.POKEMONPRICETRACKER_SOURCE_LABEL
+SEALED_BASIS = "TCGplayer sealed market"
 
 
 class PokemonPriceTrackerClient:
@@ -28,8 +36,8 @@ class PokemonPriceTrackerClient:
     def estimate(self, product_key: str, product: dict[str, Any], checked_at: int) -> dict[str, Any]:
         query = resale.product_query(product)
         response = self.session.get(
-            PPT_SEARCH_URL,
-            params={"q": query, "condition": "sealed"},
+            f"{PPT_BASE_URL}/sealed-products",
+            params={"search": query, "limit": 1},  # limit=1 => 1 credit, not the 50-credit default
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=20,
         )
@@ -37,37 +45,41 @@ class PokemonPriceTrackerClient:
         return _quote_from_ppt(product_key, product, response.json(), checked_at)
 
 
+def _first_unopened_price(payload: dict[str, Any]) -> float | None:
+    data = payload.get("data")
+    items = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+    for item in items:
+        if isinstance(item, dict):
+            price = resale._amount(item.get("unopenedPrice"))
+            if price is not None:
+                return price
+    return None
+
+
 def _quote_from_ppt(
     product_key: str, product: dict[str, Any], payload: dict[str, Any], checked_at: int
 ) -> dict[str, Any]:
-    results = payload.get("results") or payload.get("data") or []
-    prices = [
-        p for item in results
-        if isinstance(item, dict)
-        for p in [resale._amount(item.get("marketPrice") or item.get("price"))]
-        if p is not None
-    ]
+    price = _first_unopened_price(payload)
     base = {
         "productKey": product_key,
         "source": SOURCE_LABEL,
-        "basis": BASIS,
+        "basis": SEALED_BASIS,
         "query": resale.product_query(product),
         "checkedAt": checked_at,
     }
-    if not prices:
+    if price is None:
         return resale.annotate_quote(product, base | {
             "status": "no_matches", "estimate": "", "low": "", "high": "",
-            "sampleSize": 0, "detail": "No PokemonPriceTracker comps matched.",
+            "sampleSize": 0, "detail": "No PokemonPriceTracker sealed match.",
         })
-    prices.sort()
-    median = prices[len(prices) // 2]
+    money = resale._money(price)
     return resale.annotate_quote(product, base | {
         "status": "ok",
-        "estimate": resale._money(median),
-        "low": resale._money(prices[0]),
-        "high": resale._money(prices[-1]),
-        "sampleSize": len(prices),
-        "detail": f"Median of {len(prices)} PokemonPriceTracker sold comps.",
+        "estimate": money,
+        "low": money,
+        "high": money,
+        "sampleSize": 0,  # single market price, not a sold-comp sample
+        "detail": "PokemonPriceTracker TCGplayer sealed market price.",
     })
 
 

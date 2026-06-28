@@ -67,10 +67,18 @@ renderer + golden test). The follow-on plan (written after these findings) cover
 This closes spec §13.1 ("PPT graded/singles endpoint shapes + credit cost"). Build the follow-on on these:
 - **Base URL `https://www.pokemonpricetracker.com/api/v2`**, `Authorization: Bearer <key>`. Endpoints
   include `/cards` (singles, incl. graded prices) and `/sealed-products` (ETBs/boxes/bundles).
-- **REQUIRED FIX:** committed `scanner/market.py` uses a **v1** URL (`/api/v1/prices?q=`). It must be
-  rewritten to the v2 `/sealed-products` (+ `/cards`) shape. This is almost certainly why Probe A fell
-  back to PriceCharting even though the call ran. Do this in the follow-on's comp-routing task (or a
-  small standalone fix) before `market.preferred=true` can work.
+- **REQUIRED FIX — DONE (sealed) 2026-06-28:** `scanner/market.py` was on a stale **v1** URL
+  (`/api/v1/prices?q=`) — almost certainly why Probe A fell back to PriceCharting even though the call
+  ran. Rewritten to v2 `GET /sealed-products?search=…&limit=1` → `data[].unopenedPrice`, with the
+  TCGplayer market price treated as a **medium**-confidence single-source market summary
+  (`resale.annotate_quote`, mirroring the PriceCharting fallback). Unit-tested against mocked v2
+  responses. **Singles + graded `/cards` (`includeEbay`) remain the follow-on.** Once the operator
+  adds the key + `market.preferred=true`, re-run `scripts/poke_phase0_comp_probe.py` to confirm a live
+  verified-tier sealed comp. Reference: `docs/poke/reference/ppt-v2-notes.md`.
+- **Still open (follow-on tuning):** the premium sanity-check. `HIGH_PREMIUM_RATIO` is 4.0×, so the
+  $163.75-vs-$50-MSRP junk comp (3.27×) was NOT flagged. A tighter market-summary-specific ratio
+  (downgrade an implausible multiple of MSRP to EST/low) is the planned fallback-sanity-check task —
+  not changed here to avoid an unvetted global threshold change.
 - **BILLING TRAP (load-bearing):** requests bill on the requested `limit` (default 50), NOT results
   returned — a default `/cards`/`/sealed-products` call = **50 credits**. **Always pass `limit=1`** for
   single-product lookups -> 1 credit basic (+1 eBay data, +1 price history). Read the exact charge from

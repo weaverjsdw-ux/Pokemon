@@ -28,6 +28,10 @@ SOURCE_LABEL = "eBay Browse API"
 PUBLIC_SOURCE_LABEL = "eBay public search"
 PRICECHARTING_SOURCE_LABEL = "PriceCharting market fallback"
 PUBLIC_FALLBACK_SOURCE_LABEL = "eBay public search / PriceCharting fallback"
+# PokemonPriceTracker (TCGplayer market price) is a single-source daily market
+# summary — same confidence class as the PriceCharting fallback, not a sold-comp sample.
+POKEMONPRICETRACKER_SOURCE_LABEL = "PokemonPriceTracker"
+MARKET_SUMMARY_SOURCE_LABELS = (PRICECHARTING_SOURCE_LABEL, POKEMONPRICETRACKER_SOURCE_LABEL)
 CONFIDENCE_LABELS = {
     "high": "High confidence",
     "medium": "Medium confidence",
@@ -226,10 +230,10 @@ def annotate_quote(product: dict[str, Any], quote: dict[str, Any]) -> dict[str, 
     if source == PUBLIC_SOURCE_LABEL:
         flags.append("public_ebay_search")
         reasons.append("public eBay page parsing")
-    if source == PRICECHARTING_SOURCE_LABEL:
+    if source in MARKET_SUMMARY_SOURCE_LABELS:
         flags.append("single_source_summary")
         reasons.append("single-source market summary")
-    if source != PRICECHARTING_SOURCE_LABEL and 0 < sample_size < MEDIUM_CONFIDENCE_ACTIVE_SAMPLE_SIZE:
+    if source not in MARKET_SUMMARY_SOURCE_LABELS and 0 < sample_size < MEDIUM_CONFIDENCE_ACTIVE_SAMPLE_SIZE:
         flags.append("thin_sample")
         reasons.append(f"{sample_size} matched result")
     if ratio is not None and ratio >= HIGH_PREMIUM_RATIO:
@@ -246,7 +250,7 @@ def annotate_quote(product: dict[str, Any], quote: dict[str, Any]) -> dict[str, 
         and not high_premium
     ):
         confidence = "medium"
-    elif source == PRICECHARTING_SOURCE_LABEL and not high_premium:
+    elif source in MARKET_SUMMARY_SOURCE_LABELS and not high_premium:
         confidence = "medium"
     else:
         confidence = "low"
