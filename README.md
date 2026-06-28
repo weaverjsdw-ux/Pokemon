@@ -277,6 +277,20 @@ Each retailer is a self-contained module in `scanner/retailers/`. To add a new r
 
 ---
 
+## `/poke` discovery subsystem (Phase 1 — deterministic core)
+
+A sibling to the automated scanner: where the scanner watches ~26 known catalog SKUs for stock + margin, `/poke` is an AI-driven *discovery* sweep that finds deals across the open market and renders a curated dashboard. Phase 1 (the deterministic core) is built; live web acquisition + the in-session `/poke` command are the follow-on phase.
+
+`scanner/discovery/` turns a sweep JSON into a verified deal dashboard:
+- `schema.py` — `DealRow` + the price-accuracy STOP gate (verified rows need a source + date; EST rows need a derivation method; `pct_off` is computed from the market comp, never MSRP; an authenticity-flagged row can never be a confirmed STEAL).
+- `ledger.py` — append-only, idempotent observation ledger (distinct from any future inventory ledger).
+- `score.py` — STEAL/WARN/EST badges, fake-markdown heuristics, and the four lenses (Collector / Player / Investor / Flipper). **Flipper margin is computed through `scanner.margin` + `scanner.verdict`**, so a dashboard Flipper tag equals the scanner's BUY verdict for the same numbers.
+- `render.py` — `python -m scanner.discovery.render <sweep.json> -o out.html` (runs the STOP gate before emitting HTML).
+
+This phase runs on a fixture (`data/poke/fixtures/sample-sweep.json`); see `docs/poke/` for the Phase-0 findings and source tiering.
+
+---
+
 ## Operational notes
 
 - **Polling cadence**: default 3 min + jitter. Don't lower this past ~60s — these are public site endpoints, not real APIs, and hammering them is what gets them locked down for everyone.

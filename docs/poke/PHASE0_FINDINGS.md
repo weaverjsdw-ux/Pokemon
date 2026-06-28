@@ -44,3 +44,21 @@
   curators before the live build. **CHECKPOINT for operator:** the exhaustive fetchability sweep
   (retailer pages, blogs, and Playwright re-tries of the blocked sources) is the remaining Phase-0
   item; it was sampled here, not completed, to avoid a long autonomous web sweep without sign-off.
+
+## Handoff to follow-on plan (live acquisition + raw/graded + regression hardening)
+Phase-1 deterministic core is built and green on the fixture (config `poke` block,
+`DealRow` + STOP gate, observation ledger, scorer with Flipper via `scanner.margin`,
+renderer + golden test). The follow-on plan (written after these findings) covers, per spec §5/§7:
+- DISCOVER adapters (Playwright + eBay Browse API + WebSearch) per Probe B's verdict.
+- RESEARCH comp routing wired to live `scanner.market`/`resale`, **plus the new expected-range
+  sanity-check on fallback comps** that Probe A surfaced (a comp that is a large multiple of MSRP
+  downgrades to EST, never a confident STEAL).
+- raw + graded comp paths (PPT graded/singles endpoints — confirm shapes; obtain the PPT key first).
+- the in-session OPENER + `/poke` command + mode dispatch.
+- regression hardening: watchlist continuity write-path, manifest delta, persona self-test,
+  prompt-durability sidecar (`.poke-opener-verified.json`).
+
+### Operator action items before the follow-on plan
+1. **Obtain + configure the PokemonPriceTracker API key** (gates trustworthy sealed comps and is the
+   only native source for raw/graded). Probe A confirmed it is not currently active.
+2. **Sign off on the exhaustive source-fetchability sweep** (Probe B was a representative sample).
