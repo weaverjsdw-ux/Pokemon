@@ -13,16 +13,30 @@
   this necessary-not-sufficient:**
   1. **PPT is not active.** The best sealed comp source (PokemonPriceTracker) is unconfigured;
      today's comp comes from the PriceCharting *fallback*.
-  2. **Comp value looks unreliable.** $163.75 for an ETB with ~$50 MSRP is almost certainly a
-     loose/mismatched fallback match (expected sealed street ~$60). The "medium" tier label
-     does **not** guarantee the number is right.
-- **Implication for follow-on plan:**
-  - Obtain + enable the **PPT key** before the live-acquisition phase; treat it as the gating
-    prereq for trustworthy sealed comps (and the only native source for raw/graded).
-  - The live RESEARCH stage must **sanity-check fallback comps against an expected range**
-    (e.g. flag a comp that is a large multiple of MSRP as suspect / downgrade to EST), so a
-    loose PriceCharting match never produces a confident STEAL. This is a concrete addition to
-    the follow-on plan's comp-routing task, surfaced only because this probe ran live.
+  2. **Comp value looked unreliable** ($163.75 for a ~$50-MSRP ETB). **← THIS WAS WRONG, see the
+     2026-06-28 closure below.** Prismatic Evolutions is a hyped set and sealed genuinely trades
+     ~$160-200; the $163.75 was a legitimate comp, not a mismatch. My "expected ~$60" was the error.
+- **Original implication (partially WITHDRAWN — see closure):** obtain the PPT key; ~~sanity-check
+  comps that are a large multiple of MSRP and downgrade them to EST~~ — **withdrawn**: a 3-4x-MSRP
+  comp is *real* for a hyped set, so that heuristic would suppress legitimate comps. The existing
+  `HIGH_PREMIUM_RATIO=4.0` guard is the right backstop and needs no change.
+
+### Probe A CLOSED — 2026-06-28 (live, key configured)
+- Key configured in `config.yaml` (`market.preferred=true`); probe re-run live.
+- **Result:** `client=MarketFallbackClient`, `source='PokemonPriceTracker'` (NOT the fallback),
+  `comp=199.14`, `confidence_tier='medium'`, `price_confidence='verified'`. **PPT v2 works
+  end-to-end; sealed yields a verified-tier comp. Probe A is closed.**
+- **The real Phase-0 lesson (resolution, not value):** a bare PPT name search returns the WRONG
+  variant — `search="Prismatic Evolutions Elite Trainer Box"&limit=1` surfaced *"…and Pokeball
+  (Sam's Club)"* ($178.91), a *Case* ($1865), and a *Dollar General Exclusive* ($201) before the
+  standalone ETB; the verbose `resale_query` ("Pokemon TCG … sealed") returned **0 matches**.
+  Silently returning a wrong-variant price is a fabrication risk.
+- **Fix (implemented):** resolve PPT sealed comps by **exact `tcgPlayerId`** only (`?tcgPlayerId=<id>`,
+  1 credit). Products without a mapped `ppt_id` skip the API (0 credits) and fall back to resale —
+  no risky search. Proof: `prismatic_evolutions_etb` mapped to `ppt_id: 593355` → live $199.14 medium.
+- **Remaining data task:** seed `ppt_id` for the rest of the sealed catalog (see
+  `docs/poke/ppt-id-seeding.md`). Credit budget: 1 credit/product/refresh; ~26 products on a 24h
+  cache = ~26 credits/day, well within the Free tier's 100/day.
 
 ## Probe B — source fetchability (Task 2)
 - Date run: 2026-06-27 (representative sample, not exhaustive — see below)
@@ -68,17 +82,16 @@ This closes spec §13.1 ("PPT graded/singles endpoint shapes + credit cost"). Bu
 - **Base URL `https://www.pokemonpricetracker.com/api/v2`**, `Authorization: Bearer <key>`. Endpoints
   include `/cards` (singles, incl. graded prices) and `/sealed-products` (ETBs/boxes/bundles).
 - **REQUIRED FIX — DONE (sealed) 2026-06-28:** `scanner/market.py` was on a stale **v1** URL
-  (`/api/v1/prices?q=`) — almost certainly why Probe A fell back to PriceCharting even though the call
-  ran. Rewritten to v2 `GET /sealed-products?search=…&limit=1` → `data[].unopenedPrice`, with the
-  TCGplayer market price treated as a **medium**-confidence single-source market summary
-  (`resale.annotate_quote`, mirroring the PriceCharting fallback). Unit-tested against mocked v2
-  responses. **Singles + graded `/cards` (`includeEbay`) remain the follow-on.** Once the operator
-  adds the key + `market.preferred=true`, re-run `scripts/poke_phase0_comp_probe.py` to confirm a live
-  verified-tier sealed comp. Reference: `docs/poke/reference/ppt-v2-notes.md`.
-- **Still open (follow-on tuning):** the premium sanity-check. `HIGH_PREMIUM_RATIO` is 4.0×, so the
-  $163.75-vs-$50-MSRP junk comp (3.27×) was NOT flagged. A tighter market-summary-specific ratio
-  (downgrade an implausible multiple of MSRP to EST/low) is the planned fallback-sanity-check task —
-  not changed here to avoid an unvetted global threshold change.
+  (`/api/v1/prices?q=`). Rewritten to v2 `GET /sealed-products?tcgPlayerId=<ppt_id>` → `data.unopenedPrice`
+  (resolution by **exact id only** — bare name search returns wrong variants, see Probe A closure above),
+  with the TCGplayer market price treated as a **medium**-confidence single-source market summary
+  (`resale.annotate_quote`, mirroring the PriceCharting fallback). Unit-tested against mocked v2 responses
+  **and validated live** (id 593355 → $199.14). **Singles + graded `/cards` (`includeEbay`) remain the
+  follow-on.** Reference: `docs/poke/reference/ppt-v2-notes.md`.
+- **Premium sanity-check — WITHDRAWN.** Earlier I proposed downgrading comps that are a large multiple of
+  MSRP. Live data disproved it: a 3-4× MSRP sealed comp is *legitimate* for a hyped set (Prismatic ETB
+  $199 ≈ 4× MSRP). Such a heuristic would suppress real comps. The existing `HIGH_PREMIUM_RATIO=4.0` guard
+  stays as-is; no tightening.
 - **BILLING TRAP (load-bearing):** requests bill on the requested `limit` (default 50), NOT results
   returned — a default `/cards`/`/sealed-products` call = **50 credits**. **Always pass `limit=1`** for
   single-product lookups -> 1 credit basic (+1 eBay data, +1 price history). Read the exact charge from

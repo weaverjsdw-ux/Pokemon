@@ -109,40 +109,42 @@ class _FakeSession:
         return _FakeResponse(self._payload)
 
 
-def test_v2_sealed_estimate_parses_unopened_price_as_medium():
+def test_v2_sealed_by_id_parses_unopened_price_as_medium():
+    # querying by tcgPlayerId returns a single product object
     payload = {
-        "data": [{"tcgPlayerId": "471234", "name": "Prismatic Evolutions ETB",
-                  "setName": "Prismatic Evolutions", "unopenedPrice": 59.99}],
+        "data": {"tcgPlayerId": "593355", "name": "Prismatic Evolutions Elite Trainer Box",
+                 "setName": "SV: Prismatic Evolutions", "unopenedPrice": 199.14},
         "metadata": {"total": 1, "count": 1},
     }
     session = _FakeSession(payload)
     client = PokemonPriceTrackerClient(api_key="k", session=session)
     row = client.estimate(
         "prismatic_evolutions_etb",
-        {"msrp": "$49.99", "resale_query": "Prismatic Evolutions ETB sealed"},
+        {"msrp": "$49.99", "ppt_id": "593355", "resale_query": "Prismatic Evolutions ETB sealed"},
         0,
     )
     assert row["status"] == "ok"
     comp, conf = comp_from_row(row)
-    assert comp == pytest.approx(59.99)
+    assert comp == pytest.approx(199.14)
     assert conf == "medium"  # TCGplayer market price = single-source market summary
-    # hits the v2 sealed endpoint with limit=1 (avoids the 50-credit default-limit bill)
+    # exact id lookup against the v2 sealed endpoint (no risky name search)
     assert session.last["url"].endswith("/api/v2/sealed-products")
-    assert session.last["params"]["limit"] == 1
-    assert session.last["params"]["search"] == "Prismatic Evolutions ETB sealed"
+    assert session.last["params"]["tcgPlayerId"] == "593355"
+    assert "search" not in session.last["params"]
     assert session.last["headers"]["Authorization"] == "Bearer k"
 
 
-def test_v2_sealed_single_object_data_also_parses():
-    payload = {"data": {"unopenedPrice": 42.0, "name": "X"}, "metadata": {"total": 1}}
-    client = PokemonPriceTrackerClient(api_key="k", session=_FakeSession(payload))
-    row = client.estimate("x", {"resale_query": "x"}, 0)
-    comp, conf = comp_from_row(row)
-    assert comp == pytest.approx(42.0) and conf == "medium"
+def test_v2_no_ppt_id_skips_api_and_returns_no_match():
+    session = _FakeSession({"data": [], "metadata": {}})
+    client = PokemonPriceTrackerClient(api_key="k", session=session)
+    row = client.estimate("x", {"resale_query": "Prismatic Evolutions ETB sealed"}, 0)
+    assert row["status"] == "no_matches"
+    assert comp_from_row(row) == (None, "none")
+    assert session.last is None  # never hit the API (0 credits) without an id
 
 
-def test_v2_sealed_no_match_returns_no_matches():
-    client = PokemonPriceTrackerClient(api_key="k", session=_FakeSession({"data": [], "metadata": {"total": 0}}))
-    row = client.estimate("x", {"resale_query": "nope"}, 0)
+def test_v2_id_with_empty_data_returns_no_matches():
+    client = PokemonPriceTrackerClient(api_key="k", session=_FakeSession({"data": None, "metadata": {"total": 0}}))
+    row = client.estimate("x", {"ppt_id": "999"}, 0)
     assert row["status"] == "no_matches"
     assert comp_from_row(row) == (None, "none")

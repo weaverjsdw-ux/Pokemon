@@ -21,6 +21,7 @@ prismatic_evolutions_etb:
   type: "ETB"
   msrp: "$49.99"
   resale_query: "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed"
+  ppt_id: "593355"   # PokemonPriceTracker tcgPlayerId (standalone ETB; verified 2026-06-28)
   target_tcin: "1011206804"
   walmart_item_id: "15433520586"
   bestbuy_sku: "6606082"

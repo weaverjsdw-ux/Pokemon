@@ -19,14 +19,19 @@ OpenAPI 3.1.0 document (`Pokemon Price Tracker API` v2.0.0).
 
 ## Sealed products — `GET /sealed-products`  (this is what the scanner catalog needs)
 - Requires ≥1 filter: `tcgPlayerId` | `setId` | `set` | `search` | `minPrice` | `maxPrice`.
-- For a single product: `?search=<name>&limit=1` (1 credit).
+- **Resolve by `?tcgPlayerId=<id>` (1 credit) — NOT a name search.** Confirmed live: a bare
+  `search=<name>&limit=1` returns the WRONG variant (a single set's ETB has multiple TCGplayer
+  products: standalone, "… and Pokeball (Sam's Club)", "… Case", "(Dollar General Exclusive)").
+  Map each product to its exact `tcgPlayerId` (`ppt_id`); see `docs/poke/ppt-id-seeding.md`.
 - Response: `{ "data": <SealedProduct | SealedProduct[]>, "metadata": {...} }`
   (single object when by `tcgPlayerId`, else array).
 - `SealedProduct`: `{ tcgPlayerId, tcgPlayerUrl, name, setId, setName, unopenedPrice (number USD|null),
   imageCdnUrl*, priceHistory[], lastScrapedAt, updatedAt }`.
-- **The comp = `data[0].unopenedPrice`** (TCGplayer market price for the sealed product).
+- **The comp = `data.unopenedPrice`** (TCGplayer market price for the sealed product).
 - No per-sale confidence field — treat a TCGplayer market price as **medium** confidence
   (a single-source daily market summary, same tier as the PriceCharting fallback).
+- Real prices run high for hyped sets (Prismatic Evolutions ETB ≈ $199 ≈ 4× the $49.99 MSRP) — do
+  NOT treat a large MSRP-multiple as a junk comp; it's legitimate.
 
 ## Cards / singles + graded — `GET /cards`  (FOLLOW-ON: /poke raw + graded)
 - Single by `tcgPlayerId` → `data` is one Card; else `search`/`set`/filters → array. Use `limit=1`.
