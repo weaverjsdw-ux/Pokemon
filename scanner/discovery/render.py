@@ -1,0 +1,184 @@
+"""Render a /poke sweep dict into the self-contained dashboard HTML.
+
+Runs the STOP gate before producing any HTML — a bad row halts the render
+rather than shipping a dashboard that overstates confidence.
+"""
+from __future__ import annotations
+
+import html as html_lib
+import json
+import re
+import sys
+from pathlib import Path
+
+from .schema import assert_sweep, row_from_dict
+
+TEMPLATE_PATH = Path(__file__).with_name("template.html")
+
+
+def _esc(value) -> str:
+    return html_lib.escape(str(value), quote=True)
+
+
+def _badges_html(badges: list[str]) -> str:
+    cls = {"STEAL": "badge-steal", "WARN": "badge-warn", "EST": "badge-est"}
+    return "".join(
+        f'<span class="badge {cls.get(b, "badge-est")}">{_esc(b)}</span>' for b in badges
+    )
+
+
+def _lens_html(tags: list[str]) -> str:
+    return "".join(f'<span class="lens">{_esc(t)}</span>' for t in tags)
+
+
+def _deal_row_html(d: dict) -> str:
+    comp = d.get("market_comp")
+    comp_html = f'<span class="orig">${_esc(comp)}</span>' if comp is not None else ""
+    pct = d.get("pct_off")
+    pct_html = f"{_esc(pct)}%" if pct is not None else ""
+    return (
+        f'<tr data-source-url="{_esc(d.get("source_url",""))}" '
+        f'data-captured-at="{_esc(d.get("captured_at",""))}">'
+        f'<td>{_esc(d.get("item",""))}{_lens_html(d.get("lens_tags",[]))}'
+        f'{_badges_html(d.get("badges",[]))}</td>'
+        f'<td class="deal-price">${_esc(d.get("deal_price",""))}</td>'
+        f'<td>{comp_html}</td><td>{pct_html}</td>'
+        f'<td><a href="{_esc(d.get("source_url",""))}">{_esc(d.get("retailer",""))}</a> '
+        f'<span class="muted">{_esc(d.get("captured_at",""))}</span></td>'
+        f'<td>{_esc(d.get("scanner_verdict",""))}</td></tr>'
+    )
+
+
+def _table(rows: list[dict]) -> str:
+    if not rows:
+        return '<div class="muted">None this sweep.</div>'
+    body = "".join(_deal_row_html(d) for d in rows)
+    return (
+        "<table><thead><tr><th>Item</th><th>Deal</th><th>Market</th>"
+        "<th>% Off</th><th>Retailer</th><th>Scanner</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+    )
+
+
+def _category_key(d: dict) -> str:
+    return str(d.get("category") or d.get("asset_class") or "other")
+
+
+def render_sweep(sweep: dict, template: str | None = None) -> str:
+    deals = sweep.get("deals", [])
+    assert_sweep([row_from_dict(d) for d in deals])  # STOP gate before render
+
+    tpl = template if template is not None else TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    steals = [d for d in deals if "STEAL" in d.get("badges", [])]
+    watch_out = [d for d in deals if d.get("authenticity_risk") or d.get("warn_reason")]
+
+    # category sections (every section id used in nav must exist)
+    cats: dict[str, list[dict]] = {}
+    for d in deals:
+        cats.setdefault(_category_key(d), []).append(d)
+    cat_sections = []
+    cat_nav = []
+    for key in sorted(cats):
+        anchor = "cat-" + re.sub(r"[^a-z0-9]+", "-", key.lower()).strip("-")
+        cat_nav.append(anchor)
+        cat_sections.append(
+            f'<section id="{anchor}"><h2>{_esc(key)}</h2>{_table(cats[key])}</section>'
+        )
+
+    nav_ids = ["freshness", "watchlist", "top-steals", *cat_nav,
+               "promo-codes", "bundled-offers", "watch-out", "sources"]
+    nav_html = "".join(f'<a href="#{a}">{a.replace("-", " ").title()}</a>' for a in nav_ids)
+
+    wl = sweep.get("watchlist_results", [])
+    wl_html = "".join(
+        f'<div>{_esc(w.get("item",""))} — '
+        f'{"TARGET HIT" if w.get("hit") else "tracked"} '
+        f'(target ${_esc(w.get("target_price",""))})</div>' for w in wl
+    ) or '<div class="muted">No watchlist targets hit this sweep.</div>'
+
+    promos = sweep.get("promo_codes", [])
+    promo_html = "".join(
+        f'<div><strong>{_esc(p.get("code",""))}</strong> — {_esc(p.get("desc",""))} '
+        f'@ {_esc(p.get("retailer",""))} '
+        f'(<a href="{_esc(p.get("source_url",""))}">src</a>)</div>' for p in promos
+    ) or '<div class="muted">None.</div>'
+
+    bundles = sweep.get("bundled_offers", [])
+    bundle_html = "".join(
+        f'<div>{_esc(b.get("title",""))} @ {_esc(b.get("retailer",""))} '
+        f'(<a href="{_esc(b.get("source_url",""))}">src</a>)</div>' for b in bundles
+    ) or '<div class="muted">None.</div>'
+
+    watch_out_html = "".join(
+        f'<div><strong>{_esc(d.get("item",""))}</strong> — '
+        f'{_esc(d.get("warn_reason","flagged"))} '
+        f'(<a href="{_esc(d.get("source_url",""))}">src</a>)</div>' for d in watch_out
+    ) or '<div class="muted">Nothing flagged this sweep.</div>'
+
+    sources = sweep.get("sources", [])
+    sources_html = "".join(
+        f'<div>{_esc(s.get("name",""))} — {_esc(s.get("tier",""))}/'
+        f'{_esc(s.get("status",""))} <span class="muted">{_esc(s.get("note",""))}</span></div>'
+        for s in sources
+    ) or '<div class="muted">No sources recorded.</div>'
+
+    freshness = (
+        f'sweep {_esc(sweep.get("sweep_id",""))} · {len(deals)} items · '
+        f'{len(steals)} steals · {_esc(sweep.get("notes",""))}'
+    )
+
+    out = tpl
+    replacements = {
+        "{{EVENT_TITLE}}": _esc(sweep.get("event", "")),
+        "{{LAST_UPDATED}}": _esc(sweep.get("captured_window", "")),
+        "{{SWEEP_ID}}": _esc(sweep.get("sweep_id", "")),
+        "{{FRESHNESS}}": freshness,
+    }
+    for k, v in replacements.items():
+        out = out.replace(k, v)
+    injects = {
+        "<!-- INJECT: NAV -->": nav_html,
+        "<!-- INJECT: WATCHLIST -->": wl_html,
+        "<!-- INJECT: TOP_STEALS -->": _table(steals),
+        "<!-- INJECT: CATEGORY_SECTIONS -->": "".join(cat_sections),
+        "<!-- INJECT: PROMO_CODES -->": promo_html,
+        "<!-- INJECT: BUNDLED_OFFERS -->": bundle_html,
+        "<!-- INJECT: WATCH_OUT -->": watch_out_html,
+        "<!-- INJECT: SOURCES -->": sources_html,
+    }
+    for marker, value in injects.items():
+        out = out.replace(marker, value)
+    return out
+
+
+def nav_anchors(html: str) -> list[str]:
+    return re.findall(r'href="#([A-Za-z0-9\-_]+)"', html)
+
+
+def element_ids(html: str) -> list[str]:
+    return re.findall(r'id="([A-Za-z0-9\-_]+)"', html)
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv:
+        print("usage: python -m scanner.discovery.render <sweep.json> [-o out.html]")
+        return 2
+    sweep_path = Path(argv[0])
+    out_path = None
+    if "-o" in argv:
+        out_path = Path(argv[argv.index("-o") + 1])
+    sweep = json.loads(sweep_path.read_text(encoding="utf-8"))
+    html = render_sweep(sweep)
+    if out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(html, encoding="utf-8")
+        print(f"wrote {out_path}")
+    else:
+        sys.stdout.write(html)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
