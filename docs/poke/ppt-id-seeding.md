@@ -48,12 +48,14 @@ it.
 - [ ] scarlet_violet_151_booster_bundle
 - [ ] paldean_fates_etb
 - [ ] crown_zenith_etb
-- STOP (2026-07-02): opening `X-RateLimit-Daily-Remaining` was 10 (not the expected ~95) on the
-  very first search call of the session; the run's own hard-stop rule (`remaining < 15`) fired
-  immediately after that call. Only `destined_rivals_etb` was seeded (already-paid-for search +
-  1-credit by-id verify, remaining 10→9). The other six keys above were never attempted — no
-  search credits were spent on them. Investigate why today's daily credit budget was already
-  ~90 credits consumed before this session's first call.
+- STOP (2026-07-02): true session-open budget was 15 credits (reconstructed: the header is
+  post-charge, so the first search's returned value of 10 already reflects that call's own
+  5-credit charge, i.e. 10 + 5 = 15), not the ~95 expected for a fresh day. The run's own
+  hard-stop rule (`remaining < 15`) fired immediately after that first search dropped the
+  balance to 10. Only `destined_rivals_etb` was seeded (search −5 → 10, then 1-credit by-id
+  verify −1 → 9; 6 credits spent total this session). The other six keys above were never
+  attempted — no search credits were spent on them. Investigate why today's daily credit budget
+  was already ~80 credits consumed before this session's first call.
 - (MTG products: PPT is Pokémon-only — leave `ppt_id` empty; they keep the eBay/PriceCharting path.)
 
 ## Done when
