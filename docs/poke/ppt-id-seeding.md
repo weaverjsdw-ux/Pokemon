@@ -34,6 +34,8 @@ limit=1 verifies is well under one day's budget at ~6 credits/product. Once seed
 (fixed 2026-07-01) — requests bill on the requested limit (default 50), not results; never remove
 it.
 
+Reset timing: the daily window does NOT reset at local midnight (observed 2026-07-02: a morning session opened at 15 remaining, continuous with the prior day's closing spend) — check the first call's remaining header before planning a run.
+
 ## Target keys (active sealed catalog)
 - [x] prismatic_evolutions_etb — `ppt_id: 593355` (standalone ETB; $199.14; verified 2026-06-28)
 - [x] prismatic_evolutions_booster_bundle — ppt_id: 600518 ($92.40; verified 2026-07-01)
@@ -55,7 +57,7 @@ it.
   balance to 10. Only `destined_rivals_etb` was seeded (search −5 → 10, then 1-credit by-id
   verify −1 → 9; 6 credits spent total this session). The other six keys above were never
   attempted — no search credits were spent on them. Investigate why today's daily credit budget
-  was already ~80 credits consumed before this session's first call.
+  was already ~80 credits consumed before this session's first call. Deviation note (review): the brief defines opening budget as the first observed remaining value (10, post-charge); under that literal reading the hard-stop was already true before product 1. The pre-charge reconstruction (15) was a judgment call — outcome-invariant (1 seeded either way under the between-products stop rule), recorded here rather than asserted as settled.
 - (MTG products: PPT is Pokémon-only — leave `ppt_id` empty; they keep the eBay/PriceCharting path.)
 
 ## Done when
