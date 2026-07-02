@@ -143,3 +143,92 @@ def test_sweep_dict_shape():
     assert swp["bundled_offers"] == []
     assert swp["watchlist_results"] == []
     assert any(s["name"] == "PokemonPriceTracker" for s in swp["sources"])
+
+
+# ---------------------------------------------------------------- CLI + guard
+
+
+class _StubEstimator:
+    def __init__(self, row):
+        self.row = row
+        self.calls = 0
+
+    def estimate(self, key, product, checked_at):
+        self.calls += 1
+        return dict(self.row)
+
+
+def test_live_lookup_degrades_to_fallback_when_cap_hit():
+    cfg = _cfg(daily_credit_cap=2)
+    market = _StubEstimator(_verified_row() | {"creditsConsumed": 1, "dailyRemaining": 50})
+    fallback = _StubEstimator(_est_row())
+    lookup = sweep.LiveCompLookup(cfg, market_client=market, resale_client=fallback)
+    for key, product in CATALOG.items():
+        lookup(key, product)
+    assert market.calls == 2          # cap=2 -> third product skips the market path
+    assert fallback.calls == 1
+    assert lookup.credits_used == 2
+
+
+def test_live_lookup_stops_market_calls_when_daily_remaining_zero():
+    cfg = _cfg()
+    market = _StubEstimator(_verified_row() | {"creditsConsumed": 1, "dailyRemaining": 0})
+    fallback = _StubEstimator(_est_row())
+    lookup = sweep.LiveCompLookup(cfg, market_client=market, resale_client=fallback)
+    for key, product in CATALOG.items():
+        lookup(key, product)
+    assert market.calls == 1
+    assert lookup.exhausted is True
+    assert fallback.calls == 2
+
+
+def test_live_lookup_turns_exceptions_into_error_rows():
+    cfg = _cfg()
+
+    class _Boom:
+        def estimate(self, key, product, checked_at):
+            raise ValueError("boom")
+
+    lookup = sweep.LiveCompLookup(cfg, market_client=_Boom(), resale_client=_Boom())
+    row = lookup("fake_etb", CATALOG["fake_etb"])
+    assert row["status"] == "error"   # comp_from_row -> (None, "none") -> counted no_comp
+
+
+def test_cli_writes_sweep_manifest_dashboard_and_ledger(tmp_path):
+    cfg = _cfg(min_rows=3)
+    rc = sweep.main(["--out", str(tmp_path)],
+                    comp_lookup=lambda k, p: _verified_row(), cfg=cfg)
+    assert rc == 0
+    today = date.today().isoformat()
+    poke_dir = tmp_path / "data" / "poke"
+    assert (poke_dir / f"{today}-sealed.json").exists()
+    assert (poke_dir / f"{today}-sealed.manifest.json").exists()
+    dash = tmp_path / "dashboards" / f"{today}-sealed.html"
+    assert dash.exists()
+
+    from scanner.discovery.golden import golden_check
+    assert golden_check(dash.read_text(encoding="utf-8"), 3) == []
+
+    ledger_path = poke_dir / "price_history.jsonl"
+    lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 6            # market_comp + deal line per comped product
+
+    # idempotent re-run: same day, same comps -> nothing new appended
+    rc2 = sweep.main(["--out", str(tmp_path)],
+                     comp_lookup=lambda k, p: _verified_row(), cfg=cfg)
+    assert rc2 == 0
+    assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == 6
+
+
+def test_cli_halts_without_dashboard_on_golden_failure(tmp_path, capsys):
+    cfg = _cfg(min_rows=99)          # impossible floor -> acquisition-failure canary
+    rc = sweep.main(["--out", str(tmp_path)],
+                    comp_lookup=lambda k, p: _verified_row(), cfg=cfg)
+    assert rc == 1
+    today = date.today().isoformat()
+    assert not (tmp_path / "dashboards" / f"{today}-sealed.html").exists()
+    # evidence still persisted for diagnosis
+    assert (tmp_path / "data" / "poke" / f"{today}-sealed.json").exists()
+    assert (tmp_path / "data" / "poke" / f"{today}-sealed.manifest.json").exists()
+    out = capsys.readouterr().out
+    assert "GOLDEN FAIL" in out
