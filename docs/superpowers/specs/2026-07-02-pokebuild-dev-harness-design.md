@@ -48,7 +48,7 @@ pointer plus an instruction to read it fresh.
 ## Architecture — three artifacts
 
 | # | File | Loading | Carries |
-|---|------|---------|---------|
+| --- | --- | --- | --- |
 | 1 | `Pokemon-main/CLAUDE.md` (repo root, committed) | Always-on, every session in this cwd | Safety invariants + orientation, ~30 lines max |
 | 2 | `C:\Users\Weave\.claude\commands\pokebuild.md` (global) | On `/pokebuild [args]` | Thin dispatcher: read the OPENER in full, then dispatch on `$ARGUMENTS` |
 | 3 | `Pokemon-main/docs/poke/pokebuild-opener.md` (committed) | Read by the command at invocation | The full session contract: persona, prep protocol, mode dispatch, workflow, guardrails, boundaries |
@@ -90,9 +90,11 @@ Frontmatter: `description` (one line: begin a Pokemon-main dev advisor/coder ses
 Body (short, `/gun`-shaped):
 
 - "You are now starting a **POKEBUILD** session. The input is: `$ARGUMENTS`."
-- **Begin immediately**: read `<repo>\docs\poke\pokebuild-opener.md` in full — it is the
-  canonical session contract. If it is missing/unreadable, surface that and stop (do not
-  improvise a contract).
+- **Begin immediately**: read
+  `C:\Users\Weave\OneDrive\Desktop\Pokemon-main\docs\poke\pokebuild-opener.md` in full — it is
+  the canonical session contract (absolute path: the command file is global and must not
+  depend on cwd). If it is missing/unreadable, surface that and stop (do not improvise a
+  contract).
 - Dispatch on `$ARGUMENTS` per the OPENER's Mode Dispatch rules.
 - Load the OPENER's referenced files on demand only (progressive disclosure).
 
