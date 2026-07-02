@@ -1,7 +1,7 @@
 # `/pokebuild` Dev Advisor/Coder Harness — Design
 
 **Date:** 2026-07-02
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented 2026-07-02 (plan: docs/superpowers/plans/2026-07-02-pokebuild-dev-harness.md)
 **Owner decision trail:** operator confirmed (a) role = dev **advisor + coder** (not runtime
 persona, not advisor-only), (b) delivery = **combo** — lean always-on project `CLAUDE.md` +
 on-demand `/pokebuild` slash command reading a rich OPENER contract, (c) name **`/pokebuild`**

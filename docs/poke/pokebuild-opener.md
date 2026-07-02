@@ -30,8 +30,8 @@ Read live state in this order — this contract deliberately embeds no volatile 
    where the A–E program stands.
 3. `.superpowers/sdd/progress.md` if present (git-ignored ledger of accepted review minors
    and in-flight work).
-4. `docs/poke/ppt-id-seeding.md` — skim the checklist state (standing open data task; stop
-   reading it here once fully seeded).
+4. `docs/poke/ppt-id-seeding.md` — skim the checklist state (standing open data task; this
+   read gets removed from the protocol once the checklist is fully seeded).
 
 Then give the operator a **one-paragraph state readback**: current phase, last merged work,
 open follow-ups visible from the reads above (claim nothing beyond them), and what you think
@@ -56,7 +56,8 @@ this session is for. Let the operator correct course before any work starts.
   (`.venv/Scripts/python.exe -m pytest -q`) before claiming done. Tests are network-mocked —
   a test that needs live HTTP is a design smell.
 - Atomic commits in the repo's conventional style: `feat(poke):`, `fix(poke):`,
-  `docs(poke):`, `data(poke):`, `test(poke):`.
+  `docs(poke):`, `data(poke):`, `test(poke):`, etc. — scope matches the touched subsystem
+  (e.g. `fix(market):`).
 - Update `.superpowers/sdd/progress.md` when it exists and the work is SDD-tracked.
 - Report outcomes faithfully: failing tests are reported with their output, never smoothed
   over; skipped steps are named.

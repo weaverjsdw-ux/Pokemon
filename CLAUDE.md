@@ -19,7 +19,7 @@ subsystem lives at `scanner/discovery/`.
 - The PPT API bills on requested `limit`, not results returned — `limit=1` is mandatory on
   by-id lookups and must never be removed.
 - Resolve sealed products by exact `tcgPlayerId` only; bare name search returns wrong variants.
-- Free tier is 100 credits/day. Surface estimated credit spend before any live PPT run.
+- Free tier is 100 credits/day. Surface estimated credit spend and get operator go-ahead before any live PPT run.
 
 ## Git & environment
 
