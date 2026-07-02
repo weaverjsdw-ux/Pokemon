@@ -263,3 +263,26 @@ def test_poke_overrides_parse():
 def test_poke_must_be_mapping():
     with pytest.raises(SystemExit):
         cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}, "poke": []})
+
+
+def test_poke_slice_defaults():
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.poke.buy_basis == "msrp"
+    assert cfg.poke.daily_credit_cap == 90
+
+
+def test_poke_slice_overrides_parse():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"buy_basis": "MSRP", "daily_credit_cap": 40},
+    })
+    assert cfg.poke.buy_basis == "msrp"
+    assert cfg.poke.daily_credit_cap == 40
+
+
+def test_poke_rejects_unknown_buy_basis():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({
+            "locations": {"home": "A", "work": "B"},
+            "poke": {"buy_basis": "observed"},
+        })

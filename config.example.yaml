@@ -82,6 +82,8 @@ poke:
   steal_pct: 30             # a VERIFIED deal at/above this % off market is STEAL-eligible
   min_discount_pct: 5       # below this % off market it is not a deal row
   grading_cost_all_in: 97.50  # live PSA tier all-in (value tiers paused 2026-06; config, not hardcoded)
+  buy_basis: msrp           # sealed-board deal-price basis ("observed" last-seen retail is a future hook)
+  daily_credit_cap: 90      # PPT credits per sweep run; past this, remaining products use the resale fallback
 
 # Discord webhook URL. See README for the 30-second setup walkthrough.
 # Leave blank for console-only output.

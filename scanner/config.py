@@ -35,6 +35,8 @@ class PokeCfg:
     steal_pct: float = 30.0       # verified deal at/above this % off -> STEAL eligible
     min_discount_pct: float = 5.0 # below this % off market -> not a deal row
     grading_cost_all_in: float = 97.50  # live PSA tier all-in (config, value tiers paused 2026-06)
+    buy_basis: str = "msrp"       # sealed-board deal-price basis ("observed" is a future hook)
+    daily_credit_cap: int = 90    # PPT credits/run guard; past this the sweep uses the resale fallback
 
 
 @dataclass
@@ -158,6 +160,12 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         poke_raw = {}
     if not isinstance(poke_raw, dict):
         raise SystemExit("config.yaml: poke must be a mapping.")
+    buy_basis = str(poke_raw.get("buy_basis", "msrp")).strip().lower()
+    if buy_basis != "msrp":
+        raise SystemExit(
+            "config.yaml: poke.buy_basis only supports 'msrp' in this build "
+            "('observed' is a future hook, not implemented)."
+        )
     try:
         poke_cfg = PokeCfg(
             min_rows=int(poke_raw.get("min_rows", 10)),
@@ -165,9 +173,11 @@ def from_mapping(raw: dict[str, Any]) -> Config:
             steal_pct=_num(poke_raw, "steal_pct", 30.0, "poke.steal_pct"),
             min_discount_pct=_num(poke_raw, "min_discount_pct", 5.0, "poke.min_discount_pct"),
             grading_cost_all_in=_num(poke_raw, "grading_cost_all_in", 97.50, "poke.grading_cost_all_in"),
+            buy_basis=buy_basis,
+            daily_credit_cap=int(poke_raw.get("daily_credit_cap", 90)),
         )
     except (TypeError, ValueError):
-        raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days must be integers.")
+        raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days / poke.daily_credit_cap must be integers.")
 
     return Config(
         home_address=home,
