@@ -46,7 +46,7 @@ class PokemonPriceTrackerClient:
                              "No ppt_id mapped; skipped to avoid a wrong-variant search.")
         response = self.session.get(
             f"{PPT_BASE_URL}/sealed-products",
-            params={"tcgPlayerId": ppt_id},  # exact single product, 1 credit
+            params={"tcgPlayerId": ppt_id, "limit": 1},  # exact single product; limit=1 is REQUIRED - requests bill on limit (default 50), not results
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=20,
         )

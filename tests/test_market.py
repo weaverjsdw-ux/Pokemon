@@ -133,6 +133,7 @@ def test_v2_sealed_by_id_parses_unopened_price_as_medium():
     assert session.last["url"].endswith("/api/v2/sealed-products")
     assert session.last["params"]["tcgPlayerId"] == "593355"
     assert "search" not in session.last["params"]
+    assert session.last["params"]["limit"] == 1  # bills 1 credit, not the default 50
     assert session.last["headers"]["Authorization"] == "Bearer k"
 
 
