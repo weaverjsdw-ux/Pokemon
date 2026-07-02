@@ -25,17 +25,22 @@ Pick the row whose `name` is the **standalone product in the right set** (exclud
 (or a by-id GET) and confirming the name + a plausible `unopenedPrice`.
 
 ## Budget
-Free tier = 100 credits/day. A by-id lookup is 1 credit; seeding all ~26 sealed products via a few
-limit=5 searches is well under one day's budget. Once seeded, steady-state is ~1 credit/product per
-24h cache refresh.
+Free tier = 100 credits/day. A by-id lookup is 1 credit **only if `limit=1` is passed explicitly**
+— omitting `limit` on `/sealed-products` defaults to `limit=50` and bills 50 credits (confirmed live
+2026-07-01: one no-`limit` by-id call dropped `X-RateLimit-Daily-Remaining` from 95 to 45). Always
+pass `limit=1` for by-id verification. Seeding all ~26 sealed products via limit=5 searches +
+limit=1 verifies is well under one day's budget at ~6 credits/product. Once seeded, steady-state is
+~1 credit/product per 24h cache refresh — but `scanner/market.py`'s `estimate()` currently omits
+`limit=1` from its by-id GET (see line ~49); its comment says "1 credit" but as written it will bill
+50 per refresh. Flagged for a follow-up fix, not corrected by this data task.
 
 ## Target keys (active sealed catalog)
 - [x] prismatic_evolutions_etb — `ppt_id: 593355` (standalone ETB; $199.14; verified 2026-06-28)
-- [ ] prismatic_evolutions_booster_bundle
-- [ ] prismatic_evolutions_surprise_box
-- [ ] journey_together_etb
-- [ ] journey_together_booster_bundle
-- [ ] destined_rivals_booster_bundle
+- [x] prismatic_evolutions_booster_bundle — ppt_id: 600518 ($92.40; verified 2026-07-01)
+- [x] prismatic_evolutions_surprise_box — ppt_id: 593466 ($72.67; verified 2026-07-01)
+- [x] journey_together_etb — ppt_id: 610930 ($132.58; verified 2026-07-01)
+- [x] journey_together_booster_bundle — ppt_id: 610953 ($48.81; verified 2026-07-01)
+- [x] destined_rivals_booster_bundle — ppt_id: 625670 ($84.74; verified 2026-07-01)
 - [ ] destined_rivals_etb
 - [ ] surging_sparks_etb
 - [ ] surging_sparks_booster_bundle

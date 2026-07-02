@@ -35,6 +35,7 @@ prismatic_evolutions_booster_bundle:
   type: "Booster Bundle"
   msrp: "$26.94"
   resale_query: "Pokemon TCG Prismatic Evolutions Booster Bundle sealed"
+  ppt_id: "600518"   # PokemonPriceTracker tcgPlayerId (standalone Booster Bundle; verified 2026-07-01)
   target_tcin: "93954446"
   walmart_item_id: ""
   bestbuy_sku: "6608206"
@@ -48,6 +49,7 @@ prismatic_evolutions_surprise_box:
   type: "Surprise Box"
   msrp: "$22.99"
   resale_query: "Pokemon TCG Prismatic Evolutions Surprise Box sealed"
+  ppt_id: "593466"   # PokemonPriceTracker tcgPlayerId (standalone Surprise Box; verified 2026-07-01)
   target_tcin: "94336414"
   walmart_item_id: ""
   bestbuy_sku: "6607717"
@@ -61,6 +63,7 @@ journey_together_etb:
   type: "ETB"
   msrp: "$49.99"
   resale_query: "Pokemon TCG Journey Together Elite Trainer Box sealed"
+  ppt_id: "610930"   # PokemonPriceTracker tcgPlayerId (standalone ETB; verified 2026-07-01)
   target_tcin: "93803439"
   walmart_item_id: ""
   bestbuy_sku: "6614267"
@@ -74,6 +77,7 @@ journey_together_booster_bundle:
   type: "Booster Bundle"
   msrp: "$26.94"
   resale_query: "Pokemon TCG Journey Together Booster Bundle sealed"
+  ppt_id: "610953"   # PokemonPriceTracker tcgPlayerId (standalone Booster Bundle; verified 2026-07-01)
   target_tcin: "94300074"
   walmart_item_id: ""
   bestbuy_sku: "6614264"
@@ -87,6 +91,7 @@ destined_rivals_booster_bundle:
   type: "Booster Bundle"
   msrp: "$26.94"
   resale_query: "Pokemon TCG Destined Rivals Booster Bundle sealed"
+  ppt_id: "625670"   # PokemonPriceTracker tcgPlayerId (standalone Booster Bundle; verified 2026-07-01)
   target_tcin: "94300067"
   walmart_item_id: ""
   bestbuy_sku: "6624828"
