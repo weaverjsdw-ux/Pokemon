@@ -41,13 +41,19 @@ it.
 - [x] journey_together_etb — ppt_id: 610930 ($132.58; verified 2026-07-01)
 - [x] journey_together_booster_bundle — ppt_id: 610953 ($48.81; verified 2026-07-01)
 - [x] destined_rivals_booster_bundle — ppt_id: 625670 ($84.74; verified 2026-07-01)
-- [ ] destined_rivals_etb
+- [x] destined_rivals_etb — ppt_id: 624676 ($180.65; verified 2026-07-02)
 - [ ] surging_sparks_etb
 - [ ] surging_sparks_booster_bundle
 - [ ] scarlet_violet_151_etb
 - [ ] scarlet_violet_151_booster_bundle
 - [ ] paldean_fates_etb
 - [ ] crown_zenith_etb
+- STOP (2026-07-02): opening `X-RateLimit-Daily-Remaining` was 10 (not the expected ~95) on the
+  very first search call of the session; the run's own hard-stop rule (`remaining < 15`) fired
+  immediately after that call. Only `destined_rivals_etb` was seeded (already-paid-for search +
+  1-credit by-id verify, remaining 10→9). The other six keys above were never attempted — no
+  search credits were spent on them. Investigate why today's daily credit budget was already
+  ~90 credits consumed before this session's first call.
 - (MTG products: PPT is Pokémon-only — leave `ppt_id` empty; they keep the eBay/PriceCharting path.)
 
 ## Done when

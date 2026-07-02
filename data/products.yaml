@@ -105,6 +105,7 @@ destined_rivals_etb:
   type: "ETB"
   msrp: "$49.99"
   resale_query: "Pokemon TCG Destined Rivals Elite Trainer Box sealed"
+  ppt_id: "624676"   # PokemonPriceTracker tcgPlayerId (standalone ETB; verified 2026-07-02)
   target_tcin: ""
   walmart_item_id: ""
   bestbuy_sku: "6624825"
