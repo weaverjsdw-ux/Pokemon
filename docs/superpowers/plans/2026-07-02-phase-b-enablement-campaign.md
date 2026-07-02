@@ -165,7 +165,7 @@ Co-Authored-By: Claude Fable 5 (1M context) <noreply@anthropic.com>
 
 **Files:**
 - Modify: `docs/poke/sources.md`
-- Modify: `docs/poke/PHASO0_FINDINGS.md` — CORRECTION, exact path: `docs/poke/PHASE0_FINDINGS.md` (append only)
+- Modify: `docs/poke/PHASE0_FINDINGS.md` (append only)
 
 **Interfaces:**
 - Consumes: the existing verdict-table format in `docs/poke/sources.md` (read it first;
