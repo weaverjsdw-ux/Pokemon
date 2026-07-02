@@ -51,18 +51,41 @@ class PokemonPriceTrackerClient:
             timeout=20,
         )
         response.raise_for_status()  # 401/429/5xx -> RequestException -> fallback
-        return _quote_from_ppt(product_key, product, response.json(), checked_at)
+        payload = response.json()
+        headers = getattr(response, "headers", None) or {}
+        row = _quote_from_ppt(product_key, product, payload, checked_at)
+        return row | {
+            "creditsConsumed": _credits_from(payload, headers),
+            "dailyRemaining": _int_or(headers.get("X-RateLimit-Daily-Remaining"), None),
+        }
 
 
-def _first_unopened_price(payload: dict[str, Any]) -> float | None:
+def _first_unopened(payload: dict[str, Any]) -> tuple[float | None, str]:
+    """(unopenedPrice, tcgPlayerUrl) from the first usable data item."""
     data = payload.get("data")
     items = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
     for item in items:
         if isinstance(item, dict):
             price = resale._amount(item.get("unopenedPrice"))
             if price is not None:
-                return price
-    return None
+                return price, str(item.get("tcgPlayerUrl") or "")
+    return None, ""
+
+
+def _int_or(value: Any, default: int | None) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _credits_from(payload: dict[str, Any], headers: Any) -> int:
+    consumed = _int_or((headers or {}).get("X-API-Calls-Consumed"), None)
+    if consumed is None:
+        calls = (payload.get("metadata") or {}).get("apiCallsConsumed")
+        total = calls.get("total") if isinstance(calls, dict) else calls
+        consumed = _int_or(total, 1)  # an HTTP call happened; never claim 0
+    return consumed
 
 
 def _no_match(
@@ -79,7 +102,7 @@ def _no_match(
 def _quote_from_ppt(
     product_key: str, product: dict[str, Any], payload: dict[str, Any], checked_at: int
 ) -> dict[str, Any]:
-    price = _first_unopened_price(payload)
+    price, source_url = _first_unopened(payload)
     base = {
         "productKey": product_key,
         "source": SOURCE_LABEL,
@@ -97,6 +120,8 @@ def _quote_from_ppt(
         "low": money,
         "high": money,
         "sampleSize": 0,  # single market price, not a sold-comp sample
+        "sourceUrl": source_url,
+        "url": source_url,
         "detail": "PokemonPriceTracker TCGplayer sealed market price.",
     })
 
@@ -107,15 +132,22 @@ class MarketFallbackClient:
         self.fallback = fallback
 
     def estimate(self, product_key: str, product: dict[str, Any], checked_at: int) -> dict[str, Any]:
+        consumed = 0
+        remaining = None
         try:
             row = self.primary.estimate(product_key, product, checked_at)
+            consumed = int(row.get("creditsConsumed") or 0)
+            remaining = row.get("dailyRemaining")
             if row.get("status") == "ok":
                 return row
         except requests.RequestException:
             pass
         except Exception:
             pass
-        return self.fallback.estimate(product_key, product, checked_at)
+        row = self.fallback.estimate(product_key, product, checked_at)
+        if consumed or remaining is not None:
+            row = row | {"creditsConsumed": consumed, "dailyRemaining": remaining}
+        return row
 
 
 def market_client_from_config(cfg: Any) -> Any:

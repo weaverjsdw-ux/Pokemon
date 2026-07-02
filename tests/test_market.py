@@ -89,8 +89,9 @@ def test_factory_with_preference_wraps_ppt():
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, headers=None):
         self._payload = payload
+        self.headers = headers or {}
 
     def raise_for_status(self):
         return None
@@ -100,13 +101,14 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, payload):
+    def __init__(self, payload, headers=None):
         self._payload = payload
+        self._headers = headers
         self.last = None
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.last = {"url": url, "params": params, "headers": headers}
-        return _FakeResponse(self._payload)
+        return _FakeResponse(self._payload, self._headers)
 
 
 def test_v2_sealed_by_id_parses_unopened_price_as_medium():
@@ -148,3 +150,65 @@ def test_v2_id_with_empty_data_returns_no_matches():
     row = client.estimate("x", {"ppt_id": "999"}, 0)
     assert row["status"] == "no_matches"
     assert comp_from_row(row) == (None, "none")
+
+
+def test_v2_ok_row_carries_source_url_and_credit_telemetry():
+    payload = {
+        "data": {"tcgPlayerId": "593355", "name": "Prismatic Evolutions Elite Trainer Box",
+                 "tcgPlayerUrl": "https://www.tcgplayer.com/product/593355",
+                 "unopenedPrice": 199.14},
+        "metadata": {"apiCallsConsumed": {"total": 1}},
+    }
+    session = _FakeSession(payload, headers={"X-API-Calls-Consumed": "1",
+                                             "X-RateLimit-Daily-Remaining": "87"})
+    client = PokemonPriceTrackerClient(api_key="k", session=session)
+    row = client.estimate("prismatic_evolutions_etb", {"msrp": "$49.99", "ppt_id": "593355"}, 0)
+    assert row["status"] == "ok"
+    assert row["sourceUrl"] == "https://www.tcgplayer.com/product/593355"
+    assert row["url"] == "https://www.tcgplayer.com/product/593355"
+    assert row["creditsConsumed"] == 1
+    assert row["dailyRemaining"] == 87
+
+
+def test_v2_credits_fall_back_to_metadata_then_one():
+    # no headers at all -> metadata total; no metadata either -> default 1 (a call happened)
+    payload = {"data": {"tcgPlayerId": "1", "unopenedPrice": 10.0},
+               "metadata": {"apiCallsConsumed": {"total": 3}}}
+    client = PokemonPriceTrackerClient(api_key="k", session=_FakeSession(payload))
+    row = client.estimate("x", {"ppt_id": "1"}, 0)
+    assert row["creditsConsumed"] == 3
+    assert row["dailyRemaining"] is None
+
+    bare = {"data": {"tcgPlayerId": "1", "unopenedPrice": 10.0}}
+    row = PokemonPriceTrackerClient(api_key="k", session=_FakeSession(bare)).estimate(
+        "x", {"ppt_id": "1"}, 0)
+    assert row["creditsConsumed"] == 1
+
+
+def test_v2_no_match_after_http_still_bills_credit():
+    session = _FakeSession({"data": None, "metadata": {}},
+                           headers={"X-API-Calls-Consumed": "1",
+                                    "X-RateLimit-Daily-Remaining": "42"})
+    row = PokemonPriceTrackerClient(api_key="k", session=session).estimate(
+        "x", {"ppt_id": "999"}, 0)
+    assert row["status"] == "no_matches"
+    assert row["creditsConsumed"] == 1
+    assert row["dailyRemaining"] == 42
+
+
+def test_fallback_row_carries_primary_telemetry():
+    primary = _StubClient(row={"status": "no_matches", "creditsConsumed": 1,
+                               "dailyRemaining": 42})
+    fallback = _StubClient(row=_ok_row("$50.00"))
+    client = MarketFallbackClient(primary, fallback)
+    row = client.estimate("k", {"msrp": "$49.99"}, 0)
+    assert row["status"] == "ok"
+    assert row["creditsConsumed"] == 1
+    assert row["dailyRemaining"] == 42
+
+
+def test_fallback_row_untouched_when_primary_never_called_http():
+    primary = _StubClient(row={"status": "no_matches"})  # e.g. no ppt_id, 0 credits
+    fallback = _StubClient(row=_ok_row("$50.00"))
+    row = MarketFallbackClient(primary, fallback).estimate("k", {"msrp": "$49.99"}, 0)
+    assert "creditsConsumed" not in row
