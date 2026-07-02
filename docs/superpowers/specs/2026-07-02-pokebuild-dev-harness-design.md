@@ -73,10 +73,11 @@ Target ≤ ~30 lines of content. Sections and the facts they carry:
    not results — `limit=1` is mandatory on by-id lookups and must never be removed; resolve
    sealed products by exact `tcgPlayerId` only (bare name search returns wrong variants); free
    tier is 100 credits/day.
-5. **Git & environment policy**: local `main` is intentionally ahead of `origin/main` — never
-   push without explicit operator instruction; no dependency installs without asking; runtime
-   deps are only `requests` + `PyYAML`; `config.yaml` and `data/state.db` are gitignored
-   (config holds the PPT key — never commit or print it).
+5. **Git & environment policy** (invariants only — no volatile state in this always-on file):
+   never push to any remote without explicit operator instruction (local `main` may
+   intentionally diverge from `origin/main`); keep the dependency footprint minimal and never
+   install anything without asking; `config.yaml` and `data/state.db` are gitignored (config
+   holds the PPT key — never commit or print it).
 6. **Workflow pointer** (2 lines): feature work follows the SDD flow (brainstorm → spec in
    `docs/superpowers/specs/` → plan → execute); the program roadmap is
    `docs/superpowers/specs/2026-06-28-resale-engine-program-roadmap.md`. For a full build
@@ -112,7 +113,9 @@ Sections, in order:
    2. The roadmap spec's phase list — where the program stands (A–E).
    3. `.superpowers/sdd/progress.md` if present (git-ignored ledger of accepted review minors
       and in-flight work).
-   4. Then a **one-paragraph state readback** to the operator: current phase, last merged
+   4. `docs/poke/ppt-id-seeding.md` — skim the checklist state (the standing open data task;
+      remove this read from the protocol once the checklist is fully seeded).
+   5. Then a **one-paragraph state readback** to the operator: current phase, last merged
       work, open follow-ups it can see, and what it thinks the session is for. Operator
       corrects course before any work starts.
 3. **Mode dispatch** on `$ARGUMENTS`:
@@ -141,9 +144,10 @@ Sections, in order:
    operator go-ahead since they spend credits; if a task implies any of these, stop and
    surface it.
 7. **Referenced files (on demand only):** the roadmap spec; `docs/poke/live-sealed-board.md`
-   (sweep runbook); `docs/poke/ppt-id-seeding.md` (open seeding checklist);
-   `docs/poke/reference/ppt-v2-notes.md` (PPT v2 API contract); `docs/poke/sources.md`;
-   `docs/poke/PHASE0_FINDINGS.md`. Load a file only when the chosen task needs it.
+   (sweep runbook); `docs/poke/ppt-id-seeding.md` (open seeding checklist — also a prep read,
+   see above); `docs/poke/reference/ppt-v2-notes.md` (PPT v2 API contract);
+   `docs/poke/sources.md`; `docs/poke/PHASE0_FINDINGS.md`. Load a file only when the chosen
+   task needs it.
 
 ## Error handling
 
