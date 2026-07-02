@@ -1,7 +1,5 @@
 from datetime import date
 
-import pytest
-
 from scanner import config as cfg_mod
 from scanner import main as main_mod
 from scanner.discovery import score, sweep

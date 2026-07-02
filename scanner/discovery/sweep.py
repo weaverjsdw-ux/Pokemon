@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from dataclasses import asdict
 from datetime import date
@@ -269,7 +268,7 @@ def main(argv: list[str] | None = None,
 
     dash_dir = root / "dashboards"
     dash_dir.mkdir(parents=True, exist_ok=True)
-    dash_path = dash_dir / f"{today}-sealed.html"
+    dash_path = dash_dir / f"{sweep_id}.html"
     dash_path.write_text(html, encoding="utf-8")
 
     c = sweep["counts"]
