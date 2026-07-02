@@ -82,7 +82,8 @@ config tests); credits spent + remaining logged in the progress ledger.
 - PENDING retailer sale pages: Target, Best Buy, Costco, Pokémon Center (deal/clearance/sale
   URLs — identify the concrete URLs during the sweep).
 - Deal blogs / curators: identify candidates via WebSearch first (e.g. TCG deal roundups),
-  then probe each.
+  then probe the **top 3–5 candidates** (bounded — this is a fetchability sweep, not a source
+  census; more curators can be probed later on demand).
 - Re-verify the three known-blocked paths so the sign-off reflects 2026-07-02, not June:
   r/PKMNTCGDeals (WebFetch policy block?), eBay search (timeout?), TCGplayer (JS wall?).
 
