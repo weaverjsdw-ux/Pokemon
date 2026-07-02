@@ -1157,6 +1157,8 @@ git commit -m "docs(poke): live sealed board runbook + recorded spot-check"
 1. **`no_source` skip-counter (not in spec):** an "ok" comp with neither `sourceUrl` nor `url` cannot satisfy the golden per-row provenance rule, so it is skipped + counted rather than rendered with an empty link or dropped silently. Same doctrine as `no_comp` (never fabricate, demote-never-hide is satisfied by the manifest count).
 2. **Est rows carry the fallback's search-page `url` as `source_url`:** the spec's provenance step only names PPT's `sourceUrl`; without this, every fallback row would golden-fail on empty `data-source-url` and the CLI could never ship a board with fallback comps. `verified` still keys strictly off the exact-product `sourceUrl`.
 3. **`main()` accepts `cfg=` injection** in addition to the spec's monkeypatched-client idea — same no-network guarantee, less brittle than patching module internals.
+4. **Ledger lines are per rendered deal row, not per comped product:** a comped-but-`no_source` product is skipped from the ledger too — an observation without provenance shouldn't enter the observation ledger (spec §3.2 wording predates the no_source rule).
+5. **MSRP is parsed before the comp lookup** (spec §3.1 orders comp first): unrankable products burn zero credits; a product missing both MSRP and comp counts as `no_msrp`.
 
 ## Execution notes
 

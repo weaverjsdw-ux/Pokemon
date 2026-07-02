@@ -160,6 +160,29 @@ def test_pricecharting_high_premium_gets_low_confidence_asterisk():
     assert "single_source_summary" in quote["flags"]
 
 
+def test_pricecharting_quote_from_html_unescapes_href_entities():
+    product = {
+        "name": "Prismatic Evolutions Elite Trainer Box",
+        "msrp": "$49.99",
+        "resale_query": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed",
+    }
+    body = """
+      <tr id="product-8256647" data-product="8256647">
+        <td class="title">
+          <a href="/game/x?utm=a&amp;ref=b">Elite Trainer Box</a>
+        </td>
+        <td class="console phone-landscape-hidden">Pokemon Prismatic Evolutions</td>
+        <td class="price numeric used_price"><span class="js-price">$150.00</span></td>
+      </tr>
+    """
+
+    quote = resale.pricecharting_quote_from_html("etb", product, body, checked_at=456)
+
+    assert quote["status"] == "ok"
+    assert "&" in quote["url"]
+    assert "&amp;" not in quote["url"]
+
+
 def test_pricecharting_rejects_false_magic_marvel_non_tcg_match():
     product = {
         "name": "Magic: The Gathering Marvel Super Heroes Bundle",

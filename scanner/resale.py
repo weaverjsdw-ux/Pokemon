@@ -458,7 +458,11 @@ def pricecharting_quote_from_html(
             title_match.group(1),
             flags=re.I,
         )
-        url = _absolute_pricecharting_url(link_match.group(1)) if link_match else base["url"]
+        url = (
+            _absolute_pricecharting_url(html.unescape(link_match.group(1)))
+            if link_match
+            else base["url"]
+        )
         estimate = _money(price)
         return annotate_quote(product, base | {
             "status": "ok",

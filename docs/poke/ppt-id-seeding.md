@@ -30,9 +30,9 @@ Free tier = 100 credits/day. A by-id lookup is 1 credit **only if `limit=1` is p
 2026-07-01: one no-`limit` by-id call dropped `X-RateLimit-Daily-Remaining` from 95 to 45). Always
 pass `limit=1` for by-id verification. Seeding all ~26 sealed products via limit=5 searches +
 limit=1 verifies is well under one day's budget at ~6 credits/product. Once seeded, steady-state is
-~1 credit/product per 24h cache refresh — but `scanner/market.py`'s `estimate()` currently omits
-`limit=1` from its by-id GET (see line ~49); its comment says "1 credit" but as written it will bill
-50 per refresh. Flagged for a follow-up fix, not corrected by this data task.
+~1 credit/product per 24h cache refresh — `scanner/market.py` pins `limit=1` on its by-id GET
+(fixed 2026-07-01) — requests bill on the requested limit (default 50), not results; never remove
+it.
 
 ## Target keys (active sealed catalog)
 - [x] prismatic_evolutions_etb — `ppt_id: 593355` (standalone ETB; $199.14; verified 2026-06-28)

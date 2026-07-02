@@ -51,6 +51,35 @@ def test_safe_href_allows_http_blocks_script_uris():
     assert _safe_href("") == ""
 
 
+def test_deal_row_data_source_url_is_scheme_filtered():
+    # An untrusted javascript: source_url must never reach the data-source-url
+    # attribute either, not just the href. Use an "est" row so it passes the
+    # STOP gate without needing a real source_url (verified rows require one).
+    evil = json.loads(json.dumps(SWEEP))
+    evil["deals"] = [{
+        "item": "Suspect ETB",
+        "set": "Prismatic Evolutions",
+        "asset_class": "sealed",
+        "category": "sealed-etb",
+        "deal_price": 42.0,
+        "market_comp": 60.0,
+        "pct_off": 30,
+        "retailer": "Marketplace seller",
+        "source_url": "javascript:alert(1)",
+        "captured_at": "2026-06-27",
+        "price_confidence": "est",
+        "comp_confidence": "low",
+        "derivation_method": "comp_inference",
+        "badges": ["EST"],
+        "lens_tags": [],
+        "stock_status": "unknown",
+    }]
+    html = render_sweep(evil)
+    assert 'data-source-url=""' in html
+    assert 'href=""' in html
+    assert "javascript:alert" not in html
+
+
 def test_render_drops_javascript_uri_from_href():
     # An untrusted javascript: source_url must never become a clickable href.
     # (deal_price is a string-ish javascript payload only in source_url; the row

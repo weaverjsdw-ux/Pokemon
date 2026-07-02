@@ -52,7 +52,7 @@ def _deal_row_html(d: dict) -> str:
     pct = d.get("pct_off")
     pct_html = f"{_esc(pct)}%" if pct is not None else ""
     return (
-        f'<tr data-source-url="{_esc(d.get("source_url",""))}" '
+        f'<tr data-source-url="{_safe_href(d.get("source_url",""))}" '
         f'data-captured-at="{_esc(d.get("captured_at",""))}">'
         f'<td>{_esc(d.get("item",""))}{_lens_html(d.get("lens_tags",[]))}'
         f'{_badges_html(d.get("badges",[]))}</td>'

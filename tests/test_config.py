@@ -286,3 +286,11 @@ def test_poke_rejects_unknown_buy_basis():
             "locations": {"home": "A", "work": "B"},
             "poke": {"buy_basis": "observed"},
         })
+
+
+def test_poke_rejects_non_numeric_daily_credit_cap():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({
+            "locations": {"home": "A", "work": "B"},
+            "poke": {"daily_credit_cap": "forty"},
+        })

@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 from scanner import config as cfg_mod
@@ -207,6 +208,12 @@ def test_cli_writes_sweep_manifest_dashboard_and_ledger(tmp_path):
     from scanner.discovery.golden import golden_check
     assert golden_check(dash.read_text(encoding="utf-8"), 3) == []
 
+    manifest = json.loads((poke_dir / f"{today}-sealed.manifest.json").read_text(encoding="utf-8"))
+    assert manifest["counts"] == {"scanned": 3, "comped": 3, "no_comp": 0,
+                                  "no_msrp": 0, "no_source": 0}
+    assert manifest["credits_consumed"] == 0
+    assert manifest["golden_failures"] == []
+
     ledger_path = poke_dir / "price_history.jsonl"
     lines = ledger_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 6            # market_comp + deal line per comped product
@@ -228,5 +235,8 @@ def test_cli_halts_without_dashboard_on_golden_failure(tmp_path, capsys):
     # evidence still persisted for diagnosis
     assert (tmp_path / "data" / "poke" / f"{today}-sealed.json").exists()
     assert (tmp_path / "data" / "poke" / f"{today}-sealed.manifest.json").exists()
+    ledger_path = tmp_path / "data" / "poke" / "price_history.jsonl"
+    assert ledger_path.exists()
+    assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == 6
     out = capsys.readouterr().out
     assert "GOLDEN FAIL" in out
