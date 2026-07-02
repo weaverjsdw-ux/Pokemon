@@ -107,3 +107,59 @@ This closes spec §13.1 ("PPT graded/singles endpoint shapes + credit cost"). Bu
   catalog, and reserve parse-title for genuinely unmapped items.
 - **Recommended tier:** start **Free** to validate + run small curated sweeps (with `limit=1`); move to
   **API ($9.99)** for real coverage feeding both `/poke` sweeps and the scanner's background comp cache.
+
+## Phase-0 completion sweep — 2026-07-02
+
+**Method:** WebFetch-first, Playwright-MCP fallback, two-timeout rule, verdicts + evidence
+per source (full table in sources.md).
+
+| Source | Verdict | Evidence (2026-07-02) |
+| --- | --- | --- |
+| Target search | fetchable-plain | Plain WebFetch returned a full product/price list on first try (10 items shown, e.g. Prismatic Evolutions ETB $219.99; "497 results"). |
+| Best Buy search | fetchable-playwright | WebFetch timed out (60s) then ECONNRESET on retry. Playwright rendered full product grid: 646 results, prices visible (e.g. Chaos Rising Booster Box $160.99, ETB $105.00). |
+| Costco search | fetchable-playwright | WebFetch ECONNRESET twice. Playwright initially showed a "Loading" shell; after a short wait it rendered "1 - 11 of 11 results for 'pokemon cards'" with prices (e.g. TOPPS box $35.99, LEGO Pokémon set $229.99). |
+| Pokémon Center new releases | API-only — needs PC product `.js` stock endpoint | WebFetch returned empty content. Playwright hit an Imperva/hCaptcha "Additional security check is required" wall (observation only, not evaded) — a bot-check block, not a timeout. Scanner already reads Pokémon Center product `.js` endpoints for stock; that endpoint, not this HTML category page, is the acquisition path. |
+| r/PKMNTCGDeals | API-only — needs Reddit API | WebFetch: "Claude Code is unable to fetch from www.reddit.com" (policy-layer block). Playwright: page redirected to a `js_challenge=1` URL and returned "You've been blocked by network security." — confirmed policy/bot block, not a timeout. |
+| eBay search | API-only — needs eBay Browse keyset | WebFetch timed out (60s). Playwright rendered a full listing grid with prices (e.g. $97.88, $92.99-with-coupon, $20.00), but the scanner's chosen acquisition path is the eBay Browse API, not HTML scraping — eBay Browse creds NOT configured as of 2026-07-02 (no config.yaml ebay block; env vars empty); see docs/poke/ebay-keyset-setup.md. |
+| TCGplayer search | fetchable-playwright | WebFetch returned only the page header, no products. Playwright (after ~4s render wait) showed "318 results for 'elite trainer box' in Pokémon" with prices and market prices (e.g. Prismatic Evolutions ETB 242 listings from $1.99, Market Price $177.59). |
+| Slickdeals Pokémon TCG search | fetchable-plain | Plain WebFetch returned real deal listings with prices on first try (655 results; e.g. Mega Evolution—Perfect Order ETB $59.99, Destined Rivals Booster Bundle $52.49). |
+| TrackaLacker Pokémon tracker | fetchable-playwright | WebFetch returned HTTP 403. Playwright rendered a free, no-login product/price tracker: "Page 1 of 9 · 406 results" with per-product prices (e.g. Prismatic Evolutions ETB $50, Chaos Rising Booster Display Box $160). Strongest curator candidate. |
+| PriceCharting Elite Trainer Box prices | fetchable-playwright | WebFetch returned HTTP 403. Playwright rendered a structured price list (e.g. Surging Sparks Costco 2-Pack $225.00, Phantasmal Flames ETB $107.99). Scanner already uses PriceCharting as its resale-fallback comp source (Probe A, above). |
+| Poke Alerts | fetchable-playwright — marketing page, live feed paywalled | WebFetch returned HTTP 403. Playwright rendered the landing/marketing page for a paid Discord alert service ("17,009+ successful checkouts"); ETB prices shown are illustrative feature examples, not a live deal feed — actual restock/deal data is gated behind a paid subscription. |
+
+**Changed since June:**
+- The June sample called Target/Best Buy/Costco/Pokémon Center "not yet probed" — all four are now
+  verdicted. Target and Best Buy/Costco resolve cleanly to fetchable (plain and Playwright,
+  respectively); Pokémon Center is the one retailer that is a genuine bot-wall (Imperva/hCaptcha),
+  re-bucketed to `API-only` pointing at the scanner's existing product `.js` stock endpoint rather
+  than this HTML page.
+- Reddit and eBay were "needs Playwright" in June; re-probing on 2026-07-02 shows Playwright
+  clears eBay's HTML (full listing grid renders) but Reddit still hard-blocks even via Playwright
+  ("blocked by network security") — so Reddit stays `API-only`, while eBay is `API-only` for a
+  different reason (design choice: Browse API is the intended acquisition path, not scraping).
+- TCGplayer was "JS-required, header only" in June; on 2026-07-02, Playwright (with a short render
+  wait) clears it fully — 318 results with prices, confirming Playwright is sufficient without
+  needing the TCGplayer API for basic search/price data.
+- **Corrected eBay-creds claim:** earlier findings (lines above) described the scanner as already
+  holding eBay Browse tokens. That is not accurate as of 2026-07-02: eBay Browse creds are NOT
+  configured (no `ebay` block in `config.yaml`, no `EBAY_*` env vars set, and no eBay credential
+  file exists anywhere in the repo). See `docs/poke/ebay-keyset-setup.md` for the setup path (file
+  is a forward reference — it does not yet exist and needs to be authored before eBay Browse can
+  be wired up).
+- Four curators were identified and probed (Slickdeals, TrackaLacker, PriceCharting, Poke Alerts) —
+  none existed in the June sample, which had no curator candidates at all.
+
+**Recommendation:** DISCOVER should target, in priority order: (1) **TrackaLacker** first — free,
+no-login, 406 Pokémon products with live prices, clears Playwright cleanly, closest thing to a
+ready-made curator feed; (2) **Target + Slickdeals** next — both `fetchable-plain`, cheapest to
+poll (no browser needed), good for a fast/low-cost polling tier; (3) **Best Buy / Costco /
+TCGplayer** via Playwright — all render fully, just costlier per-poll than plain fetch; (4)
+**PriceCharting** as the existing comp-source, keep using it for sealed pricing validation rather
+than as a deal feed; (5) defer **eBay Browse API** and **Reddit API** integration until credentials
+are obtained (eBay keyset per `ebay-keyset-setup.md`, once authored; Reddit API app registration);
+(6) for **Pokémon Center**, skip the HTML category page entirely and use the scanner's existing
+product `.js` stock-endpoint path, matching current scanner behavior. Do not attempt to bypass the
+Pokémon Center or Reddit bot-walls with CAPTCHA-solving or similar evasion.
+
+**Operator: does this complete Phase-0 Probe B — signed off? (yes → Phase B unblocked;
+this packet does not self-certify.)**
