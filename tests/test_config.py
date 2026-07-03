@@ -294,3 +294,32 @@ def test_poke_rejects_non_numeric_daily_credit_cap():
             "locations": {"home": "A", "work": "B"},
             "poke": {"daily_credit_cap": "forty"},
         })
+
+
+@pytest.fixture
+def base_raw():
+    """Minimal valid raw config mapping for comps tests."""
+    return {
+        "locations": {"home": "A", "work": "B"},
+    }
+
+
+def test_comps_defaults(base_raw):
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.comps.engine == "legacy"
+    assert cfg.comps.agreement_tolerance_pct == 20.0
+    assert cfg.comps.ebay_floor_sanity_pct == 50.0
+    assert cfg.comps.cache_ttl_seconds == 21600
+    assert cfg.comps.politeness_seconds == 1.0
+
+
+def test_comps_engine_validated(base_raw):
+    base_raw["comps"] = {"engine": "warp-drive"}
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_comps_inhouse_accepted(base_raw):
+    base_raw["comps"] = {"engine": "inhouse", "cache_ttl_seconds": 60}
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.comps.engine == "inhouse" and cfg.comps.cache_ttl_seconds == 60

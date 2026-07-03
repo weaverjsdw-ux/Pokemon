@@ -40,6 +40,15 @@ class PokeCfg:
 
 
 @dataclass
+class CompsCfg:
+    engine: str = "legacy"                 # legacy | inhouse (Slice-6 flips the default)
+    agreement_tolerance_pct: float = 20.0
+    ebay_floor_sanity_pct: float = 50.0
+    cache_ttl_seconds: int = 21600
+    politeness_seconds: float = 1.0
+
+
+@dataclass
 class Config:
     home_address: str
     work_address: str
@@ -74,6 +83,7 @@ class Config:
     market_api_key: str = ""
     market_cache_ttl_seconds: int = 86400
     poke: PokeCfg = field(default_factory=PokeCfg)
+    comps: CompsCfg = field(default_factory=CompsCfg)
 
 
 def load(path: Path | None = None) -> Config:
@@ -179,6 +189,28 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days / poke.daily_credit_cap must be integers.")
 
+    comps_raw = raw.get("comps")
+    if comps_raw is None:
+        comps_raw = {}
+    if not isinstance(comps_raw, dict):
+        raise SystemExit("config.yaml: comps must be a mapping.")
+    comps_engine = str(comps_raw.get("engine", "legacy")).strip().lower()
+    if comps_engine not in {"legacy", "inhouse"}:
+        raise SystemExit("config.yaml: comps.engine must be 'legacy' or 'inhouse'.")
+    try:
+        comps_cfg = CompsCfg(
+            engine=comps_engine,
+            agreement_tolerance_pct=_num(comps_raw, "agreement_tolerance_pct", 20.0,
+                                         "comps.agreement_tolerance_pct"),
+            ebay_floor_sanity_pct=_num(comps_raw, "ebay_floor_sanity_pct", 50.0,
+                                       "comps.ebay_floor_sanity_pct"),
+            cache_ttl_seconds=int(comps_raw.get("cache_ttl_seconds", 21600)),
+            politeness_seconds=_num(comps_raw, "politeness_seconds", 1.0,
+                                    "comps.politeness_seconds"),
+        )
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: comps.cache_ttl_seconds must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -220,6 +252,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         market_api_key=str(market_raw.get("api_key", "") or os.getenv("PPT_API_KEY", "")),
         market_cache_ttl_seconds=market_cache_ttl,
         poke=poke_cfg,
+        comps=comps_cfg,
     )
 
 
