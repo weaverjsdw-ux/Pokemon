@@ -23,12 +23,18 @@ from .. import main as main_mod
 from .. import market as market_mod
 from .. import resale
 from ..comps import engine as comps_engine
+from ..retailers import ALL as RETAILERS_ALL
 from . import golden as golden_mod
 from . import ledger as ledger_mod
 from . import render as render_mod
 from . import schema, score
+from . import verify as verify_mod
 
 CompLookup = Callable[[str, dict], dict]
+# (product_key, product, expected_price) -> StockVerification
+StockVerifier = Callable[[str, dict, float], "verify_mod.StockVerification"]
+
+_RETAILER_NAMES = {slug: RClass.name for slug, RClass in RETAILERS_ALL.items()}
 
 
 def _msrp(product: dict) -> float | None:
@@ -65,6 +71,24 @@ def _provenance(comp_row: dict, comp_confidence: str) -> tuple[str, str, str, st
     return "est", source_url, method, detail
 
 
+def _apply_stock(row: schema.DealRow, v: "verify_mod.StockVerification") -> None:
+    """Copy verification evidence onto the row; re-anchor price math to the
+    observed price when one was read (verdicts run on verified, never ads)."""
+    row.stock_status = v.stock_status
+    row.stock_evidence = v.evidence or v.degraded_reason
+    row.buy_url = v.buy_url
+    row.stock_checked_at = v.checked_at
+    row.stock_method = v.method
+    if v.stock_status in schema.POSITIVE_STOCK and v.source:
+        row.retailer = _RETAILER_NAMES.get(v.source, v.source)
+    if v.verified_price and v.verified_price > 0:
+        if v.price_matches is False:
+            row.warn_reason = (f"PRICE_CHANGED: observed ${v.verified_price:.2f} "
+                               f"vs expected ${row.deal_price:.2f}")
+        row.deal_price = v.verified_price
+        row.pct_off = score.compute_pct_off(row.deal_price, row.market_comp)
+
+
 def build_sealed_sweep(
     cfg: Any,
     comp_lookup: CompLookup,
@@ -72,11 +96,13 @@ def build_sealed_sweep(
     event: str,
     sweep_id: str,
     captured_at: str,
+    stock_verifier: StockVerifier | None = None,
 ) -> dict:
     products = cfg_mod.selected_products(cfg)
     rows: list[schema.DealRow] = []
     counts = {"scanned": 0, "comped": 0, "no_comp": 0, "no_msrp": 0, "no_source": 0}
     comp_sources: dict[str, int] = {}
+    stock_states: dict[str, int] = {}
 
     for key, product in products.items():
         counts["scanned"] += 1
@@ -109,11 +135,16 @@ def build_sealed_sweep(
             confidence_detail=detail,
             capture_method="live-comp",
             set=str(product.get("set") or ""),
+            comp_basis=str(comp_row.get("compBasis") or comp_row.get("basis") or ""),
         )
+        if stock_verifier is not None:
+            v = stock_verifier(key, product, deal_price)
+            _apply_stock(row, v)   # before scoring: badges/verdict follow the observed price
+            stock_states[v.state] = stock_states.get(v.state, 0) + 1
         row.badges = score.assign_badges(row, cfg)
         row.lens_tags = score.lens_tags(row, cfg)
         row.scanner_verdict = main_mod.verdict_for_alert(
-            cfg, product, f"${deal_price:.2f}", comp_row)
+            cfg, product, f"${row.deal_price:.2f}", comp_row)
         rows.append(row)
         counts["comped"] += 1
         label = str(comp_row.get("source") or "unknown")
@@ -131,7 +162,7 @@ def build_sealed_sweep(
                     "status": "skipped",
                     "note": f"{counts['no_comp']} products had no usable comp"})
 
-    return {
+    sweep = {
         "event": event,
         "sweep_id": sweep_id,
         "captured_window": captured_at,
@@ -144,6 +175,9 @@ def build_sealed_sweep(
         "sources": sources,
         "counts": counts,
     }
+    if stock_verifier is not None:
+        sweep["stock_states"] = stock_states   # terminal-state tally for the manifest
+    return sweep
 
 
 class LiveCompLookup:
@@ -221,13 +255,17 @@ def _append_ledger(path: Path, sweep: dict, capture_date: str) -> int:
 
 def main(argv: list[str] | None = None,
          comp_lookup: CompLookup | None = None,
-         cfg: Any = None) -> int:
+         cfg: Any = None,
+         stock_verifier: StockVerifier | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m scanner.discovery.sweep",
         description="Render the live sealed deal board from the tracked catalog.")
     parser.add_argument("--out", default=None,
                         help="output root (default: repo root; writes data/poke/ + dashboards/)")
     parser.add_argument("--event", default="sealed", help="event label for the sweep id")
+    parser.add_argument("--verify-stock", action="store_true",
+                        help="verify purchasability via enabled online retailer adapters; "
+                             "board rows carry stock evidence instead of 'unknown'")
     args = parser.parse_args(argv)
 
     cfg = cfg or cfg_mod.load()
@@ -235,9 +273,14 @@ def main(argv: list[str] | None = None,
     today = date.today().isoformat()
     sweep_id = f"{today}-{args.event}"
     lookup = comp_lookup if comp_lookup is not None else LiveCompLookup(cfg)
+    if stock_verifier is None and args.verify_stock:
+        def stock_verifier(key, product, expected_price, _cfg=cfg):
+            return verify_mod.verify_catalog_product(
+                _cfg, key, product, expected_price=expected_price)
 
     sweep = build_sealed_sweep(cfg, lookup,
-                               event=args.event, sweep_id=sweep_id, captured_at=today)
+                               event=args.event, sweep_id=sweep_id, captured_at=today,
+                               stock_verifier=stock_verifier)
 
     poke_dir = root / "data" / "poke"
     poke_dir.mkdir(parents=True, exist_ok=True)
@@ -257,6 +300,8 @@ def main(argv: list[str] | None = None,
         "credits_consumed": credits,
         "golden_failures": fails,
     }
+    if "stock_states" in sweep:
+        manifest["stock_states"] = sweep["stock_states"]
     (poke_dir / f"{sweep_id}.manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -279,6 +324,9 @@ def main(argv: list[str] | None = None,
     print(f"scanned={c['scanned']} comped={c['comped']} no_comp={c['no_comp']} "
           f"no_msrp={c['no_msrp']} no_source={c['no_source']} steals={steals} "
           f"credits={credits} ledger+={appended}")
+    if "stock_states" in sweep:
+        summary = ", ".join(f"{k}={n}" for k, n in sorted(sweep["stock_states"].items()))
+        print(f"stock: {summary or 'no rows verified'}")
     print(f"dashboard: {dash_path}")
     return 0
 

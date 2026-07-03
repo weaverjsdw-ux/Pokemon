@@ -244,6 +244,110 @@ def test_cli_halts_without_dashboard_on_golden_failure(tmp_path, capsys):
     assert "GOLDEN FAIL" in out
 
 
+# ---------------------------------------------------------------- stock verify
+
+
+def _fake_verification(expected, **kw):
+    from scanner.discovery import verify as verify_mod
+    base = dict(
+        state=verify_mod.VERIFIED_BUYABLE, stock_status="in_stock",
+        verified_price=expected, expected_price=expected, price_matches=True,
+        buy_url="https://www.walmart.com/ip/123", checked_at="2026-07-01T09:00:00",
+        source="walmart", method="retailer_adapter:walmart",
+        evidence="walmart adapter: status=ONLINE_IN_STOCK price=$x",
+        degraded_reason="")
+    base.update(kw)
+    return verify_mod.StockVerification(**base)
+
+
+def test_build_without_verifier_leaves_stock_untouched():
+    swp = _build(_cfg(), lambda k, p: _verified_row())
+    assert "stock_states" not in swp
+    for d in swp["deals"]:
+        assert d["stock_status"] == "unknown"
+        assert d["stock_evidence"] == "" and d["buy_url"] == ""
+        assert d["stock_checked_at"] == "" and d["stock_method"] == ""
+
+
+def test_rows_carry_comp_basis_passthrough():
+    swp = _build(_cfg(), lambda k, p: _verified_row())
+    for d in swp["deals"]:
+        assert d["comp_basis"] == "TCGplayer sealed market"
+
+
+def test_verify_stock_populates_evidence_and_retailer():
+    swp = sweep.build_sealed_sweep(
+        _cfg(), lambda k, p: _verified_row(), event="sealed",
+        sweep_id="2026-07-01-sealed", captured_at="2026-07-01",
+        stock_verifier=lambda k, p, expected: _fake_verification(expected))
+    assert swp["stock_states"] == {"VERIFIED_BUYABLE": 3}
+    for d in swp["deals"]:
+        assert d["stock_status"] == "in_stock"
+        assert d["stock_evidence"]
+        assert d["buy_url"] == "https://www.walmart.com/ip/123"
+        assert d["stock_checked_at"] == "2026-07-01T09:00:00"
+        assert d["stock_method"] == "retailer_adapter:walmart"
+        assert d["retailer"] == "Walmart"          # no longer the MSRP placeholder
+
+
+def test_verify_stock_price_mismatch_recomputes_at_observed_price():
+    from scanner.discovery import verify as verify_mod
+
+    def verifier(key, product, expected):
+        return _fake_verification(expected, state=verify_mod.PRICE_MISMATCH,
+                                  verified_price=round(expected * 1.5, 2),
+                                  price_matches=False)
+
+    swp = sweep.build_sealed_sweep(
+        _cfg(), lambda k, p: _verified_row(), event="sealed",
+        sweep_id="2026-07-01-sealed", captured_at="2026-07-01",
+        stock_verifier=verifier)
+    assert swp["stock_states"] == {"PRICE_MISMATCH": 3}
+    by_item = {d["item"]: d for d in swp["deals"]}
+    etb = by_item["Fake ETB"]                      # MSRP 49.99 -> observed 1.5x
+    observed = round(49.99 * 1.5, 2)
+    assert etb["deal_price"] == observed           # verdict basis = verified price
+    assert etb["pct_off"] == score.compute_pct_off(observed, etb["market_comp"])
+    assert etb["warn_reason"].startswith("PRICE_CHANGED")
+    assert "WARN" in etb["badges"]
+    assert etb["stock_status"] == "in_stock"       # stock evidence intact
+
+
+def test_verify_stock_unknown_stays_unknown_and_gate_clean():
+    from scanner.discovery import verify as verify_mod
+
+    def verifier(key, product, expected):
+        return _fake_verification(expected, state=verify_mod.UNKNOWN_NO_ALERT,
+                                  stock_status="unknown", verified_price=None,
+                                  price_matches=None, buy_url="", source="",
+                                  method="none", evidence="",
+                                  degraded_reason="no online-capable adapter")
+
+    swp = sweep.build_sealed_sweep(
+        _cfg(), lambda k, p: _verified_row(), event="sealed",
+        sweep_id="2026-07-01-sealed", captured_at="2026-07-01",
+        stock_verifier=verifier)
+    assert swp["stock_states"] == {"UNKNOWN_NO_ALERT": 3}
+    for d in swp["deals"]:
+        assert d["stock_status"] == "unknown"
+        assert d["stock_evidence"] == "no online-capable adapter"  # honest reason
+        assert d["retailer"] == "MSRP"             # no fake retailer claim
+
+
+def test_cli_verify_stock_flag_writes_stock_states_to_manifest(tmp_path):
+    # fake catalog has no retailer ids -> the real verifier runs entirely
+    # offline and every product terminates UNKNOWN_NO_ALERT (no network).
+    cfg = _cfg(min_rows=3)
+    cfg.retailers = {}
+    rc = sweep.main(["--out", str(tmp_path), "--verify-stock"],
+                    comp_lookup=lambda k, p: _verified_row(), cfg=cfg)
+    assert rc == 0
+    today = date.today().isoformat()
+    manifest = json.loads((tmp_path / "data" / "poke" / f"{today}-sealed.manifest.json")
+                          .read_text(encoding="utf-8"))
+    assert manifest["stock_states"] == {"UNKNOWN_NO_ALERT": 3}
+
+
 # ---------------------------------------------------------------- CompEngine wiring
 
 

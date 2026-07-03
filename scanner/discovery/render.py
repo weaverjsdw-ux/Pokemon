@@ -46,6 +46,35 @@ def _lens_html(tags: list[str]) -> str:
     return "".join(f'<span class="lens">{_esc(t)}</span>' for t in tags)
 
 
+_POSITIVE_STOCK = {"in_stock", "limited"}
+
+
+def _stock_html(d: dict) -> str:
+    """Stock evidence cell: status + when it was checked + the buy link.
+
+    Everything here is untrusted sweep data — evidence is escaped, buy_url
+    goes through the same scheme allowlist as source_url. The operator can
+    see *why* a row is (or is not) buyable without leaving the board.
+    """
+    status = str(d.get("stock_status") or "unknown")
+    label = _esc(status.replace("_", " "))
+    evidence = str(d.get("stock_evidence") or "")
+    checked = str(d.get("stock_checked_at") or "")
+    if status == "unknown" and not evidence:
+        return f'<span class="muted stock-unknown">{label}</span>'
+    bits = [f'<span class="stock stock-{_esc(status)}" '
+            f'title="{_esc(evidence)}">{label}</span>']
+    if status in _POSITIVE_STOCK:
+        buy = _safe_href(d.get("buy_url", ""))
+        if buy:
+            bits.append(f'<a href="{buy}">buy</a>')
+    if checked:
+        bits.append(f'<span class="muted">{_esc(checked)}</span>')
+    if evidence:
+        bits.append(f'<span class="muted">{_esc(evidence)}</span>')
+    return " ".join(bits)
+
+
 def _deal_row_html(d: dict) -> str:
     comp = d.get("market_comp")
     comp_html = f'<span class="orig">${_esc(comp)}</span>' if comp is not None else ""
@@ -60,6 +89,7 @@ def _deal_row_html(d: dict) -> str:
         f'<td>{comp_html}</td><td>{pct_html}</td>'
         f'<td><a href="{_safe_href(d.get("source_url",""))}">{_esc(d.get("retailer",""))}</a> '
         f'<span class="muted">{_esc(d.get("captured_at",""))}</span></td>'
+        f'<td>{_stock_html(d)}</td>'
         f'<td>{_esc(d.get("scanner_verdict",""))}</td></tr>'
     )
 
@@ -70,7 +100,7 @@ def _table(rows: list[dict]) -> str:
     body = "".join(_deal_row_html(d) for d in rows)
     return (
         "<table><thead><tr><th>Item</th><th>Deal</th><th>Market</th>"
-        "<th>% Off</th><th>Retailer</th><th>Scanner</th></tr></thead>"
+        "<th>% Off</th><th>Retailer</th><th>Stock</th><th>Scanner</th></tr></thead>"
         f"<tbody>{body}</tbody></table>"
     )
 

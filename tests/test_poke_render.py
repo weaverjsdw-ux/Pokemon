@@ -80,6 +80,54 @@ def test_deal_row_data_source_url_is_scheme_filtered():
     assert "javascript:alert" not in html
 
 
+def _stocked_row(**kw):
+    row = {
+        "item": "Verified ETB", "set": "FakeSet", "asset_class": "sealed",
+        "category": "sealed-etb", "deal_price": 39.99, "market_comp": 60.0,
+        "pct_off": 33, "retailer": "Walmart",
+        "source_url": "https://www.tcgplayer.com/product/1",
+        "captured_at": "2026-07-01", "price_confidence": "verified",
+        "comp_confidence": "high", "badges": [], "lens_tags": [],
+        "stock_status": "in_stock",
+        "stock_evidence": "walmart adapter: status=ONLINE_IN_STOCK price=$39.99",
+        "buy_url": "https://www.walmart.com/ip/123",
+        "stock_checked_at": "2026-07-01T09:00:00",
+        "stock_method": "retailer_adapter:walmart",
+    }
+    row.update(kw)
+    return row
+
+
+def _render_with(row):
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [row]
+    return render_sweep(swp)
+
+
+def test_stock_column_renders_status_evidence_and_buy_link():
+    html = _render_with(_stocked_row())
+    assert "<th>Stock</th>" in html
+    assert "in stock" in html
+    assert "status=ONLINE_IN_STOCK" in html        # evidence visible to operator
+    assert 'href="https://www.walmart.com/ip/123"' in html
+    assert "2026-07-01T09:00:00" in html
+
+
+def test_stock_column_unknown_renders_muted_not_positive():
+    html = _render_with(_stocked_row(stock_status="unknown", stock_evidence="",
+                                     buy_url="", stock_checked_at="",
+                                     stock_method=""))
+    assert "<th>Stock</th>" in html
+    assert "stock-unknown" in html
+    assert "buy</a>" not in html
+
+
+def test_buy_url_is_scheme_filtered_like_source_url():
+    # untrusted buy_url must never become a clickable javascript: href
+    html = _render_with(_stocked_row(buy_url="javascript:alert(1)"))
+    assert "javascript:alert" not in html
+
+
 def test_render_drops_javascript_uri_from_href():
     # An untrusted javascript: source_url must never become a clickable href.
     # (deal_price is a string-ish javascript payload only in source_url; the row
