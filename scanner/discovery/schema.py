@@ -9,6 +9,8 @@ from dataclasses import dataclass, field, fields
 
 ASSET_CLASSES = {"sealed", "raw", "graded"}
 PRICE_CONFIDENCE = {"verified", "est"}
+STOCK_STATUSES = {"unknown", "in_stock", "limited", "out_of_stock", "unverifiable"}
+POSITIVE_STOCK = {"in_stock", "limited"}
 
 
 class StopGateError(Exception):
@@ -37,6 +39,10 @@ class DealRow:
     lens_tags: list[str] = field(default_factory=list)  # COL | PLY | INV | FLP
     stock_status: str = "unknown"
     stock_evidence: str = ""
+    buy_url: str = ""           # click-to-buy link (distinct from source_url = comp attribution)
+    stock_checked_at: str = ""  # ISO datetime of the live stock check
+    stock_method: str = ""      # verification method slug, e.g. "retailer_adapter:walmart"
+    comp_basis: str = ""        # comp derivation basis (STEAL requires sold-derived)
     reprint_risk: bool = False
     finite: bool = False
     grade: str = ""             # graded only, e.g. "PSA 10"
@@ -75,6 +81,17 @@ def validate_row(row: DealRow) -> list[str]:
         expected = round((row.market_comp - row.deal_price) / row.market_comp * 100)
         if abs(expected - row.pct_off) > 1:
             v.append(f"{tag}: pct_off must be computed from market_comp (got {row.pct_off}, expected ~{expected})")
+    if row.stock_status not in STOCK_STATUSES:
+        v.append(f"{tag}: stock_status must be one of {sorted(STOCK_STATUSES)}")
+    if row.stock_status in POSITIVE_STOCK:
+        # A positive stock claim without evidence is a gate violation, same
+        # class as a fabricated price: it must halt the render, not ship.
+        if not row.stock_evidence:
+            v.append(f"{tag}: positive stock_status needs stock_evidence")
+        if not row.buy_url:
+            v.append(f"{tag}: positive stock_status needs buy_url")
+        if not row.stock_checked_at:
+            v.append(f"{tag}: positive stock_status needs stock_checked_at")
     if row.asset_class == "graded" and (not row.grade or not row.grader):
         v.append(f"{tag}: graded row needs grade + grader")
     if row.asset_class == "raw" and not row.condition:

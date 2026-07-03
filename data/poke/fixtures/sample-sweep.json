@@ -24,9 +24,12 @@
         "PLY",
         "INV"
       ],
-      "stock_status": "in-stock",
+      "stock_status": "in_stock",
       "stock_evidence": "page says in stock",
-      "scanner_verdict": "SKIP · +$0.86 net, 2.00982% ROI"
+      "scanner_verdict": "SKIP · +$0.86 net, 2.00982% ROI",
+      "buy_url": "https://example.com/pe-etb",
+      "stock_checked_at": "2026-06-27T09:00:00",
+      "stock_method": "sample_fixture"
     },
     {
       "item": "Surging Sparks Elite Trainer Box",
@@ -46,7 +49,7 @@
         "PLY",
         "INV"
       ],
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "Journey Together Booster Bundle",
@@ -65,7 +68,7 @@
       "lens_tags": [
         "INV"
       ],
-      "stock_status": "limited"
+      "stock_status": "unknown"
     },
     {
       "item": "Destined Rivals Elite Trainer Box",
@@ -88,7 +91,7 @@
         "INV"
       ],
       "reprint_risk": false,
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "Scarlet & Violet 151 Booster Bundle",
@@ -107,7 +110,7 @@
       "lens_tags": [
         "INV"
       ],
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "Paldean Fates Elite Trainer Box",
@@ -131,7 +134,7 @@
         "INV"
       ],
       "finite": true,
-      "stock_status": "limited"
+      "stock_status": "unknown"
     },
     {
       "item": "Crown Zenith Elite Trainer Box",
@@ -155,7 +158,7 @@
         "INV"
       ],
       "finite": true,
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "Prismatic Evolutions Booster Bundle",
@@ -174,7 +177,7 @@
       "lens_tags": [
         "INV"
       ],
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "Surging Sparks Booster Bundle",
@@ -193,7 +196,7 @@
       "lens_tags": [
         "INV"
       ],
-      "stock_status": "in-stock"
+      "stock_status": "unknown"
     },
     {
       "item": "151 Elite Trainer Box (est comp)",

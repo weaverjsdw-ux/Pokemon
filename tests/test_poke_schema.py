@@ -67,6 +67,47 @@ def test_authenticity_risk_cannot_be_a_steal():
     assert validate_row(a) != []
 
 
+def test_stock_status_outside_vocabulary_is_a_violation():
+    assert validate_row(_sealed(stock_status="maybe")) != []
+
+
+def test_default_unknown_stock_row_still_passes():
+    assert validate_row(_sealed()) == []          # stock_status defaults to "unknown"
+    assert validate_row(_sealed(stock_status="unverifiable")) == []
+
+
+def _verified_stock(**kw):
+    base = dict(stock_status="in_stock",
+                stock_evidence="ONLINE_IN_STOCK $39.99 (walmart product page)",
+                buy_url="https://www.walmart.com/ip/123",
+                stock_checked_at="2026-07-03T10:00:00")
+    base.update(kw)
+    return _sealed(**base)
+
+
+def test_positive_stock_with_full_evidence_passes():
+    assert validate_row(_verified_stock()) == []
+    assert validate_row(_verified_stock(stock_status="limited")) == []
+
+
+def test_positive_stock_missing_evidence_is_a_gate_violation():
+    assert validate_row(_verified_stock(stock_evidence="")) != []
+
+
+def test_positive_stock_missing_buy_url_is_a_gate_violation():
+    assert validate_row(_verified_stock(buy_url="")) != []
+
+
+def test_positive_stock_missing_checked_at_is_a_gate_violation():
+    assert validate_row(_verified_stock(stock_checked_at="")) != []
+
+
+def test_out_of_stock_needs_no_buy_evidence():
+    # only a POSITIVE stock claim demands buy evidence; negative/unknown states
+    # stay legal without it (they can never alert anyway)
+    assert validate_row(_sealed(stock_status="out_of_stock")) == []
+
+
 def test_assert_sweep_raises_on_any_violation():
     with pytest.raises(StopGateError):
         assert_sweep([_sealed(), _sealed(source_url="")])
