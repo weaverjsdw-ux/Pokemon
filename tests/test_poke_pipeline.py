@@ -156,8 +156,9 @@ def test_verified_buyable_alerts_and_gate_runs_on_fresh_object(tmp_path, monkeyp
     assert len(notifier.calls) == 1
     deal, push = notifier.calls[0]
     assert push is True                              # NOON is outside quiet hours
-    assert deal["buy_url"] == BUY_URL and deal["verified_price"] == 50.0
-    assert deal["comp"] == 100.0 and deal["comp_confidence"] == "high"
+    assert deal.buy_url == BUY_URL and deal.verified_price == 50.0
+    assert deal.comp == 100.0 and deal.comp_confidence == "high"
+    assert deal.source_adapter == "slickdeals" and deal.listing_id == "c1"
     assert seen["v"].state == verify_mod.VERIFIED_BUYABLE   # gate saw the fresh object
     assert m["counts"]["alerted"] == 1
 

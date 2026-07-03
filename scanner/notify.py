@@ -4,9 +4,19 @@ from __future__ import annotations
 import json
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 import requests
+
+
+def _safe_url(url: str) -> str:
+    """http(s) only, else empty. Buy URLs are untrusted (web/AI-derived); a
+    javascript:/data: link must never become a clickable alert target."""
+    try:
+        return url if urlparse(str(url)).scheme.lower() in ("http", "https") else ""
+    except ValueError:
+        return ""
 
 
 def _ago(ts: int | None) -> str:
@@ -63,6 +73,52 @@ class StockAlert:
             f"[{self.retailer}] {self.status}: {self.product_name}{price}\n"
             f"   {self.store_label}{dist}\n"
             f"   {self.url}{ctx_line}"
+        )
+
+
+@dataclass(frozen=True)
+class DealAlert:
+    """User-facing verified-buyable deal. Every field an operator needs to act
+    without re-deriving anything: what/where, the price VERIFIED from the buy
+    page, the comp + its confidence + basis, the fee-adjusted verdict, and the
+    stock evidence + when it was checked. Emitted only for VERIFIED_BUYABLE
+    candidates that passed verify.assert_alertable (enforced in the pipeline)."""
+    item: str
+    retailer: str
+    source_adapter: str
+    listing_id: str
+    buy_url: str
+    verified_price: float | None
+    stock_status: str
+    stock_evidence: str
+    checked_at: str
+    msrp: float | None = None
+    comp: float | None = None
+    comp_confidence: str = ""
+    comp_basis: str = ""
+    pct_off: float | None = None
+    verdict_headline: str = ""
+    badges: list[str] = field(default_factory=list)
+    warn_flags: list[str] = field(default_factory=list)
+
+    def _price(self, value: float | None) -> str:
+        return f"${value:.2f}" if isinstance(value, (int, float)) else "n/a"
+
+    def line(self) -> str:
+        head = self.verdict_headline or "BUYABLE"
+        comp_bit = ""
+        if self.comp is not None:
+            conf = f" ({self.comp_confidence})" if self.comp_confidence else ""
+            comp_bit = f" vs comp {self._price(self.comp)}{conf}"
+        pct_bit = f" · {self.pct_off}% off" if self.pct_off is not None else ""
+        warn = f" · ⚠ {', '.join(self.warn_flags)}" if self.warn_flags else ""
+        badges = f" [{' '.join(self.badges)}]" if self.badges else ""
+        return (
+            f"[deal] {head}: {self.item} @ {self.retailer}{badges}\n"
+            f"   {self._price(self.verified_price)}{comp_bit}{pct_bit} · "
+            f"{self.stock_status}{warn}\n"
+            f"   {self.buy_url}\n"
+            f"   checked {self.checked_at} · {self.stock_evidence}"
         )
 
 
@@ -138,6 +194,90 @@ class Notifier:
                     "Click": alert.url,
                     "Tags": "package",
                 },
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            print(f"  ! ntfy failed: {exc}", file=sys.stderr)
+
+    # ------------------------------------------------------------ deal alerts
+
+    def send_deal(self, alert: DealAlert, *, push: bool = True) -> None:
+        """Emit a verified-buyable deal. Discord always posts (silent history);
+        ntfy pushes only when ``push`` (quiet hours pass push=False)."""
+        print(alert.line(), flush=True)
+        if self.discord_webhook:
+            self._discord_deal(alert)
+        if self.ntfy_topic and push:
+            self._ntfy_deal(alert)
+
+    def _build_deal_embed(self, alert: DealAlert) -> dict:
+        color = {"in_stock": 0x2ECC71, "limited": 0xF1C40F}.get(alert.stock_status, 0x3498DB)
+        title = f"{alert.verdict_headline or 'BUYABLE'}: {alert.item}"
+        embed: dict = {
+            "title": title[:250],
+            "url": _safe_url(alert.buy_url),
+            "color": color,
+            "fields": [
+                {"name": "Retailer", "value": f"{alert.retailer} ({alert.source_adapter})",
+                 "inline": True},
+                {"name": "Verified price", "value": alert._price(alert.verified_price),
+                 "inline": True},
+            ],
+        }
+        if alert.msrp is not None:
+            embed["fields"].append(
+                {"name": "MSRP", "value": alert._price(alert.msrp), "inline": True})
+        if alert.comp is not None:
+            comp_val = alert._price(alert.comp)
+            if alert.comp_confidence:
+                comp_val += f" ({alert.comp_confidence})"
+            embed["fields"].append({"name": "Comp", "value": comp_val, "inline": True})
+        if alert.comp_basis:
+            embed["fields"].append(
+                {"name": "Comp basis", "value": alert.comp_basis[:200], "inline": False})
+        if alert.pct_off is not None:
+            embed["fields"].append(
+                {"name": "% off", "value": f"{alert.pct_off}%", "inline": True})
+        if alert.verdict_headline:
+            embed["fields"].append(
+                {"name": "Verdict", "value": alert.verdict_headline, "inline": False})
+        embed["fields"].append(
+            {"name": "Stock", "value": f"{alert.stock_status} · checked {alert.checked_at}",
+             "inline": False})
+        if alert.stock_evidence:
+            embed["fields"].append(
+                {"name": "Evidence", "value": alert.stock_evidence[:1000], "inline": False})
+        if alert.warn_flags:
+            embed["fields"].append(
+                {"name": "⚠ Warnings", "value": ", ".join(alert.warn_flags)[:1000],
+                 "inline": False})
+        return embed
+
+    def _discord_deal(self, alert: DealAlert) -> None:
+        embed = self._build_deal_embed(alert)
+        try:
+            requests.post(
+                self.discord_webhook,
+                data=json.dumps({"embeds": [embed]}),
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            print(f"  ! discord webhook failed: {exc}", file=sys.stderr)
+
+    def _ntfy_deal(self, alert: DealAlert) -> None:
+        headers = {
+            "Title": f"{alert.verdict_headline or 'BUYABLE'}: {alert.item}"[:250],
+            "Tags": "moneybag",
+        }
+        click = _safe_url(alert.buy_url)
+        if click:
+            headers["Click"] = click
+        try:
+            requests.post(
+                f"https://ntfy.sh/{self.ntfy_topic}",
+                data=alert.line().encode("utf-8"),
+                headers=headers,
                 timeout=10,
             )
         except requests.RequestException as exc:

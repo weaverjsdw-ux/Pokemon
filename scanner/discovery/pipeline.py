@@ -39,6 +39,7 @@ from .. import main as main_mod
 from .. import market as market_mod
 from .. import resale
 from ..comps import engine as comps_engine
+from ..notify import DealAlert, Notifier
 from ..retailers import http as retailer_http
 from ..state import State
 from . import ledger as ledger_mod
@@ -137,18 +138,6 @@ def _dry_run_comp_lookup(candidate: CandidateDeal, product: dict | None) -> dict
     return {"status": "skipped", "detail": "dry-run: comp lookup skipped (no network)"}
 
 
-class _ConsoleDealSink:
-    """Default notifier seam: console only. Real Discord/ntfy DealAlert channels
-    land in Slice 5; this keeps notify.py off the Slice-4 write set."""
-
-    def send_deal(self, deal: dict, *, push: bool = True) -> None:
-        tag = "push" if push else "silent"
-        print(f"[deal:{tag}] {deal.get('item')} @ {deal.get('retailer')} "
-              f"${deal.get('verified_price')} vs comp ${deal.get('comp')} "
-              f"({deal.get('comp_confidence')}) {deal.get('verdict') or ''} "
-              f"-> {deal.get('buy_url')}", flush=True)
-
-
 # ------------------------------------------------------------ row + payload
 
 def _build_row(cfg: Any, c: CandidateDeal, v: StockVerification, product: dict | None,
@@ -188,27 +177,27 @@ def _build_row(cfg: Any, c: CandidateDeal, v: StockVerification, product: dict |
     return row
 
 
-def _deal_payload(c: CandidateDeal, v: StockVerification, comp: float, comp_conf: str,
-                  comp_row: dict, row: schema.DealRow, msrp: float | None) -> dict:
-    return {
-        "item": c.item_name,
-        "retailer": row.retailer,
-        "source": c.source,
-        "listing_id": c.listing_id,
-        "buy_url": v.buy_url,
-        "verified_price": v.verified_price,
-        "msrp": msrp,
-        "comp": comp,
-        "comp_confidence": comp_conf,
-        "comp_basis": str(comp_row.get("compBasis") or comp_row.get("basis") or ""),
-        "pct_off": row.pct_off,
-        "verdict": row.scanner_verdict,
-        "stock_status": v.stock_status,
-        "stock_evidence": v.evidence or v.degraded_reason,
-        "checked_at": v.checked_at,
-        "badges": list(row.badges),
-        "warn_reason": row.warn_reason,
-    }
+def _deal_alert(c: CandidateDeal, v: StockVerification, comp: float | None, comp_conf: str,
+                comp_row: dict, row: schema.DealRow, msrp: float | None) -> DealAlert:
+    return DealAlert(
+        item=c.item_name,
+        retailer=row.retailer,
+        source_adapter=c.source,
+        listing_id=c.listing_id,
+        buy_url=v.buy_url,
+        verified_price=v.verified_price,
+        stock_status=v.stock_status,
+        stock_evidence=v.evidence or v.degraded_reason,
+        checked_at=v.checked_at,
+        msrp=msrp,
+        comp=comp,
+        comp_confidence=comp_conf,
+        comp_basis=str(comp_row.get("compBasis") or comp_row.get("basis") or ""),
+        pct_off=row.pct_off,
+        verdict_headline=row.scanner_verdict,
+        badges=list(row.badges),
+        warn_flags=[row.warn_reason] if row.warn_reason else [],
+    )
 
 
 def _append_listing(path: Path, c: CandidateDeal, capture_date: str) -> None:
@@ -277,7 +266,7 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
     if not fire:
         return "suppressed_dupe"
     msrp = resale._amount(product.get("msrp")) if product else None
-    deal = _deal_payload(c, v, comp, comp_conf, comp_row, row, msrp)
+    deal = _deal_alert(c, v, comp, comp_conf, comp_row, row, msrp)
     if not dry_run:
         notifier.send_deal(deal, push=not quiet)
         if state is not None:
@@ -336,7 +325,9 @@ def run_once(
         # the default comp path touches the network; in --dry-run it is replaced
         # with a network-free stub so zero-network is structural, not incidental.
         comp_lookup = _dry_run_comp_lookup if dry_run else default_comp_lookup(cfg)
-    notifier = notifier or _ConsoleDealSink()
+    if notifier is None:
+        notifier = Notifier(getattr(cfg, "discord_webhook", "") or "",
+                            getattr(cfg, "ntfy_topic", "") or "")
 
     if dry_run:
         discover_kwargs = {"http_get": _no_network, "search_fn": _no_network}
