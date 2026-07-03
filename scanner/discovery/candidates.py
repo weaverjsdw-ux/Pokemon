@@ -17,18 +17,25 @@ from dataclasses import dataclass
 from .. import resale
 
 
-def _ascii_fold(text: str) -> str:
-    """'Pokémon' -> 'Pokemon', 'Evolution—Ascended' -> 'Evolution Ascended'.
+def _fold_char(ch: str) -> str:
+    if ord(ch) < 128:
+        return ch
+    decomposed = unicodedata.normalize("NFKD", ch)
+    base = [c for c in decomposed if not unicodedata.combining(c)]
+    if len(base) == 1 and ord(base[0]) < 128:
+        return base[0]        # é -> e
+    return " "                # ™/½/— must not merge neighbors into one token
 
-    Real listing titles carry diacritics and em-dashes; dropping them naively
-    either splits tokens (é) or merges neighbors (—), silently unmatching the
-    title. Decompose accents away, turn other non-ASCII into spaces."""
-    folded = []
-    for ch in unicodedata.normalize("NFKD", text):
-        if unicodedata.combining(ch):
-            continue
-        folded.append(ch if ord(ch) < 128 else " ")
-    return "".join(folded)
+
+def _ascii_fold(text: str) -> str:
+    """'Pokémon' -> 'Pokemon', 'Evolution—Ascended' -> 'Evolution Ascended',
+    'Pokémon™' -> 'Pokemon ' (NOT 'PokemonTM').
+
+    Real listing titles carry diacritics, em-dashes, and trademark signs;
+    folding them naively either splits tokens (é), merges neighbors (—), or
+    glues compatibility expansions onto words (™ -> TM), silently unmatching
+    the title."""
+    return "".join(_fold_char(ch) for ch in text)
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,10 @@ def match_title(
     if "pokemon" not in title_tokens:
         return None, ""
     for set_name in set_watch:
-        if resale._tokens(set_name) <= title_tokens:
+        # Same generic-token subtraction Ring 1 uses: real listings say
+        # "Pokemon TCG 151", not "Scarlet & Violet 151" — the distinctive
+        # tokens are what identify the set.
+        required = resale._tokens(set_name) - resale.GENERIC_QUERY_TOKENS
+        if required and required <= title_tokens:
             return None, set_name
     return None, ""

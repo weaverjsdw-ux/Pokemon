@@ -40,14 +40,19 @@ def _to_float(raw: str) -> float | None:
 
 def _card_price(title: str, final_price_raw: str) -> float | None:
     """Displayed finalPrice is rounded ('$50' for a $49.99 deal); prefer the
-    precise figure the deal author put in the title when it agrees."""
+    precise figure the deal author put in the title when it agrees.
+
+    Titles often carry several figures ('Reg. $50.49, now $49.99'); take the
+    one CLOSEST to the displayed price, later-wins on ties (deal price is
+    conventionally stated last)."""
     final_price = _to_float(final_price_raw)
-    m = _TITLE_PRICE_RE.search(title)
-    if m:
-        precise = _to_float(m.group(1))
-        if precise is not None and (final_price is None
-                                    or abs(precise - final_price) <= 1.0):
-            return precise
+    precise = [p for m in _TITLE_PRICE_RE.finditer(title)
+               for p in [_to_float(m.group(1))] if p is not None]
+    if final_price is None:
+        return precise[-1] if len(precise) == 1 else None
+    agreeing = [p for p in precise if abs(p - final_price) <= 1.0]
+    if agreeing:
+        return min(reversed(agreeing), key=lambda p: abs(p - final_price))
     return final_price
 
 
@@ -75,13 +80,16 @@ def parse_search_html(
             continue
         store_m = _STORE_RE.search(chunk)
         product_key, matched_set = match_title(title, catalog, set_watch)
+        # unescape BEFORE stripping the query: an entity like &#63; must not
+        # decode back into a '?' after the strip already ran
+        href = html_lib.unescape(href_m.group(1)).split("?")[0].split('"')[0]
         candidates.append(CandidateDeal(
             source="slickdeals",
             listing_id=m.group(2),
             item_name=title,
             price=price,
             shipping=None,
-            url="https://slickdeals.net" + html_lib.unescape(href_m.group(1)),
+            url="https://slickdeals.net" + href,
             retailer=html_lib.unescape(store_m.group(1)).strip() if store_m else "",
             seen_at=seen_at,
             evidence_excerpt=f"{title} | ${price_m.group(1)}"[:200],
@@ -107,8 +115,8 @@ class Slickdeals(DiscoverySource):
                 timeout=25,
             )
         except Exception as exc:
-            self._set_state(confidence.DEGRADED,
-                            (str(exc) or exc.__class__.__name__)[:200])
+            self._set_state(confidence.DEGRADED, retailer_http._redact_query_strings(
+                str(exc) or exc.__class__.__name__)[:200])
             return []
         status = getattr(resp, "status_code", 200)
         if status in (403, 429):

@@ -169,7 +169,8 @@ class State:
             INSERT INTO seen_listings(source, listing_id, price, status, first_seen, last_seen)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(source, listing_id)
-            DO UPDATE SET price=excluded.price, status=excluded.status,
+            DO UPDATE SET price=COALESCE(excluded.price, price),
+                          status=excluded.status,
                           last_seen=excluded.last_seen
             """,
             (source, listing_id, price, status, now, now),

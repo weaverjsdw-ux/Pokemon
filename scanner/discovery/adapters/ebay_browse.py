@@ -10,22 +10,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-import requests
-
 from ... import confidence, resale
+from ...retailers import http as retailer_http
 from ..candidates import CandidateDeal, junk_title, match_title, stable_listing_id
 from .base import DiscoverySource
 
 
 def _shipping(item: dict) -> float | None:
-    options = item.get("shippingOptions") or []
-    if not options:
-        return None
-    return resale._amount((options[0].get("shippingCost") or {}).get("value"))
+    costs = [
+        resale._amount((opt.get("shippingCost") or {}).get("value"))
+        for opt in item.get("shippingOptions") or []
+        if isinstance(opt, dict)
+    ]
+    costs = [c for c in costs if c is not None]
+    return min(costs) if costs else None  # option order is not cheapest-first
 
 
 def candidates_from_payload(
-    payload: dict, query_set: str, catalog: dict, set_watch: list[str], seen_at: str,
+    payload: dict, catalog: dict, set_watch: list[str], seen_at: str,
 ) -> list[CandidateDeal]:
     out: list[CandidateDeal] = []
     for item in payload.get("itemSummaries") or []:
@@ -38,8 +40,12 @@ def candidates_from_payload(
         if price is None or price <= 0:
             continue                      # no price, no candidate — never invented
         url = str(item.get("itemWebUrl") or "")
-        if not url:
-            continue                      # a candidate without a buy link is useless
+        if not url.startswith(("https://", "http://")):
+            continue                      # a buy link is http(s) or it is nothing
+        # Ring resolution comes from the TITLE only. Browse fuzzy-matches
+        # aggressively, so the query's set name must never be stamped onto an
+        # unmatched item — that would smuggle Ring-3 wildcards past the
+        # min_alert_confidence gate as fake Ring-2 matches.
         product_key, matched_set = match_title(title, catalog, set_watch)
         out.append(CandidateDeal(
             source="ebay_browse",
@@ -52,7 +58,7 @@ def candidates_from_payload(
             seen_at=seen_at,
             evidence_excerpt=f"{title} | ${price:.2f}"[:200],
             matched_product_key=product_key,
-            matched_set=matched_set or query_set,
+            matched_set=matched_set,
         ))
     return out
 
@@ -78,19 +84,32 @@ class EbayBrowse(DiscoverySource):
         seen_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         out: list[CandidateDeal] = []
         errors: list[str] = []
+        saw_summaries_key = False
         for set_name in set_watch:
             query = f"Pokemon TCG {set_name} sealed"
-            try:
+            try:  # never-raise contract: ANY per-query failure degrades, not crashes
                 payload = search_fn(query)
-            except requests.RequestException as exc:
-                errors.append((str(exc) or exc.__class__.__name__)[:120])
+                if isinstance(payload, dict) and "itemSummaries" in payload:
+                    saw_summaries_key = True
+                out.extend(candidates_from_payload(
+                    payload if isinstance(payload, dict) else {},
+                    catalog, set_watch, seen_at))
+            except Exception as exc:
+                errors.append(retailer_http._redact_query_strings(
+                    str(exc) or exc.__class__.__name__)[:120])
                 continue
-            out.extend(candidates_from_payload(
-                payload, set_name, catalog, set_watch, seen_at))
-        if errors and not out:
-            self._set_state(confidence.DEGRADED, "; ".join(errors)[:200])
+        if errors:
+            self._set_state(
+                confidence.DEGRADED,
+                f"{len(errors)}/{len(set_watch)} set queries failed "
+                f"({len(out)} candidates): " + "; ".join(errors)[:160])
+        elif set_watch and not saw_summaries_key:
+            # every query answered but none carried the itemSummaries key:
+            # Browse schema drift, not a legitimately empty result set
+            self._set_state(confidence.PARSER_SUSPECT,
+                            "no query returned an itemSummaries key; "
+                            "Browse response schema may have drifted")
         else:
             self._set_state(confidence.WORKING,
-                            f"{len(out)} candidates from {len(set_watch)} set queries"
-                            + (f"; {len(errors)} query errors" if errors else ""))
+                            f"{len(out)} candidates from {len(set_watch)} set queries")
         return out

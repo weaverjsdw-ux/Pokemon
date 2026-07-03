@@ -100,3 +100,16 @@ def test_stub_adapters_report_not_implemented():
         assert adapter.state == confidence.NOT_IMPLEMENTED
         assert adapter.state_detail            # reason recorded, never silent
     assert DISCOVERY_REGISTRY["target_search"].requires == "playwright"
+
+
+def test_card_price_prefers_figure_closest_to_displayed_price():
+    # 'Reg. $50.49 ... now $49.99' with displayed '$50': the deal price wins,
+    # not the first figure in the title
+    assert sd_mod._card_price(
+        "Pokemon ETB (Reg. $50.49) now $49.99", "50") == 49.99
+    assert sd_mod._card_price(
+        "Pokemon ETB was $59.99 now $49.99", "50") == 49.99
+    # single agreeing figure still preferred over the rounded display
+    assert sd_mod._card_price("Pokemon ETB $49.99", "50") == 49.99
+    # no title figure -> displayed price
+    assert sd_mod._card_price("Pokemon ETB great deal", "50") == 50.0

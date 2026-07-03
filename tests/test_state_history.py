@@ -153,3 +153,12 @@ def test_seen_listings_upsert_tracks_first_and_last_seen(tmp_path):
 def test_listing_history_unknown_returns_none(tmp_path):
     s = State(db_path=tmp_path / "state.db")
     assert s.listing_history("slickdeals", "nope") is None
+
+
+def test_expired_mark_without_price_keeps_last_known_price(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_listing("slickdeals", "1", 49.99, "live", ts=1000)
+    s.record_listing("slickdeals", "1", None, "expired", ts=2000)
+    row = s.listing_history("slickdeals", "1")
+    assert row["price"] == 49.99          # price trajectory never nulled
+    assert row["status"] == "expired" and row["lastSeen"] == 2000

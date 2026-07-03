@@ -96,3 +96,18 @@ def test_accented_pokemon_titles_still_match():
     assert key == "prismatic_etb"
     key2, set_name = _match("Pokémon TCG Paldean Fates Tin")
     assert key2 is None and set_name == "Paldean Fates"
+
+
+def test_trademark_sign_does_not_glue_tokens():
+    # NFKD expands (TM) into ASCII 'TM'; naive folding yields 'pokemontm' and
+    # silently unmatches exact catalog products
+    key, _ = _match("Pokémon™ Prismatic Evolutions Elite Trainer Box Sealed")
+    assert key == "prismatic_etb"
+
+
+def test_ring2_matches_distinctive_set_tokens_only():
+    # real listings say "Pokemon TCG 151", never "Scarlet & Violet 151"
+    key, set_name = candidates.match_title(
+        "Pokemon TCG 151 Ultra Premium Collection Sealed",
+        CATALOG, ["Scarlet & Violet 151"])
+    assert key is None and set_name == "Scarlet & Violet 151"

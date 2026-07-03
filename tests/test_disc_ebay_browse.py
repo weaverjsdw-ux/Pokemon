@@ -88,3 +88,90 @@ def test_query_errors_degrade_without_raising():
     assert out == []
     assert adapter.state == confidence.DEGRADED
     assert "api down" in adapter.state_detail
+
+
+def test_unmatched_titles_stay_ring3_never_stamped_with_query_set():
+    # Browse fuzzy-matches aggressively: a plush or another game's product can
+    # come back from a set query. It must stay Ring 3 (matched_set == ""), not
+    # inherit the query's set label and sneak past the wildcard gate.
+    payload = {"itemSummaries": [
+        _item("v1|7|0", "Charizard Plush Toy 12 inch", "19.99"),
+    ]}
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH,
+                           search_fn=lambda q: payload)
+    assert len(out) == 1
+    assert out[0].matched_product_key is None
+    assert out[0].matched_set == ""
+
+
+def test_non_request_exceptions_degrade_instead_of_raising():
+    def token_shape_boom(query):
+        raise RuntimeError("eBay token response did not include access_token.")
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH,
+                           search_fn=token_shape_boom)
+    assert out == []
+    assert adapter.state == confidence.DEGRADED
+
+
+def test_non_dict_payload_degrades_instead_of_raising():
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH,
+                           search_fn=lambda q: ["not", "a", "dict"])
+    # non-dict answers carry no itemSummaries key anywhere -> schema drift
+    assert out == []
+    assert adapter.state == confidence.PARSER_SUSPECT
+
+
+def test_partial_query_errors_are_degraded_not_working():
+    calls = iter([PAYLOAD, RuntimeError("boom")])
+    def flaky(query):
+        item = next(calls)
+        if isinstance(item, Exception):
+            raise item
+        return item
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG,
+                           ["Prismatic Evolutions", "Surging Sparks"],
+                           search_fn=flaky)
+    assert out                                  # first query produced candidates
+    assert adapter.state == confidence.DEGRADED  # but the failure is not hidden
+    assert "1/2" in adapter.state_detail
+
+
+def test_missing_summaries_key_everywhere_is_parser_suspect():
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH,
+                           search_fn=lambda q: {"total": 0})
+    assert out == []
+    assert adapter.state == confidence.PARSER_SUSPECT
+
+
+def test_query_error_detail_is_redacted():
+    def boom(query):
+        raise RuntimeError("https://api.ebay.com/x?token=SECRET99 failed")
+    adapter = EbayBrowse()
+    adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH, search_fn=boom)
+    assert "SECRET99" not in adapter.state_detail
+
+
+def test_cheapest_shipping_option_wins():
+    from scanner.discovery.adapters.ebay_browse import _shipping
+    item = _item("v1|8|0", "Pokemon Prismatic Evolutions ETB", "50.00")
+    item["shippingOptions"] = [
+        {"shippingCost": {"value": "12.00"}},
+        {"shippingCost": {"value": "0.00"}},
+    ]
+    assert _shipping(item) == 0.0
+
+
+def test_non_http_item_url_is_never_a_candidate():
+    payload = {"itemSummaries": [
+        _item("v1|9|0", "Pokemon Prismatic Evolutions ETB", "50.00",
+              url="javascript:alert(1)"),
+    ]}
+    adapter = EbayBrowse()
+    out = adapter.discover(NO_KEYSET_CFG, CATALOG, SET_WATCH,
+                           search_fn=lambda q: payload)
+    assert out == []
