@@ -48,6 +48,22 @@ class CompsCfg:
     politeness_seconds: float = 1.0
 
 
+DEFAULT_SET_WATCH = [
+    "Prismatic Evolutions", "Destined Rivals", "Journey Together",
+    "Surging Sparks", "Scarlet & Violet 151", "Paldean Fates", "Crown Zenith",
+]
+
+
+@dataclass
+class DiscoveryCfg:
+    enabled: bool = True
+    interval_seconds: int = 7200
+    sources: list[str] = field(
+        default_factory=lambda: ["target_search", "slickdeals", "ebay_browse"])
+    set_watch: list[str] = field(default_factory=lambda: list(DEFAULT_SET_WATCH))
+    min_alert_confidence: str = "medium"
+
+
 @dataclass
 class Config:
     home_address: str
@@ -84,6 +100,7 @@ class Config:
     market_cache_ttl_seconds: int = 86400
     poke: PokeCfg = field(default_factory=PokeCfg)
     comps: CompsCfg = field(default_factory=CompsCfg)
+    discovery: DiscoveryCfg = field(default_factory=DiscoveryCfg)
 
 
 def load(path: Path | None = None) -> Config:
@@ -211,6 +228,32 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: comps.cache_ttl_seconds must be an integer.")
 
+    disc_raw = raw.get("discovery")
+    if disc_raw is None:
+        disc_raw = {}
+    if not isinstance(disc_raw, dict):
+        raise SystemExit("config.yaml: discovery must be a mapping.")
+    disc_conf = str(disc_raw.get("min_alert_confidence", "medium")).strip().lower()
+    if disc_conf not in VALID_CONFIDENCE:
+        raise SystemExit(
+            "config.yaml: discovery.min_alert_confidence must be one of "
+            + ", ".join(sorted(VALID_CONFIDENCE)))
+    disc_sources = disc_raw.get("sources",
+                                ["target_search", "slickdeals", "ebay_browse"])
+    disc_watch = disc_raw.get("set_watch", list(DEFAULT_SET_WATCH))
+    if not isinstance(disc_sources, list) or not isinstance(disc_watch, list):
+        raise SystemExit("config.yaml: discovery.sources and discovery.set_watch must be lists.")
+    try:
+        discovery_cfg = DiscoveryCfg(
+            enabled=bool(disc_raw.get("enabled", True)),
+            interval_seconds=int(disc_raw.get("interval_seconds", 7200)),
+            sources=[str(s) for s in disc_sources],
+            set_watch=[str(s) for s in disc_watch],
+            min_alert_confidence=disc_conf,
+        )
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: discovery.interval_seconds must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -253,6 +296,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         market_cache_ttl_seconds=market_cache_ttl,
         poke=poke_cfg,
         comps=comps_cfg,
+        discovery=discovery_cfg,
     )
 
 

@@ -62,3 +62,14 @@ def test_bad_kind_rejected(tmp_path):
 
 def test_existing_ids_empty_for_missing_file(tmp_path):
     assert existing_ids(tmp_path / "nope.jsonl") == set()
+
+
+def test_listing_kind_appends_idempotently(tmp_path):
+    path = tmp_path / "history.jsonl"
+    obs = {"kind": "listing", "set": "Prismatic Evolutions", "item": "ETB",
+           "variant": "", "grade": "", "condition": "",
+           "source_url": "https://slickdeals.net/f/1-etb", "capture_date": "2026-07-03",
+           "price": 39.99, "source": "slickdeals", "listing_id": "1"}
+    assert append_observation(path, obs) is True
+    assert append_observation(path, dict(obs)) is False
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 1

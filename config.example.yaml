@@ -105,3 +105,14 @@ comps:
   ebay_floor_sanity_pct: 50
   cache_ttl_seconds: 21600  # 6h
   politeness_seconds: 1.0   # min gap between live source fetches
+
+# Discovery lane (candidate deals beyond the tracked catalog). Slice 3 ships
+# the adapters; the scheduled pipeline that consumes them lands in Slice 4.
+discovery:
+  enabled: true
+  interval_seconds: 7200    # 2h between discovery refreshes
+  sources: [target_search, slickdeals, ebay_browse]   # target_search + trackalacker are
+                            # Playwright-gated stubs until the wave-2 dependency decision
+  set_watch: ["Prismatic Evolutions", "Destined Rivals", "Journey Together",
+              "Surging Sparks", "Scarlet & Violet 151", "Paldean Fates", "Crown Zenith"]
+  min_alert_confidence: medium   # Ring-3 wildcard candidates need at least this comp confidence

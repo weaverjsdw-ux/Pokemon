@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-VALID_KINDS = {"deal", "market_comp"}
+VALID_KINDS = {"deal", "market_comp", "listing"}
 
 
 def item_key(obs: dict) -> str:

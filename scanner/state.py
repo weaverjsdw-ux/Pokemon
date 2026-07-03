@@ -109,6 +109,19 @@ class State:
             )
             """
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seen_listings (
+                source TEXT NOT NULL,
+                listing_id TEXT NOT NULL,
+                price REAL,
+                status TEXT NOT NULL,
+                first_seen INTEGER NOT NULL,
+                last_seen INTEGER NOT NULL,
+                PRIMARY KEY (source, listing_id)
+            )
+            """
+        )
         db.commit()
 
     def should_alert(
@@ -139,6 +152,40 @@ class State:
             (retailer, store_id, product_key, status, ts),
         )
         self.db.commit()
+
+    def record_listing(
+        self,
+        source: str,
+        listing_id: str,
+        price: float | None,
+        status: str,
+        ts: int | None = None,
+    ) -> None:
+        """Fold one discovered listing into seen_listings (dedupe + how long a
+        listing has sat). First sighting timestamp is preserved forever."""
+        now = ts if ts is not None else int(time.time())
+        self.db.execute(
+            """
+            INSERT INTO seen_listings(source, listing_id, price, status, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, listing_id)
+            DO UPDATE SET price=excluded.price, status=excluded.status,
+                          last_seen=excluded.last_seen
+            """,
+            (source, listing_id, price, status, now, now),
+        )
+        self.db.commit()
+
+    def listing_history(self, source: str, listing_id: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT price, status, first_seen, last_seen FROM seen_listings "
+            "WHERE source=? AND listing_id=?",
+            (source, listing_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"source": source, "listingId": listing_id, "price": row[0],
+                "status": row[1], "firstSeen": row[2], "lastSeen": row[3]}
 
     def record_observation(
         self,

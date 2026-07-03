@@ -135,3 +135,21 @@ def test_comp_cache_roundtrip(tmp_path):
     state.comp_cache_put("set|item|||", {"status": "ok", "estimate": "$12.00"}, ts=2000)
     payload, fetched_at = state.comp_cache_get("set|item|||")
     assert payload["estimate"] == "$12.00" and fetched_at == 2000   # upsert, one row
+
+
+def test_seen_listings_upsert_tracks_first_and_last_seen(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_listing("slickdeals", "19710354", 49.99, "live", ts=1000)
+    row = s.listing_history("slickdeals", "19710354")
+    assert row == {"source": "slickdeals", "listingId": "19710354", "price": 49.99,
+                   "status": "live", "firstSeen": 1000, "lastSeen": 1000}
+    s.record_listing("slickdeals", "19710354", 44.99, "live", ts=2000)
+    row = s.listing_history("slickdeals", "19710354")
+    assert row["firstSeen"] == 1000          # first sighting preserved
+    assert row["lastSeen"] == 2000
+    assert row["price"] == 44.99             # latest price recorded
+
+
+def test_listing_history_unknown_returns_none(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    assert s.listing_history("slickdeals", "nope") is None

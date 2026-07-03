@@ -323,3 +323,30 @@ def test_comps_inhouse_accepted(base_raw):
     base_raw["comps"] = {"engine": "inhouse", "cache_ttl_seconds": 60}
     cfg = cfg_mod.from_mapping(base_raw)
     assert cfg.comps.engine == "inhouse" and cfg.comps.cache_ttl_seconds == 60
+
+
+def test_discovery_defaults(base_raw):
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.discovery.enabled is True
+    assert cfg.discovery.interval_seconds == 7200
+    assert cfg.discovery.sources == ["target_search", "slickdeals", "ebay_browse"]
+    assert "Prismatic Evolutions" in cfg.discovery.set_watch
+    assert cfg.discovery.min_alert_confidence == "medium"
+
+
+def test_discovery_min_alert_confidence_validated(base_raw):
+    base_raw["discovery"] = {"min_alert_confidence": "vibes"}
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_discovery_overrides_accepted(base_raw):
+    base_raw["discovery"] = {"enabled": False, "interval_seconds": 3600,
+                             "sources": ["slickdeals"], "set_watch": ["Crown Zenith"],
+                             "min_alert_confidence": "high"}
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.discovery.enabled is False
+    assert cfg.discovery.interval_seconds == 3600
+    assert cfg.discovery.sources == ["slickdeals"]
+    assert cfg.discovery.set_watch == ["Crown Zenith"]
+    assert cfg.discovery.min_alert_confidence == "high"
