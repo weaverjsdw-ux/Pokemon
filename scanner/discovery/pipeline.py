@@ -130,6 +130,13 @@ def default_comp_lookup(cfg: Any) -> CompLookup:
     return lookup
 
 
+def _dry_run_comp_lookup(candidate: CandidateDeal, product: dict | None) -> dict:
+    """The comp stage in --dry-run: network-free by construction, so the
+    zero-network guarantee never depends on the verifier happening to skip
+    VERIFIED_BUYABLE. A skipped comp resolves to no_comp (honest)."""
+    return {"status": "skipped", "detail": "dry-run: comp lookup skipped (no network)"}
+
+
 class _ConsoleDealSink:
     """Default notifier seam: console only. Real Discord/ntfy DealAlert channels
     land in Slice 5; this keeps notify.py off the Slice-4 write set."""
@@ -233,9 +240,13 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
     except verify_mod.AlertGateError:
         return "unverifiable"
 
-    # 3) COMP (PPT-free); no usable comp -> no_comp
+    # 3) COMP (PPT-free); no usable comp -> no_comp. A comp source that raises
+    # never errors the run (sweep's "one comp failure just skips + counts" doctrine).
     product = catalog.get(c.matched_product_key) if c.matched_product_key else None
-    comp_row = comp_lookup(c, product) or {}
+    try:
+        comp_row = comp_lookup(c, product) or {}
+    except Exception:
+        comp_row = {}
     comp, comp_conf = market_mod.comp_from_row(comp_row)
     if comp is None:
         return "no_comp"
@@ -321,7 +332,10 @@ def run_once(
         source_instances = list(sources)
 
     verifier = verifier or default_verifier(cfg)
-    comp_lookup = comp_lookup or default_comp_lookup(cfg)
+    if comp_lookup is None:
+        # the default comp path touches the network; in --dry-run it is replaced
+        # with a network-free stub so zero-network is structural, not incidental.
+        comp_lookup = _dry_run_comp_lookup if dry_run else default_comp_lookup(cfg)
     notifier = notifier or _ConsoleDealSink()
 
     if dry_run:

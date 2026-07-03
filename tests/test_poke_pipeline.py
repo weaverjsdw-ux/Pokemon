@@ -284,8 +284,12 @@ def test_quiet_hours_suppresses_push_but_writes_board(tmp_path):
 
 
 def test_in_quiet_hours_wraps_midnight():
-    assert pipeline._in_quiet_hours(NIGHT, "23:00-08:00") is True     # 02:00 inside
-    assert pipeline._in_quiet_hours(NOON, "23:00-08:00") is False     # 12:00 outside
+    # wrap window (start > end): exercise BOTH disjuncts
+    assert pipeline._in_quiet_hours(NIGHT, "23:00-08:00") is True             # 02:00 (cur < end)
+    assert pipeline._in_quiet_hours(datetime(2026, 7, 3, 23, 30), "23:00-08:00") is True  # 23:30 (cur >= start)
+    assert pipeline._in_quiet_hours(datetime(2026, 7, 3, 8, 0), "23:00-08:00") is False   # 08:00 boundary (exclusive)
+    assert pipeline._in_quiet_hours(NOON, "23:00-08:00") is False            # 12:00 outside
+    # normal window (start <= end)
     assert pipeline._in_quiet_hours(datetime(2026, 7, 3, 10, 0), "09:00-17:00") is True
     assert pipeline._in_quiet_hours(datetime(2026, 7, 3, 20, 0), "09:00-17:00") is False
 
@@ -354,27 +358,56 @@ def test_interval_elapsed_source_runs_and_records(tmp_path):
 
 # --- dry run: zero network, zero side effects ---------------------------------
 
-def test_dry_run_makes_zero_network_calls(tmp_path, monkeypatch):
-    """Patch the lowest network primitives; a dry run with REAL default adapters
-    must complete without any of them being called."""
+def _network_spy(monkeypatch):
+    """Count every call to the lowest network primitives (module-level AND the
+    Session instance methods the resale clients use). Returns the call log so a
+    test can assert it stayed empty -- a non-vacuous zero-network proof."""
     from scanner.retailers import http as retailer_http
     import requests as requests_mod
 
-    def _boom(*a, **k):
-        raise AssertionError("network call in --dry-run")
+    calls: list[str] = []
 
-    monkeypatch.setattr(retailer_http, "get", _boom)
-    monkeypatch.setattr(requests_mod, "get", _boom)
-    monkeypatch.setattr(requests_mod, "post", _boom)
+    def _spy(name):
+        def f(*a, **k):
+            calls.append(name)
+            raise RuntimeError(f"network via {name} in --dry-run")
+        return f
 
+    monkeypatch.setattr(retailer_http, "get", _spy("http.get"))
+    monkeypatch.setattr(requests_mod, "get", _spy("requests.get"))
+    monkeypatch.setattr(requests_mod, "post", _spy("requests.post"))
+    monkeypatch.setattr(requests_mod.Session, "get", _spy("session.get"), raising=False)
+    monkeypatch.setattr(requests_mod.Session, "post", _spy("session.post"), raising=False)
+    return calls
+
+
+def test_dry_run_makes_zero_network_calls(tmp_path, monkeypatch):
+    """A dry run with REAL default adapters must touch NO network primitive.
+    Proven by call-counting spies, not by a swallowable raise."""
+    calls = _network_spy(monkeypatch)
     st = State(db_path=tmp_path / "s.db")
     m = pipeline.run_once(_cfg(), source_slugs=["slickdeals", "ebay_browse"],
                           state=st, now_ts=1000, dry_run=True)
+    assert calls == []                          # THE invariant: zero network
     assert m["dry_run"] is True
     assert m["candidates"] == 0
-    # no state writes
     assert st.get_last_run("slickdeals") is None
     assert st.listing_history("slickdeals", "anything") is None
+
+
+def test_dry_run_default_comp_lookup_makes_no_network(tmp_path, monkeypatch):
+    """Even when a candidate reaches the COMP stage in --dry-run (fake verifier
+    -> VERIFIED_BUYABLE, DEFAULT comp lookup), zero network is structural: the
+    comp is skipped, candidate ends no_comp."""
+    calls = _network_spy(monkeypatch)
+    st = State(db_path=tmp_path / "s.db")
+    m = pipeline.run_once(
+        _cfg(), sources=[FakeSource("s", [_candidate()])],
+        verifier=lambda c: _verification(verify_mod.VERIFIED_BUYABLE),
+        comp_lookup=None, state=st, catalog=dict(CATALOG),
+        now_ts=1000, now_dt=NOON, dry_run=True)
+    assert calls == []
+    assert m["counts"]["no_comp"] == 1
 
 
 def test_dry_run_with_fake_candidates_suppresses_side_effects(tmp_path):
@@ -403,20 +436,12 @@ def test_cli_unknown_source_returns_2(tmp_path):
 
 
 def test_cli_dry_run_writes_nothing_zero_network(tmp_path, monkeypatch):
-    from scanner.retailers import http as retailer_http
-    import requests as requests_mod
-
-    def _boom(*a, **k):
-        raise AssertionError("network in CLI --dry-run")
-
-    monkeypatch.setattr(retailer_http, "get", _boom)
-    monkeypatch.setattr(requests_mod, "get", _boom)
-    monkeypatch.setattr(requests_mod, "post", _boom)
-
+    calls = _network_spy(monkeypatch)
     out = tmp_path / "out"
     rc = pipeline.main(["--dry-run", "--out", str(out)], cfg=_cfg(),
                        state=State(db_path=tmp_path / "s.db"))
     assert rc == 0
+    assert calls == []                            # zero network on a CLI dry run
     assert not (out / "data" / "poke").exists()   # nothing written on a dry run
 
 
@@ -446,3 +471,43 @@ def test_cli_once_writes_board_and_manifest(tmp_path):
     board = _json.loads(open(boards[0], encoding="utf-8").read())
     assert len(board["deals"]) == 1
     assert len(notifier.calls) == 1
+
+
+# --- comp lookup: PPT-free + never errors the run ----------------------------
+
+def test_default_comp_lookup_is_ppt_free(monkeypatch):
+    """The default (legacy) comp path must use the resale fallback, never the
+    PPT-billing MarketFallbackClient."""
+    from scanner import resale as resale_mod, market as market_mod
+
+    used = {}
+
+    class FakeResale:
+        def estimate(self, key, product, checked_at):
+            used["resale"] = True
+            return _comp_row()
+
+    monkeypatch.setattr(resale_mod, "resale_client_from_config", lambda cfg: FakeResale())
+
+    def _no_ppt(*a, **k):
+        raise AssertionError("PPT MarketFallbackClient used in pipeline comp path")
+
+    monkeypatch.setattr(market_mod, "MarketFallbackClient", _no_ppt)
+
+    lookup = pipeline.default_comp_lookup(_cfg())          # engine == 'legacy' default
+    row = lookup(_candidate(), CATALOG["fake_etb"])
+    assert used.get("resale") is True and row["status"] == "ok"
+
+
+def test_comp_lookup_exception_becomes_no_comp(tmp_path):
+    """A comp source that raises must not crash the run (sweep doctrine)."""
+    st = State(db_path=tmp_path / "s.db")
+
+    def boom(c, p):
+        raise RuntimeError("comp source down")
+
+    m, notifier = _run(cfg=_cfg(), state=st, sources=[FakeSource("s", [_candidate()])],
+                       verifier=lambda c: _verification(verify_mod.VERIFIED_BUYABLE),
+                       comp_lookup=boom)
+    assert m["counts"]["no_comp"] == 1
+    assert notifier.calls == []
