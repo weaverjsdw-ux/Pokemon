@@ -334,6 +334,27 @@ def test_verify_stock_unknown_stays_unknown_and_gate_clean():
         assert d["retailer"] == "MSRP"             # no fake retailer claim
 
 
+def test_out_of_stock_price_never_reanchors_deal_price():
+    from scanner.discovery import verify as verify_mod
+
+    def verifier(key, product, expected):
+        # an OUT listing that still carries a page price (BestBuy does this)
+        return _fake_verification(expected, state=verify_mod.OUT_OF_STOCK,
+                                  stock_status="out_of_stock",
+                                  verified_price=19.99, price_matches=None)
+
+    swp = sweep.build_sealed_sweep(
+        _cfg(), lambda k, p: _verified_row(), event="sealed",
+        sweep_id="2026-07-01-sealed", captured_at="2026-07-01",
+        stock_verifier=verifier)
+    by_item = {d["item"]: d for d in swp["deals"]}
+    etb = by_item["Fake ETB"]
+    assert etb["deal_price"] == 49.99             # MSRP basis kept: not buyable at 19.99
+    assert etb["warn_reason"] == ""
+    assert etb["stock_status"] == "out_of_stock"
+    assert etb["retailer"] == "MSRP"              # no retailer claim for unbuyable stock
+
+
 def test_cli_verify_stock_flag_writes_stock_states_to_manifest(tmp_path):
     # fake catalog has no retailer ids -> the real verifier runs entirely
     # offline and every product terminates UNKNOWN_NO_ALERT (no network).

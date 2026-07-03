@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -153,6 +153,18 @@ def from_stock_result(
     """Translate a live retailer-adapter check into verification evidence."""
     stock_status = _ADAPTER_STATUS.get(result.status, "unknown")
     verified_price = _price_to_float(result.price)
+    checked_at = checked_at or _now_iso()
+    if stock_status in POSITIVE_STOCK and not result.url:
+        # A positive claim with no buy link can never satisfy the gate; demote
+        # to unknown so one drifted adapter degrades a row instead of tripping
+        # the STOP gate for the whole board.
+        return _unverified(
+            UNKNOWN_NO_ALERT, source=source, method=f"retailer_adapter:{source}",
+            reason=f"positive stock ({result.status}) but adapter returned no buy URL",
+            expected_price=expected_price, checked_at=checked_at,
+            stock_status="unknown",
+            evidence=f"{source} adapter: status={result.status} "
+                     f"price={result.price or 'n/a'} url=missing")
     state, matches, reason = classify_stock(stock_status, verified_price, expected_price)
     if stock_status == "unknown":
         reason = f"unrecognized adapter status {result.status!r}"
@@ -191,23 +203,34 @@ def _unverified(
     )
 
 
+def _error_detail(exc: Exception) -> str:
+    """Exception text safe for evidence: query strings (which can carry API
+    keys) redacted before anything lands in a sweep JSON or dashboard."""
+    return retailer_http._redact_query_strings(str(exc) or exc.__class__.__name__)
+
+
+_HTTP_BLOCK_RE = re.compile(r"(?<!\d)(?:403|429)(?!\d)")  # not digits inside an id
+
+
 def _blocked_or_unavailable(detail: str) -> str:
-    return SOURCE_BLOCKED if ("403" in detail or "429" in detail) else PAGE_UNAVAILABLE
+    return SOURCE_BLOCKED if _HTTP_BLOCK_RE.search(detail) else PAGE_UNAVAILABLE
 
 
 # Ordering for picking the most informative verification across retailers:
-# positive stock first, then negative, then failures; price-bearing wins ties.
+# an alertable result always wins; then positive stock, then negative, then
+# failures; price-bearing wins remaining ties.
 _STATUS_RANK = {"in_stock": 0, "limited": 1, "out_of_stock": 2,
                 "unverifiable": 3, "unknown": 4}
 
 
-def _rank(v: StockVerification) -> tuple[int, int]:
-    return (_STATUS_RANK.get(v.stock_status, 9),
+def _rank(v: StockVerification) -> tuple[int, int, int]:
+    return (0 if v.state in ALERTABLE_STATES else 1,
+            _STATUS_RANK.get(v.stock_status, 9),
             0 if (v.verified_price or 0) > 0 else 1)
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def verify_catalog_product(
@@ -250,7 +273,7 @@ def verify_catalog_product(
             results = list(RClass(api_key=rcfg.api_key).inventory(
                 {product_key: product}, []))
         except Exception as exc:  # adapter failure = degraded state, not a crash
-            detail = str(exc) or exc.__class__.__name__
+            detail = _error_detail(exc)
             candidates.append(_unverified(
                 _blocked_or_unavailable(detail), source=slug, method=method,
                 reason=f"{slug} adapter error: {detail}",
@@ -295,31 +318,43 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 # schema.org availability markers, JSON-LD or microdata. Conservative on
 # purpose: no recognizable marker means PARSER_SUSPECT, never a guess.
+# ([\\/]+ tolerates escaped-slash JSON-LD, e.g. https:\/\/schema.org\/InStock.)
 _AVAILABILITY_RE = re.compile(
     r'(?:"availability"\s*:\s*"|itemprop="availability"[^>]*?(?:href|content)=")'
-    r'(?:https?://schema\.org/)?(\w+)"')
+    r'(?:https?:[\\/]+schema\.org[\\/]+)?(\w+)"')
 _PRICE_RES = (
     re.compile(r'"price"\s*:\s*"?(\d[\d,]*\.?\d*)"?'),
     re.compile(r'itemprop="price"[^>]*?content="(\d[\d,]*\.?\d*)"'),
 )
 _AVAILABILITY_STOCK = {
     "InStock": "in_stock",
-    "InStoreOnly": "in_stock",
+    "InStoreOnly": "limited",
     "OnlineOnly": "in_stock",
-    "PreSale": "in_stock",
     "LimitedAvailability": "limited",
     "OutOfStock": "out_of_stock",
     "SoldOut": "out_of_stock",
     "Discontinued": "out_of_stock",
 }
+# Real markers that are NOT buyable-now: recognized, but never positive stock.
+_NOT_BUYABLE_NOW = {"PreSale", "PreOrder", "BackOrder"}
+# A price only counts if it sits near the availability marker — a document-wide
+# grab can pair the target's stock with an unrelated product's price (the
+# Walmart adapter uses the same proximity idea).
+_PRICE_WINDOW_CHARS = 1500
+# "1,299.99" is a US thousands group; "39,99" is a locale decimal we refuse to
+# guess at (stripping the comma would fabricate a 100x price).
+_US_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?")
 
 
 def _page_price(text: str) -> float | None:
     for pattern in _PRICE_RES:
         m = pattern.search(text)
         if m:
+            raw = m.group(1)
+            if not _US_NUMBER_RE.fullmatch(raw):
+                continue
             try:
-                return float(m.group(1).replace(",", ""))
+                return float(raw.replace(",", ""))
             except ValueError:
                 continue
     return None
@@ -343,9 +378,8 @@ def verify_page(
     try:
         resp = get(url, headers={"User-Agent": _UA, "Accept": "text/html"}, timeout=20)
     except Exception as exc:
-        detail = str(exc) or exc.__class__.__name__
         return _unverified(PAGE_UNAVAILABLE, source=source, method="page_fetch",
-                           reason=f"transport failure: {detail}",
+                           reason=f"transport failure: {_error_detail(exc)}",
                            expected_price=expected_price, checked_at=checked_at)
     status_code = getattr(resp, "status_code", 200)
     if status_code in (403, 429):
@@ -358,18 +392,41 @@ def verify_page(
                            expected_price=expected_price, checked_at=checked_at)
 
     text = getattr(resp, "text", "") or ""
-    marker = _AVAILABILITY_RE.search(text)
-    stock_status = _AVAILABILITY_STOCK.get(marker.group(1)) if marker else None
-    if stock_status is None:
+    markers = list(_AVAILABILITY_RE.finditer(text))
+    if not markers:
         return _unverified(PARSER_SUSPECT, source=source, method="page_fetch",
                            reason="no schema.org availability signal parsed; "
                                   "refusing to guess stock from page text",
                            expected_price=expected_price, checked_at=checked_at)
+    values = {m.group(1) for m in markers}
+    if len(values) > 1:
+        # e.g. an in-stock recommendation carousel next to a sold-out product:
+        # which marker is the target is a guess, and we don't guess.
+        return _unverified(PARSER_SUSPECT, source=source, method="page_fetch",
+                           reason="ambiguous availability signals on page: "
+                                  + ", ".join(sorted(values)),
+                           expected_price=expected_price, checked_at=checked_at)
+    marker = markers[0]
+    value = marker.group(1)
+    if value in _NOT_BUYABLE_NOW:
+        return _unverified(UNKNOWN_NO_ALERT, source=source, method="page_fetch",
+                           reason=f"availability={value}: preorder/backorder, "
+                                  "not buyable now",
+                           expected_price=expected_price, checked_at=checked_at,
+                           stock_status="unknown",
+                           evidence=f"availability={value}")
+    stock_status = _AVAILABILITY_STOCK.get(value)
+    if stock_status is None:
+        return _unverified(PARSER_SUSPECT, source=source, method="page_fetch",
+                           reason=f"unrecognized availability marker {value!r}",
+                           expected_price=expected_price, checked_at=checked_at)
 
-    price = _page_price(text)
+    window = text[max(0, marker.start() - _PRICE_WINDOW_CHARS):
+                  marker.end() + _PRICE_WINDOW_CHARS]
+    price = _page_price(window)
     state, matches, reason = classify_stock(stock_status, price, expected_price)
     snippet_start = max(0, marker.start() - 80)
-    evidence = _clip(f"availability={marker.group(1)} "
+    evidence = _clip(f"availability={value} "
                      f"price={price if price is not None else 'n/a'} :: "
                      f"{text[snippet_start:marker.end() + 40]}")
     return StockVerification(

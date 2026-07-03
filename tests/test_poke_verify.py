@@ -409,3 +409,111 @@ def test_page_transport_error_is_page_unavailable():
     v = _verify_page(None, exc=requests.ConnectionError("dns failure"))
     assert v.state == verify.PAGE_UNAVAILABLE
     assert "dns failure" in v.degraded_reason
+
+
+# ------------------------------------------------------- review-wave fixes
+
+
+def test_rank_prefers_alertable_over_mismatch_regardless_of_order():
+    # A PRICE_MISMATCH at one retailer must not shadow a genuinely buyable
+    # verification at another (was decided by registry dict order).
+    registry = {
+        "misfit": _stub_retailer("misfit", results=[_result("ONLINE_IN_STOCK", "$59.99")]),
+        "buyable": _stub_retailer("buyable", results=[_result("ONLINE_IN_STOCK", "$39.99",
+                                                              url="https://buy.example/p")]),
+    }
+    v = _verify_catalog(registry)
+    assert v.state == verify.VERIFIED_BUYABLE and v.source == "buyable"
+    assert verify.alert_allowed(v)
+
+
+def test_rank_prefers_alertable_over_priceless_in_stock():
+    registry = {
+        "priceless": _stub_retailer("priceless", results=[_result("ONLINE_IN_STOCK")]),
+        "buyable": _stub_retailer("buyable", results=[_result("LIMITED", "$39.99",
+                                                              url="https://buy.example/p")]),
+    }
+    v = _verify_catalog(registry)
+    assert v.state == verify.VERIFIED_BUYABLE and v.source == "buyable"
+
+
+def test_positive_result_without_buy_url_demotes_instead_of_tripping_gate():
+    # One drifted adapter must degrade a row, not kill a whole board run at
+    # the STOP gate with a positive status that has no buy link.
+    result = _result("ONLINE_IN_STOCK", "$39.99", url="")
+    v = verify.from_stock_result(result, source="drifty",
+                                 expected_price=39.99, checked_at=CHECKED_AT)
+    assert v.state == verify.UNKNOWN_NO_ALERT
+    assert v.stock_status == "unknown"
+    assert "no buy URL" in v.degraded_reason
+    assert not verify.alert_allowed(v)
+
+
+def test_adapter_error_detail_is_query_string_redacted():
+    registry = {"stuba": _stub_retailer("stuba", raises=requests.ConnectionError(
+        "https://api.example.com/v1/products/9?apiKey=SECRET123 failed"))}
+    v = _verify_catalog(registry)
+    assert "SECRET123" not in v.degraded_reason
+    assert "SECRET123" not in v.evidence
+
+
+def test_digits_inside_ids_do_not_classify_as_blocked():
+    registry = {"stuba": _stub_retailer("stuba", raises=requests.ConnectionError(
+        "https://www.walmart.com/ip/1403559521 timed out"))}
+    v = _verify_catalog(registry)
+    assert v.state == verify.PAGE_UNAVAILABLE     # 403 inside an item id is not HTTP 403
+
+
+def _page_from_text(text, expected=39.99):
+    return verify.verify_page("https://megamart.example/p/fake-etb",
+                              expected_price=expected, checked_at=CHECKED_AT,
+                              http_get=lambda url, **kw: SimpleNamespace(
+                                  status_code=200, text=text))
+
+
+def test_page_ambiguous_availability_refuses_to_guess():
+    # in-stock carousel product + sold-out main product = no answer, honestly
+    v = _verify_page("carousel_ambiguous.html")
+    assert v.state == verify.PARSER_SUSPECT
+    assert "ambiguous" in v.degraded_reason.lower()
+
+
+def test_page_price_outside_window_is_not_paired_with_stock():
+    filler = "<p>" + ("lorem ipsum " * 200) + "</p>"      # > 1500 chars of distance
+    text = ('<html><head><script type="application/ld+json">'
+            '{"price":"19.99","name":"Unrelated Sticker"}</script></head><body>'
+            + filler +
+            '<link itemprop="availability" href="https://schema.org/InStock">'
+            + filler + "</body></html>")
+    v = _page_from_text(text)
+    assert v.state == verify.UNKNOWN_NO_ALERT     # stock seen, price NOT borrowed
+    assert v.stock_status == "in_stock"
+    assert v.verified_price is None
+
+
+def test_page_locale_decimal_price_is_refused_not_fabricated():
+    text = ('<html><body><script type="application/ld+json">'
+            '{"offers":{"price":"39,99",'
+            '"availability":"https://schema.org/InStock"}}</script></body></html>')
+    v = _page_from_text(text)
+    assert v.verified_price is None               # never 3999.0
+    assert v.state == verify.UNKNOWN_NO_ALERT
+
+
+def test_page_presale_marker_is_not_buyable_now():
+    text = ('<html><body><script type="application/ld+json">'
+            '{"offers":{"price":"39.99",'
+            '"availability":"https://schema.org/PreSale"}}</script></body></html>')
+    v = _page_from_text(text)
+    assert v.state == verify.UNKNOWN_NO_ALERT
+    assert v.stock_status == "unknown"
+    assert "preorder" in v.degraded_reason.lower()
+
+
+def test_page_escaped_slash_jsonld_parses():
+    text = ('<html><body><script type="application/ld+json">'
+            '{"offers":{"price":"39.99",'
+            '"availability":"https:\\/\\/schema.org\\/InStock"}}</script></body></html>')
+    v = _page_from_text(text)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.verified_price == 39.99

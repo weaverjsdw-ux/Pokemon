@@ -81,7 +81,10 @@ def _apply_stock(row: schema.DealRow, v: "verify_mod.StockVerification") -> None
     row.stock_method = v.method
     if v.stock_status in schema.POSITIVE_STOCK and v.source:
         row.retailer = _RETAILER_NAMES.get(v.source, v.source)
-    if v.verified_price and v.verified_price > 0:
+    # Re-anchor only for stock you can actually buy: an OUT listing's leftover
+    # price must not replace the MSRP basis (it could mint a STEAL nobody can
+    # purchase).
+    if v.stock_status in schema.POSITIVE_STOCK and v.verified_price and v.verified_price > 0:
         if v.price_matches is False:
             row.warn_reason = (f"PRICE_CHANGED: observed ${v.verified_price:.2f} "
                                f"vs expected ${row.deal_price:.2f}")
