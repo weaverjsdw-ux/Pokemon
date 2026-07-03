@@ -5,14 +5,18 @@ the actual buy page. Every candidate ends in exactly one terminal state and
 only VERIFIED_BUYABLE may ever alert.
 """
 import dataclasses
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import requests
 
 from scanner.discovery import verify
 from scanner.discovery.schema import DealRow, validate_row
-from scanner.retailers.base import StockResult
+from scanner.retailers.base import Retailer, StockResult
 
 CHECKED_AT = "2026-07-03T10:00:00"
+FIXTURES = Path("tests/fixtures/verify")
 
 
 def _verification(**kw):
@@ -209,3 +213,199 @@ def test_good_comp_with_unknown_stock_never_alerts():
 def test_verification_is_immutable_evidence():
     with pytest.raises(dataclasses.FrozenInstanceError):
         _verification().state = verify.OUT_OF_STOCK
+
+
+# ------------------------------------------------- catalog-product verification
+
+
+def _result(status, price="", url="https://stub.example/p/1"):
+    return StockResult(store=None, product_key="fake_etb", product_name="Fake ETB",
+                       status=status, url=url, price=price)
+
+
+def _stub_retailer(slug, results=None, raises=None, online=True, fields=("stub_id",)):
+    """Build a fake Retailer class yielding scripted results (or raising)."""
+    class _Stub(Retailer):
+        name = slug.title()
+        online_only = online
+        product_id_fields = fields
+
+        def inventory(self, products, stores):
+            if raises is not None:
+                raise raises
+            yield from (results or [])
+    _Stub.__name__ = f"Stub{slug.title()}"
+    return _Stub
+
+
+def _cfg_for(slugs):
+    return SimpleNamespace(retailers={
+        s: SimpleNamespace(enabled=True, api_key="") for s in slugs})
+
+
+PRODUCT = {"name": "Fake ETB", "stub_id": "123", "msrp": "$39.99"}
+
+
+def _verify_catalog(registry, product=PRODUCT, expected=39.99, health=None):
+    return verify.verify_catalog_product(
+        _cfg_for(registry), "fake_etb", product,
+        registry=registry, expected_price=expected, checked_at=CHECKED_AT,
+        health_lookup=(health or (lambda slug: {})).__call__)
+
+
+def test_catalog_in_stock_with_price_is_verified_buyable():
+    registry = {"stuba": _stub_retailer("stuba",
+                                        results=[_result("ONLINE_IN_STOCK", "$39.99")])}
+    v = _verify_catalog(registry)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.source == "stuba" and v.method == "retailer_adapter:stuba"
+    assert v.buy_url == "https://stub.example/p/1"
+    assert v.verified_price == 39.99 and v.expected_price == 39.99
+    assert v.checked_at == CHECKED_AT and v.evidence
+    assert verify.alert_allowed(v)
+
+
+def test_catalog_prefers_positive_stock_across_adapters():
+    registry = {
+        "outone": _stub_retailer("outone", results=[_result("ONLINE_OUT")]),
+        "hit": _stub_retailer("hit", results=[_result("ONLINE_IN_STOCK", "$39.99",
+                                                      url="https://hit.example/p")]),
+    }
+    v = _verify_catalog(registry)
+    assert v.state == verify.VERIFIED_BUYABLE and v.source == "hit"
+
+
+def test_catalog_price_mismatch_is_terminal_and_no_alert():
+    registry = {"stuba": _stub_retailer("stuba",
+                                        results=[_result("ONLINE_IN_STOCK", "$59.99")])}
+    v = _verify_catalog(registry)
+    assert v.state == verify.PRICE_MISMATCH and v.price_matches is False
+    assert v.verified_price == 59.99      # observed price still recorded honestly
+    assert not verify.alert_allowed(v)
+
+
+def test_catalog_all_out_is_out_of_stock():
+    registry = {"stuba": _stub_retailer("stuba", results=[_result("ONLINE_OUT")])}
+    v = _verify_catalog(registry)
+    assert v.state == verify.OUT_OF_STOCK and v.stock_status == "out_of_stock"
+
+
+def test_catalog_blocked_adapter_maps_to_source_blocked():
+    registry = {"stuba": _stub_retailer(
+        "stuba", raises=requests.HTTPError("403 Client Error: Forbidden"))}
+    v = _verify_catalog(registry)
+    assert v.state == verify.SOURCE_BLOCKED and v.stock_status == "unverifiable"
+    assert "403" in v.degraded_reason
+
+
+def test_catalog_transport_failure_maps_to_page_unavailable():
+    registry = {"stuba": _stub_retailer(
+        "stuba", raises=requests.ConnectTimeout("connect timed out"))}
+    v = _verify_catalog(registry)
+    assert v.state == verify.PAGE_UNAVAILABLE
+    assert "timed out" in v.degraded_reason
+
+
+def test_catalog_zero_rows_with_ok_http_is_parser_suspect():
+    registry = {"stuba": _stub_retailer("stuba", results=[])}
+    v = _verify_catalog(registry, health=lambda slug: {"last_http_status": 200})
+    assert v.state == verify.PARSER_SUSPECT
+    assert "no inventory row" in v.degraded_reason
+
+
+def test_catalog_zero_rows_with_blocked_http_is_source_blocked():
+    registry = {"stuba": _stub_retailer("stuba", results=[])}
+    v = _verify_catalog(registry, health=lambda slug: {"last_http_status": 429})
+    assert v.state == verify.SOURCE_BLOCKED
+
+
+def test_catalog_zero_rows_with_5xx_is_page_unavailable():
+    registry = {"stuba": _stub_retailer("stuba", results=[])}
+    v = _verify_catalog(registry, health=lambda slug: {"last_http_status": 503})
+    assert v.state == verify.PAGE_UNAVAILABLE
+
+
+def test_catalog_no_online_adapter_is_unknown_and_names_the_gap():
+    # store-based adapter holds the only id -> nothing verifiable in this
+    # context; the degraded reason says so instead of faking a result
+    registry = {"storeonly": _stub_retailer("storeonly", online=False,
+                                            results=[_result("IN_STOCK")])}
+    v = _verify_catalog(registry)
+    assert v.state == verify.UNKNOWN_NO_ALERT and v.stock_status == "unknown"
+    assert v.method == "none"
+    assert "storeonly" in v.degraded_reason
+    assert not verify.alert_allowed(v)
+
+
+def test_catalog_stock_seen_but_priceless_keeps_stock_evidence():
+    registry = {"stuba": _stub_retailer("stuba", results=[_result("ONLINE_IN_STOCK")])}
+    v = _verify_catalog(registry)
+    assert v.state == verify.UNKNOWN_NO_ALERT
+    assert v.stock_status == "in_stock"          # evidence preserved, alert refused
+    assert not verify.alert_allowed(v)
+
+
+# ------------------------------------------------------ merchant page fallback
+
+
+def _page_response(name, status=200):
+    text = (FIXTURES / name).read_text(encoding="utf-8") if name else ""
+    return SimpleNamespace(status_code=status, text=text)
+
+
+def _verify_page(name, status=200, expected=39.99, exc=None):
+    def fake_get(url, **kwargs):
+        if exc is not None:
+            raise exc
+        return _page_response(name, status)
+    return verify.verify_page("https://megamart.example/p/fake-etb",
+                              expected_price=expected, checked_at=CHECKED_AT,
+                              http_get=fake_get)
+
+
+def test_page_in_stock_with_price_is_verified_buyable():
+    v = _verify_page("instock_jsonld.html")
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.verified_price == 39.99 and v.price_matches is True
+    assert v.buy_url == "https://megamart.example/p/fake-etb"
+    assert v.method == "page_fetch" and v.source == "megamart.example"
+    assert "InStock" in v.evidence
+    assert verify.alert_allowed(v)
+
+
+def test_page_out_of_stock():
+    v = _verify_page("outofstock_jsonld.html")
+    assert v.state == verify.OUT_OF_STOCK and v.stock_status == "out_of_stock"
+    assert "OutOfStock" in v.evidence
+
+
+def test_page_price_mismatch():
+    v = _verify_page("mismatch_jsonld.html")
+    assert v.state == verify.PRICE_MISMATCH
+    assert v.verified_price == 59.99 and v.price_matches is False
+
+
+def test_page_without_signals_is_parser_suspect_never_a_guess():
+    # the page contains tempting bare numbers; refusing to guess is the point
+    v = _verify_page("garbage.html")
+    assert v.state == verify.PARSER_SUSPECT and v.stock_status == "unverifiable"
+    assert v.verified_price is None
+    assert not verify.alert_allowed(v)
+
+
+def test_page_403_is_source_blocked():
+    v = _verify_page("garbage.html", status=403)
+    assert v.state == verify.SOURCE_BLOCKED
+    assert "403" in v.degraded_reason
+
+
+def test_page_404_is_page_unavailable():
+    v = _verify_page("garbage.html", status=404)
+    assert v.state == verify.PAGE_UNAVAILABLE
+    assert "404" in v.degraded_reason
+
+
+def test_page_transport_error_is_page_unavailable():
+    v = _verify_page(None, exc=requests.ConnectionError("dns failure"))
+    assert v.state == verify.PAGE_UNAVAILABLE
+    assert "dns failure" in v.degraded_reason

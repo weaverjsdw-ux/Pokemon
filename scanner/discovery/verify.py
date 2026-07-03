@@ -13,9 +13,16 @@ extends here verbatim.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable
+from urllib.parse import urlparse
 
+from .. import health
 from ..main import _price_to_float
+from ..retailers import ALL as RETAILER_REGISTRY
+from ..retailers import http as retailer_http
 from ..retailers.base import StockResult
 from .schema import POSITIVE_STOCK, STOCK_STATUSES
 
@@ -162,4 +169,212 @@ def from_stock_result(
         evidence=_clip(f"{source} adapter: status={result.status} "
                        f"price={result.price or 'n/a'}"),
         degraded_reason=reason,
+    )
+
+
+def _unverified(
+    state: str,
+    *,
+    source: str,
+    method: str,
+    reason: str,
+    expected_price: float | None,
+    checked_at: str,
+    stock_status: str = "unverifiable",
+    evidence: str = "",
+) -> StockVerification:
+    return StockVerification(
+        state=state, stock_status=stock_status, verified_price=None,
+        expected_price=expected_price, price_matches=None, buy_url="",
+        checked_at=checked_at, source=source, method=method,
+        evidence=_clip(evidence or reason), degraded_reason=_clip(reason),
+    )
+
+
+def _blocked_or_unavailable(detail: str) -> str:
+    return SOURCE_BLOCKED if ("403" in detail or "429" in detail) else PAGE_UNAVAILABLE
+
+
+# Ordering for picking the most informative verification across retailers:
+# positive stock first, then negative, then failures; price-bearing wins ties.
+_STATUS_RANK = {"in_stock": 0, "limited": 1, "out_of_stock": 2,
+                "unverifiable": 3, "unknown": 4}
+
+
+def _rank(v: StockVerification) -> tuple[int, int]:
+    return (_STATUS_RANK.get(v.stock_status, 9),
+            0 if (v.verified_price or 0) > 0 else 1)
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def verify_catalog_product(
+    cfg: Any,
+    product_key: str,
+    product: dict,
+    *,
+    registry: dict | None = None,
+    expected_price: float | None = None,
+    checked_at: str = "",
+    health_lookup: Callable[[str], dict | None] | None = None,
+) -> StockVerification:
+    """Verify a tracked catalog product via its enabled retailer adapters.
+
+    Online-capable adapters only (store-based ones need corridor stores, which
+    this context does not have — recorded honestly, never guessed around).
+    Returns the most informative single verification; every degradation path
+    lands in an explicit terminal state with a reason.
+    """
+    registry = RETAILER_REGISTRY if registry is None else registry
+    health_lookup = health.get if health_lookup is None else health_lookup
+    checked_at = checked_at or _now_iso()
+    candidates: list[StockVerification] = []
+    skipped_store_based: list[str] = []
+
+    for slug, RClass in registry.items():
+        rcfg = cfg.retailers.get(slug)
+        if not rcfg or not getattr(rcfg, "enabled", False):
+            continue
+        if not getattr(RClass, "supported", True):
+            continue
+        fields = getattr(RClass, "product_id_fields", ())
+        if not any(str(product.get(f) or "").strip() for f in fields):
+            continue
+        if not getattr(RClass, "online_only", False):
+            skipped_store_based.append(slug)
+            continue
+        method = f"retailer_adapter:{slug}"
+        try:
+            results = list(RClass(api_key=rcfg.api_key).inventory(
+                {product_key: product}, []))
+        except Exception as exc:  # adapter failure = degraded state, not a crash
+            detail = str(exc) or exc.__class__.__name__
+            candidates.append(_unverified(
+                _blocked_or_unavailable(detail), source=slug, method=method,
+                reason=f"{slug} adapter error: {detail}",
+                expected_price=expected_price, checked_at=checked_at))
+            continue
+        if results:
+            candidates.extend(
+                from_stock_result(r, source=slug, expected_price=expected_price,
+                                  checked_at=checked_at)
+                for r in results)
+            continue
+        # The adapter had an id to look up but yielded nothing: same canary
+        # logic the scanner uses (HTTP-200-zero-rows means the parser broke).
+        http_status = (health_lookup(slug) or {}).get("last_http_status")
+        if http_status in (403, 429):
+            state, why = SOURCE_BLOCKED, f"HTTP {http_status}; endpoint blocked or rate-limited"
+        elif isinstance(http_status, int) and 500 <= http_status <= 599:
+            state, why = PAGE_UNAVAILABLE, f"HTTP {http_status}; endpoint unavailable"
+        else:
+            state, why = PARSER_SUSPECT, (
+                f"{slug} returned no inventory row for a product with an id"
+                + (f" (last HTTP {http_status})" if http_status else ""))
+        candidates.append(_unverified(
+            state, source=slug, method=method, reason=why,
+            expected_price=expected_price, checked_at=checked_at))
+
+    if candidates:
+        return min(candidates, key=_rank)
+    reason = "no online-capable retailer adapter holds an id for this product"
+    if skipped_store_based:
+        reason += ("; store-based adapters skipped (no stores in this context): "
+                   + ", ".join(skipped_store_based))
+    return _unverified(UNKNOWN_NO_ALERT, source="", method="none", reason=reason,
+                       expected_price=expected_price, checked_at=checked_at,
+                       stock_status="unknown")
+
+
+# ------------------------------------------------------------ page fallback
+
+_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+# schema.org availability markers, JSON-LD or microdata. Conservative on
+# purpose: no recognizable marker means PARSER_SUSPECT, never a guess.
+_AVAILABILITY_RE = re.compile(
+    r'(?:"availability"\s*:\s*"|itemprop="availability"[^>]*?(?:href|content)=")'
+    r'(?:https?://schema\.org/)?(\w+)"')
+_PRICE_RES = (
+    re.compile(r'"price"\s*:\s*"?(\d[\d,]*\.?\d*)"?'),
+    re.compile(r'itemprop="price"[^>]*?content="(\d[\d,]*\.?\d*)"'),
+)
+_AVAILABILITY_STOCK = {
+    "InStock": "in_stock",
+    "InStoreOnly": "in_stock",
+    "OnlineOnly": "in_stock",
+    "PreSale": "in_stock",
+    "LimitedAvailability": "limited",
+    "OutOfStock": "out_of_stock",
+    "SoldOut": "out_of_stock",
+    "Discontinued": "out_of_stock",
+}
+
+
+def _page_price(text: str) -> float | None:
+    for pattern in _PRICE_RES:
+        m = pattern.search(text)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+    return None
+
+
+def verify_page(
+    url: str,
+    *,
+    expected_price: float | None = None,
+    checked_at: str = "",
+    http_get: Callable[..., Any] | None = None,
+) -> StockVerification:
+    """One polite GET of a merchant product page; parse schema.org signals.
+
+    The buy page itself is the evidence source. Pages that resist parsing are
+    PARSER_SUSPECT (honest), never guessed from bare numbers in prose.
+    """
+    checked_at = checked_at or _now_iso()
+    source = urlparse(url).netloc
+    get = http_get or retailer_http.get
+    try:
+        resp = get(url, headers={"User-Agent": _UA, "Accept": "text/html"}, timeout=20)
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        return _unverified(PAGE_UNAVAILABLE, source=source, method="page_fetch",
+                           reason=f"transport failure: {detail}",
+                           expected_price=expected_price, checked_at=checked_at)
+    status_code = getattr(resp, "status_code", 200)
+    if status_code in (403, 429):
+        return _unverified(SOURCE_BLOCKED, source=source, method="page_fetch",
+                           reason=f"HTTP {status_code}; page blocked or rate-limited",
+                           expected_price=expected_price, checked_at=checked_at)
+    if status_code != 200:
+        return _unverified(PAGE_UNAVAILABLE, source=source, method="page_fetch",
+                           reason=f"HTTP {status_code}",
+                           expected_price=expected_price, checked_at=checked_at)
+
+    text = getattr(resp, "text", "") or ""
+    marker = _AVAILABILITY_RE.search(text)
+    stock_status = _AVAILABILITY_STOCK.get(marker.group(1)) if marker else None
+    if stock_status is None:
+        return _unverified(PARSER_SUSPECT, source=source, method="page_fetch",
+                           reason="no schema.org availability signal parsed; "
+                                  "refusing to guess stock from page text",
+                           expected_price=expected_price, checked_at=checked_at)
+
+    price = _page_price(text)
+    state, matches, reason = classify_stock(stock_status, price, expected_price)
+    snippet_start = max(0, marker.start() - 80)
+    evidence = _clip(f"availability={marker.group(1)} "
+                     f"price={price if price is not None else 'n/a'} :: "
+                     f"{text[snippet_start:marker.end() + 40]}")
+    return StockVerification(
+        state=state, stock_status=stock_status, verified_price=price,
+        expected_price=expected_price, price_matches=matches, buy_url=url,
+        checked_at=checked_at, source=source, method="page_fetch",
+        evidence=evidence, degraded_reason=reason,
     )
