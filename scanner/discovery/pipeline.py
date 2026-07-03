@@ -42,7 +42,9 @@ from ..comps import engine as comps_engine
 from ..notify import DealAlert, Notifier
 from ..retailers import http as retailer_http
 from ..state import State
+from . import golden as golden_mod
 from . import ledger as ledger_mod
+from . import render as render_mod
 from . import schema, score
 from . import sweep as sweep_mod
 from . import verify as verify_mod
@@ -213,21 +215,23 @@ def _append_listing(path: Path, c: CandidateDeal, capture_date: str) -> None:
 
 def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: CompLookup,
               catalog: dict, board_rows: list, state: Any, notifier: Any,
-              now_ts: int, quiet: bool, captured_at: str, dry_run: bool) -> str:
+              now_ts: int, quiet: bool, captured_at: str, dry_run: bool) -> tuple[str, str]:
+    """Return (terminal bucket, human reason) for one candidate. Every path
+    yields a reason so the manifest records an honest per-candidate disposition."""
     # 1) VERIFY outcome
     if v.state == verify_mod.OUT_OF_STOCK:
-        return "out_of_stock"
+        return "out_of_stock", (v.degraded_reason or "affirmatively out of stock")
     if v.state == verify_mod.PRICE_MISMATCH:
-        return "price_mismatch"
+        return "price_mismatch", (v.degraded_reason or "verified price differs from candidate")
     if v.state != verify_mod.VERIFIED_BUYABLE:
-        return "unverifiable"
+        return "unverifiable", (v.degraded_reason or f"not verified buyable ({v.state})")
 
     # 2) Gate the evidence immediately: a VERIFIED_BUYABLE that fails the gate is
     # a broken/lying verification (no price/buy_url/evidence) -> never trusted.
     try:
         verify_mod.assert_alertable(v)
-    except verify_mod.AlertGateError:
-        return "unverifiable"
+    except verify_mod.AlertGateError as exc:
+        return "unverifiable", f"alert gate refused: {exc}"
 
     # 3) COMP (PPT-free); no usable comp -> no_comp. A comp source that raises
     # never errors the run (sweep's "one comp failure just skips + counts" doctrine).
@@ -238,33 +242,36 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
         comp_row = {}
     comp, comp_conf = market_mod.comp_from_row(comp_row)
     if comp is None:
-        return "no_comp"
+        return "no_comp", (str(comp_row.get("detail") or "") or "no usable comp from any source")
     row = _build_row(cfg, c, v, product, comp_row, comp, comp_conf, captured_at)
     if row is None:
-        return "no_comp"  # comp had no attribution URL
+        return "no_comp", "comp had no attribution URL"
 
     # 4) VERDICT gates
     pct = row.pct_off
     if pct is None or pct < cfg.poke.min_discount_pct:
         board_rows.append(row)
-        return "below_min_discount"
+        return ("below_min_discount",
+                f"pct_off {pct} < min_discount_pct {cfg.poke.min_discount_pct}")
     ring3 = (c.matched_product_key is None) and not c.matched_set
     if ring3 and _CONF_RANK.get(comp_conf, 0) < _CONF_RANK.get(cfg.discovery.min_alert_confidence, 0):
         board_rows.append(row)
-        return "below_confidence"
+        return ("below_confidence",
+                f"ring-3 comp_confidence {comp_conf!r} < min_alert_confidence "
+                f"{cfg.discovery.min_alert_confidence!r}")
 
     board_rows.append(row)
 
     # 5) DEDUPE + ALERT (baseline = last ALERTED, recorded only on fire)
     if state is not None:
-        fire, _reason = state.should_deal_alert(
+        fire, reason = state.should_deal_alert(
             c.source, c.listing_id, v.verified_price, v.stock_status, now=now_ts,
             cooldown_hours=cfg.alerts.cooldown_hours,
             price_drop_realert_pct=cfg.alerts.price_drop_realert_pct)
     else:
-        fire, _reason = True, "no state"
+        fire, reason = True, "no state (alert)"
     if not fire:
-        return "suppressed_dupe"
+        return "suppressed_dupe", reason
     msrp = resale._amount(product.get("msrp")) if product else None
     deal = _deal_alert(c, v, comp, comp_conf, comp_row, row, msrp)
     if not dry_run:
@@ -272,7 +279,7 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
         if state is not None:
             state.record_deal_alert(c.source, c.listing_id, v.verified_price,
                                     v.stock_status, ts=now_ts)
-    return "alerted"
+    return "alerted", reason
 
 
 # ------------------------------------------------------------ orchestrator
@@ -377,6 +384,7 @@ def run_once(
     quiet = _in_quiet_hours(now_dt, cfg.alerts.quiet_hours)
     counts = {b: 0 for b in TERMINAL_BUCKETS}
     board_rows: list[schema.DealRow] = []
+    outcomes: list[dict] = []
 
     for c in candidates:
         if not dry_run and state is not None:
@@ -384,9 +392,11 @@ def run_once(
             if ledger_path is not None:
                 _append_listing(ledger_path, c, captured_at)
         v = verifier(c)
-        bucket = _classify(cfg, c, v, comp_lookup, catalog, board_rows, state,
-                           notifier, now_ts, quiet, captured_at, dry_run)
+        bucket, reason = _classify(cfg, c, v, comp_lookup, catalog, board_rows, state,
+                                   notifier, now_ts, quiet, captured_at, dry_run)
         counts[bucket] += 1
+        outcomes.append({"source": c.source, "listing_id": c.listing_id,
+                         "terminal": bucket, "reason": reason})
 
     schema.assert_sweep(board_rows)  # STOP-gate belt on every constructed row
 
@@ -395,16 +405,20 @@ def run_once(
         "notes": f"Discovery pipeline - {len(board_rows)} verified-buyable rows",
         "deals": [asdict(r) for r in board_rows],
         "promo_codes": [], "bundled_offers": [], "watchlist_results": [],
-        "sources": source_reports, "counts": counts,
+        # render-shaped so the dashboard shows each source's honest state
+        "sources": [{"name": s["slug"], "tier": "discovery", "status": s["state"],
+                     "note": s.get("detail", "")} for s in source_reports],
+        "counts": counts,
     }
     manifest = {
         "sweep_id": sweep_id, "captured_at": captured_at, "event": event,
         "dry_run": dry_run, "quiet_hours": quiet,
         "candidates": len(candidates), "counts": counts,
-        "sources": source_reports, "board": board,
+        "sources": source_reports, "outcomes": outcomes, "board": board,
     }
     # invariant: no silent drops
-    assert sum(counts.values()) == len(candidates), "manifest counts must reconcile"
+    assert sum(counts.values()) == len(candidates) == len(outcomes), \
+        "manifest counts must reconcile"
     return manifest
 
 
@@ -461,6 +475,10 @@ def main(argv: list[str] | None = None, *, cfg: Any = None, sources: list | None
         print("dry-run: no board/manifest written, no alerts, no network.")
         return 0
 
+    # Write JSON evidence first (survives a golden halt), then render the
+    # dashboard. The discovery board can be legitimately empty, so no min_rows
+    # acquisition floor here; the golden belt (Buyable-now evidence, dangling
+    # anchors, provenance) still runs and halts the dashboard write on failure.
     poke_dir.mkdir(parents=True, exist_ok=True)
     sweep_id = manifest["sweep_id"]
     board_path = poke_dir / f"{sweep_id}.json"
@@ -469,7 +487,22 @@ def main(argv: list[str] | None = None, *, cfg: Any = None, sources: list | None
     (poke_dir / f"{sweep_id}.manifest.json").write_text(
         json.dumps({k: v for k, v in manifest.items() if k != "board"},
                    indent=2, ensure_ascii=False), encoding="utf-8")
+
+    html = render_mod.render_sweep(manifest["board"])   # STOP gate runs again inside
+    fails = golden_mod.golden_check(html, min_rows=0)
+    if fails:
+        for message in fails:
+            print(f"GOLDEN FAIL: {message}")
+        print(f"HALTED: dashboard not written ({len(fails)} golden failures). "
+              f"Evidence kept at {board_path}")
+        return 1
+
+    dash_dir = root / "dashboards"
+    dash_dir.mkdir(parents=True, exist_ok=True)
+    dash_path = dash_dir / f"{sweep_id}.html"
+    dash_path.write_text(html, encoding="utf-8")
     print(f"board: {board_path}")
+    print(f"dashboard: {dash_path}")
     return 0
 
 

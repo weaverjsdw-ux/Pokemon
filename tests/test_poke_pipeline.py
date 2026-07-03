@@ -474,6 +474,43 @@ def test_cli_once_writes_board_and_manifest(tmp_path):
     assert len(notifier.calls) == 1
 
 
+def test_cli_once_writes_dashboard_with_buyable_now(tmp_path):
+    import glob
+    out = tmp_path / "out"
+    rc = pipeline.main(
+        ["--once", "--out", str(out)], cfg=_cfg(),
+        state=State(db_path=tmp_path / "s.db"),
+        sources=[FakeSource("s", [_candidate()])],
+        verifier=lambda c: _verification(verify_mod.VERIFIED_BUYABLE),
+        comp_lookup=lambda c, p: _comp_row(), notifier=FakeNotifier())
+    assert rc == 0
+    dashes = glob.glob(str(out / "dashboards" / "*-discovery.html"))
+    assert len(dashes) == 1                       # the pipeline renders a dashboard
+    html = open(dashes[0], encoding="utf-8").read()
+    assert 'id="buyable-now"' in html
+    from scanner.discovery.render import section_html
+    assert "Fake ETB" in section_html(html, "buyable-now")   # verified row is Buyable now
+
+
+def test_manifest_records_per_candidate_outcomes(tmp_path):
+    st = State(db_path=tmp_path / "s.db")
+    cands = [_candidate("a1"), _candidate("b2"), _candidate("c3"), _candidate("d4")]
+    verdicts = {
+        "a1": _verification(verify_mod.VERIFIED_BUYABLE),
+        "b2": _verification(verify_mod.OUT_OF_STOCK),
+        "c3": _verification(verify_mod.PARSER_SUSPECT),
+        "d4": _verification(verify_mod.VERIFIED_BUYABLE),
+    }
+    m, _ = _run(cfg=_cfg(), state=st, sources=[FakeSource("s", cands)],
+                verifier=lambda c: verdicts[c.listing_id],
+                comp_lookup=lambda c, p: {"status": "no_match"} if c.listing_id == "d4"
+                else _comp_row())
+    outcomes = m["outcomes"]
+    assert len(outcomes) == m["candidates"] == 4          # one disposition per candidate
+    assert {o["listing_id"] for o in outcomes} == {"a1", "b2", "c3", "d4"}
+    assert all(o["terminal"] and o.get("reason") for o in outcomes)   # every one has a reason
+
+
 # --- comp lookup: PPT-free + never errors the run ----------------------------
 
 def test_default_comp_lookup_is_ppt_free(monkeypatch):
