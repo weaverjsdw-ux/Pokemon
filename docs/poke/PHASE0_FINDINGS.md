@@ -161,3 +161,7 @@ Pokémon Center or Reddit bot-walls with CAPTCHA-solving or similar evasion.
 
 **Operator: does this complete Phase-0 Probe B — signed off? (yes → Phase B unblocked;
 this packet does not self-certify.)**
+
+**SIGNED OFF — operator, 2026-07-02.** Phase-0 Probe B complete; Phase B unblocked. Remaining
+operator items tracked elsewhere: eBay keyset provisioning (`docs/poke/ebay-keyset-setup.md`) and
+resuming the 6 remaining `ppt_id` seeds after the credit-window reset.
