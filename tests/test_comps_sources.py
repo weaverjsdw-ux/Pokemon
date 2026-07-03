@@ -101,3 +101,45 @@ def test_ebay_transport_error():
     ask = EbayAskSource(cfg=None, client=FakeEbayClient(
         exc=requests.ConnectionError("down"))).fetch("k", PRODUCT, 1)
     assert ask.quote.status == "error"
+
+
+from scanner.comps.tcgplayer import TcgPlayerSource
+
+
+class FakeHttpResp:
+    def __init__(self, status_code=200, text=""):
+        self.status_code, self.text = status_code, text
+
+
+class FakeHttpSession:
+    def __init__(self, resp=None, exc=None):
+        self.resp, self.exc = resp, exc
+    def get(self, url, **kwargs):
+        if self.exc: raise self.exc
+        return self.resp
+
+
+def test_tcg_no_ppt_id_is_skipped():          # both variants
+    quote = TcgPlayerSource(cfg=None, session=FakeHttpSession()).fetch(
+        "k", {"name": "X"}, 1)
+    assert quote.status == "skipped" and quote.price is None
+
+
+def test_tcg_http_403_is_blocked():           # both variants
+    quote = TcgPlayerSource(cfg=None, session=FakeHttpSession(FakeHttpResp(403))).fetch(
+        "k", {"name": "X", "ppt_id": "593355"}, 1)
+    assert quote.status == "blocked"
+    assert quote.url == "https://www.tcgplayer.com/product/593355"
+
+
+def test_tcg_transport_error():               # both variants
+    quote = TcgPlayerSource(cfg=None, session=FakeHttpSession(
+        exc=requests.ConnectionError("x"))).fetch("k", {"name": "X", "ppt_id": "1"}, 1)
+    assert quote.status == "error"
+
+
+def test_tcg_stub_reports_blocked_pending_acquisition():  # STUB variant ONLY
+    quote = TcgPlayerSource(cfg=None, session=FakeHttpSession(FakeHttpResp(200, "<html/>"))).fetch(
+        "k", {"name": "X", "ppt_id": "593355"}, 1)
+    assert quote.status == "blocked"
+    assert "tcgplayer-probe" in quote.detail
