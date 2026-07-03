@@ -31,8 +31,7 @@ Verdict enum: `fetchable-plain | fetchable-playwright | API-only | dead-for-now`
 | PriceCharting Elite Trainer Box prices (`pricecharting.com/search-products?q=elite+trainer+box&type=prices`) | Playwright | fetchable-playwright | WebFetch returned HTTP 403. Playwright rendered a structured price list (e.g. Surging Sparks Costco 2-Pack $225.00, Phantasmal Flames ETB $107.99). Scanner already uses PriceCharting as its resale-fallback comp source (see PHASE0_FINDINGS.md Probe A). |
 | Poke Alerts (`poke-alerts.com`) | Playwright | fetchable-playwright — marketing page, live feed paywalled | WebFetch returned HTTP 403. Playwright rendered the landing/marketing page for a paid Discord alert service ("17,009+ successful checkouts", "Sign Up" → checkout); ETB prices shown are illustrative feature examples, not a live deal feed — the actual restock/deal data is gated behind a paid subscription. |
 
-**Directional read (updated 2026-07-02):** every fixed retailer/marketplace source is now
-fetchable — either directly via plain WebFetch (Target, Slickdeals) or via Playwright
+**Directional read (updated 2026-07-02):** every fixed source now has a resolved verdict — either directly via plain WebFetch (Target, Slickdeals) or via Playwright
 (Best Buy, Costco, TCGplayer, eBay's HTML, TrackaLacker, PriceCharting, Poke Alerts's landing
 page). The only genuine `API-only` blocks are policy/bot walls that resist both WebFetch and
 Playwright without evasion: Pokémon Center (Imperva/hCaptcha — use the scanner's existing `.js`

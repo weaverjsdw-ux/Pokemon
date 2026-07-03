@@ -143,9 +143,7 @@ per source (full table in sources.md).
 - **Corrected eBay-creds claim:** earlier findings (lines above) described the scanner as already
   holding eBay Browse tokens. That is not accurate as of 2026-07-02: eBay Browse creds are NOT
   configured (no `ebay` block in `config.yaml`, no `EBAY_*` env vars set, and no eBay credential
-  file exists anywhere in the repo). See `docs/poke/ebay-keyset-setup.md` for the setup path (file
-  is a forward reference — it does not yet exist and needs to be authored before eBay Browse can
-  be wired up).
+  file exists anywhere in the repo). See `docs/poke/ebay-keyset-setup.md` for the setup path (authored later the same day; the doc now exists in the tree).
 - Four curators were identified and probed (Slickdeals, TrackaLacker, PriceCharting, Poke Alerts) —
   none existed in the June sample, which had no curator candidates at all.
 
@@ -156,7 +154,7 @@ poll (no browser needed), good for a fast/low-cost polling tier; (3) **Best Buy 
 TCGplayer** via Playwright — all render fully, just costlier per-poll than plain fetch; (4)
 **PriceCharting** as the existing comp-source, keep using it for sealed pricing validation rather
 than as a deal feed; (5) defer **eBay Browse API** and **Reddit API** integration until credentials
-are obtained (eBay keyset per `ebay-keyset-setup.md`, once authored; Reddit API app registration);
+are obtained (eBay keyset per `ebay-keyset-setup.md` using that doc; Reddit API app registration);
 (6) for **Pokémon Center**, skip the HTML category page entirely and use the scanner's existing
 product `.js` stock-endpoint path, matching current scanner behavior. Do not attempt to bypass the
 Pokémon Center or Reddit bot-walls with CAPTCHA-solving or similar evasion.
