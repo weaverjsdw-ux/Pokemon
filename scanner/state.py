@@ -100,6 +100,15 @@ class State:
             )
             """
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS comp_cache (
+                item_key TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                fetched_at INTEGER NOT NULL
+            )
+            """
+        )
         db.commit()
 
     def should_alert(
@@ -265,3 +274,32 @@ class State:
             if isinstance(payload, dict):
                 out.append(payload)
         return out
+
+    def comp_cache_get(self, item_key: str) -> tuple[dict[str, Any], int] | None:
+        row = self.db.execute(
+            "SELECT payload_json, fetched_at FROM comp_cache WHERE item_key=?",
+            (item_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row[0])
+        except (TypeError, ValueError):
+            return None
+        return (payload, int(row[1])) if isinstance(payload, dict) else None
+
+    def comp_cache_put(
+        self, item_key: str, payload: dict[str, Any], ts: int | None = None
+    ) -> None:
+        now = ts if ts is not None else int(time.time())
+        self.db.execute(
+            """
+            INSERT INTO comp_cache(item_key, payload_json, fetched_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_key)
+            DO UPDATE SET payload_json=excluded.payload_json,
+                          fetched_at=excluded.fetched_at
+            """,
+            (item_key, json.dumps(payload, sort_keys=True), now),
+        )
+        self.db.commit()

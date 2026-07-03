@@ -123,3 +123,15 @@ def test_default_state_falls_back_when_primary_schema_init_fails(tmp_path, monke
     assert s.db_path == runtime
     s.record_observation("target", "123", "booster", "OUT", ts=1000)
     assert s.history_for("target", "123", "booster")["lastStatus"] == "OUT"
+
+
+def test_comp_cache_roundtrip(tmp_path):
+    from scanner.state import State
+    state = State(db_path=tmp_path / "state.db")
+    assert state.comp_cache_get("set|item|||") is None
+    state.comp_cache_put("set|item|||", {"status": "ok", "estimate": "$10.00"}, ts=1000)
+    payload, fetched_at = state.comp_cache_get("set|item|||")
+    assert payload["estimate"] == "$10.00" and fetched_at == 1000
+    state.comp_cache_put("set|item|||", {"status": "ok", "estimate": "$12.00"}, ts=2000)
+    payload, fetched_at = state.comp_cache_get("set|item|||")
+    assert payload["estimate"] == "$12.00" and fetched_at == 2000   # upsert, one row
