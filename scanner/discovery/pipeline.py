@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import asdict
 from datetime import date, datetime
@@ -275,7 +276,19 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
     msrp = resale._amount(product.get("msrp")) if product else None
     deal = _deal_alert(c, v, comp, comp_conf, comp_row, row, msrp)
     if not dry_run:
-        notifier.send_deal(deal, push=not quiet)
+        try:
+            notifier.send_deal(deal, push=not quiet)
+        except Exception as exc:
+            # A notifier failure must never abort the run (and lose the board /
+            # every other candidate's disposition). The real Notifier already
+            # swallows per-channel RequestExceptions; this is the belt for an
+            # unexpected failure. Dedupe is deliberately NOT recorded so the next
+            # run re-attempts delivery instead of suppressing this alert forever.
+            detail = retailer_http._redact_query_strings(
+                str(exc) or exc.__class__.__name__)[:120]
+            print(f"  ! deal notify failed for {c.source}:{c.listing_id}: {detail}",
+                  file=sys.stderr)
+            return "alerted", f"{reason}; notify failed (not recorded, retries next run)"
         if state is not None:
             state.record_deal_alert(c.source, c.listing_id, v.verified_price,
                                     v.stock_status, ts=now_ts)

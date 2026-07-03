@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html as html_lib
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -56,20 +57,42 @@ def _card_price(title: str, final_price_raw: str) -> float | None:
     return final_price
 
 
+@dataclass(frozen=True)
+class ParseStats:
+    """Drift signal counters for one parse pass.
+
+    ``cards_found``  : deal-card containers matched (0 on a 200 page = drift).
+    ``non_expired``  : cards not flagged expired (the ones we try to extract).
+    ``titled``       : non-expired cards whose title selector matched. Zero
+                       titled among non-expired cards means the inner selectors
+                       drifted even though the container class still matched -
+                       the silent-empty failure mode this canary catches.
+    """
+    cards_found: int
+    non_expired: int
+    titled: int
+
+
 def parse_search_html(
     text: str, catalog: dict, set_watch: list[str], seen_at: str,
-) -> tuple[list[CandidateDeal], int]:
-    """(candidates, cards_found). cards_found=0 on a 200 page means drift."""
+) -> tuple[list[CandidateDeal], ParseStats]:
+    """(candidates, ParseStats). cards_found=0 on a 200 page means drift; so
+    does a page of live cards where not one title parsed (inner-selector drift)."""
     matches = list(_CARD_RE.finditer(text))
     candidates: list[CandidateDeal] = []
+    non_expired = 0
+    titled = 0
     for i, m in enumerate(matches):
         if "--expired" in m.group(1):
             continue
+        non_expired += 1
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         chunk = text[m.start():end]
         title_m = _TITLE_RE.search(chunk)
         price_m = _PRICE_RE.search(chunk)
         href_m = _HREF_RE.search(chunk)
+        if title_m:
+            titled += 1
         if not (title_m and price_m and href_m):
             continue                      # no price/link = no candidate, ever
         title = html_lib.unescape(title_m.group(1))
@@ -96,7 +119,7 @@ def parse_search_html(
             matched_product_key=product_key,
             matched_set=matched_set,
         ))
-    return candidates, len(matches)
+    return candidates, ParseStats(len(matches), non_expired, titled)
 
 
 class Slickdeals(DiscoverySource):
@@ -126,12 +149,20 @@ class Slickdeals(DiscoverySource):
             self._set_state(confidence.DEGRADED, f"HTTP {status}")
             return []
         seen_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        candidates, cards_found = parse_search_html(
+        candidates, stats = parse_search_html(
             getattr(resp, "text", "") or "", catalog, set_watch, seen_at)
-        if cards_found == 0:
+        if stats.cards_found == 0:
             self._set_state(confidence.PARSER_SUSPECT,
                             "HTTP 200 but no deal cards parsed for the standing query")
             return []
+        if stats.non_expired > 0 and stats.titled == 0:
+            # cards are present and live, but the title selector matched none of
+            # them: inner-markup drift. Reporting WORKING/empty here would read
+            # as "no Pokemon deals today" - a silent lie. Flag it instead.
+            self._set_state(confidence.PARSER_SUSPECT,
+                            f"{stats.non_expired} live cards but no title parsed; "
+                            "card inner markup may have drifted")
+            return []
         self._set_state(confidence.WORKING,
-                        f"{len(candidates)} candidates from {cards_found} cards")
+                        f"{len(candidates)} candidates from {stats.cards_found} cards")
         return candidates
