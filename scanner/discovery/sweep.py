@@ -22,6 +22,7 @@ from .. import config as cfg_mod
 from .. import main as main_mod
 from .. import market as market_mod
 from .. import resale
+from ..comps import engine as comps_engine
 from . import golden as golden_mod
 from . import ledger as ledger_mod
 from . import render as render_mod
@@ -159,6 +160,8 @@ class LiveCompLookup:
         self.resale_client = resale_client or resale.resale_client_from_config(cfg)
         if market_client is not None:
             self.market_client = market_client
+        elif getattr(getattr(cfg, "comps", None), "engine", "legacy") == "inhouse":
+            self.market_client = comps_engine.CompEngine.from_config(cfg)
         elif getattr(cfg, "market_preferred", False) and getattr(cfg, "market_api_key", ""):
             self.market_client = market_mod.MarketFallbackClient(
                 market_mod.PokemonPriceTrackerClient.from_config(cfg), self.resale_client)

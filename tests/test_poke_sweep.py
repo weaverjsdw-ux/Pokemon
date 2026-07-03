@@ -240,3 +240,22 @@ def test_cli_halts_without_dashboard_on_golden_failure(tmp_path, capsys):
     assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == 6
     out = capsys.readouterr().out
     assert "GOLDEN FAIL" in out
+
+
+# ---------------------------------------------------------------- CompEngine wiring
+
+
+def test_livecomplookup_inhouse_engine_selected(poke_cfg):
+    from scanner.comps.engine import CompEngine
+    from scanner.discovery.sweep import LiveCompLookup
+    poke_cfg.comps.engine = "inhouse"
+    lookup = LiveCompLookup(poke_cfg)
+    assert isinstance(lookup.market_client, CompEngine)
+
+
+def test_livecomplookup_legacy_default_unchanged(poke_cfg):
+    from scanner.comps.engine import CompEngine
+    from scanner.discovery.sweep import LiveCompLookup
+    poke_cfg.comps.engine = "legacy"
+    lookup = LiveCompLookup(poke_cfg)
+    assert not isinstance(lookup.market_client, CompEngine)
