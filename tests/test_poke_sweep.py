@@ -1,6 +1,8 @@
 import json
 from datetime import date
 
+import pytest
+
 from scanner import config as cfg_mod
 from scanner import main as main_mod
 from scanner.discovery import score, sweep
@@ -243,6 +245,11 @@ def test_cli_halts_without_dashboard_on_golden_failure(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------- CompEngine wiring
+
+
+@pytest.fixture
+def poke_cfg():
+    return _cfg()
 
 
 def test_livecomplookup_inhouse_engine_selected(poke_cfg):
