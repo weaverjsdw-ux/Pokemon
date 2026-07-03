@@ -116,3 +116,10 @@ discovery:
   set_watch: ["Prismatic Evolutions", "Destined Rivals", "Journey Together",
               "Surging Sparks", "Scarlet & Violet 151", "Paldean Fates", "Crown Zenith"]
   min_alert_confidence: medium   # Ring-3 wildcard candidates need at least this comp confidence
+
+# Deal-alert dedupe + quiet hours for the discovery pipeline (Slice 4).
+alerts:
+  quiet_hours: "23:00-08:00"     # local HH:MM-HH:MM; ntfy pushes suppressed in-window
+                                 # (board + manifest still written; Discord still posts)
+  price_drop_realert_pct: 5      # re-alert a live listing when its price drops >= this %
+  cooldown_hours: 24             # otherwise no repeat alert for the same listing until this elapses

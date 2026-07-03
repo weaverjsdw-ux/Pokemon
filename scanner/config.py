@@ -65,6 +65,34 @@ class DiscoveryCfg:
 
 
 @dataclass
+class AlertsCfg:
+    quiet_hours: str = "23:00-08:00"   # HH:MM-HH:MM local; ntfy pushes suppressed in-window
+    price_drop_realert_pct: float = 5.0  # re-alert a live listing when price drops >= this %
+    cooldown_hours: float = 24.0        # otherwise no repeat alert until this elapses
+
+
+def parse_quiet_hours(value: str) -> tuple[int, int]:
+    """('23:00-08:00') -> (1380, 480) minutes-of-day. Wrap (start > end) allowed.
+
+    Raises ValueError on anything not HH:MM-HH:MM with valid clock values."""
+    text = str(value).strip()
+    if text.count("-") != 1:
+        raise ValueError(f"quiet_hours must be HH:MM-HH:MM, got {value!r}")
+    start_s, end_s = text.split("-")
+
+    def _to_minutes(clock: str) -> int:
+        parts = clock.strip().split(":")
+        if len(parts) != 2:
+            raise ValueError(f"quiet_hours time must be HH:MM, got {clock!r}")
+        hh, mm = int(parts[0]), int(parts[1])
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError(f"quiet_hours time out of range: {clock!r}")
+        return hh * 60 + mm
+
+    return _to_minutes(start_s), _to_minutes(end_s)
+
+
+@dataclass
 class Config:
     home_address: str
     work_address: str
@@ -101,6 +129,7 @@ class Config:
     poke: PokeCfg = field(default_factory=PokeCfg)
     comps: CompsCfg = field(default_factory=CompsCfg)
     discovery: DiscoveryCfg = field(default_factory=DiscoveryCfg)
+    alerts: AlertsCfg = field(default_factory=AlertsCfg)
 
 
 def load(path: Path | None = None) -> Config:
@@ -254,6 +283,25 @@ def from_mapping(raw: dict[str, Any]) -> Config:
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: discovery.interval_seconds must be an integer.")
 
+    alerts_raw = raw.get("alerts")
+    if alerts_raw is None:
+        alerts_raw = {}
+    if not isinstance(alerts_raw, dict):
+        raise SystemExit("config.yaml: alerts must be a mapping.")
+    quiet_hours = str(alerts_raw.get("quiet_hours", "23:00-08:00")).strip()
+    try:
+        parse_quiet_hours(quiet_hours)  # validate now so the pipeline can trust it
+    except ValueError:
+        raise SystemExit(
+            "config.yaml: alerts.quiet_hours must be HH:MM-HH:MM (24h), "
+            f"got {quiet_hours!r}.")
+    alerts_cfg = AlertsCfg(
+        quiet_hours=quiet_hours,
+        price_drop_realert_pct=_num(alerts_raw, "price_drop_realert_pct", 5.0,
+                                    "alerts.price_drop_realert_pct"),
+        cooldown_hours=_num(alerts_raw, "cooldown_hours", 24.0, "alerts.cooldown_hours"),
+    )
+
     return Config(
         home_address=home,
         work_address=work,
@@ -297,6 +345,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         poke=poke_cfg,
         comps=comps_cfg,
         discovery=discovery_cfg,
+        alerts=alerts_cfg,
     )
 
 

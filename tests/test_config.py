@@ -350,3 +350,54 @@ def test_discovery_overrides_accepted(base_raw):
     assert cfg.discovery.sources == ["slickdeals"]
     assert cfg.discovery.set_watch == ["Crown Zenith"]
     assert cfg.discovery.min_alert_confidence == "high"
+
+
+def test_alerts_defaults(base_raw):
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.alerts.quiet_hours == "23:00-08:00"
+    assert cfg.alerts.price_drop_realert_pct == 5.0
+    assert cfg.alerts.cooldown_hours == 24.0
+
+
+def test_alerts_overrides_parse(base_raw):
+    base_raw["alerts"] = {"quiet_hours": "22:30-06:15",
+                          "price_drop_realert_pct": 10, "cooldown_hours": 12}
+    cfg = cfg_mod.from_mapping(base_raw)
+    assert cfg.alerts.quiet_hours == "22:30-06:15"
+    assert cfg.alerts.price_drop_realert_pct == 10.0
+    assert cfg.alerts.cooldown_hours == 12.0
+
+
+def test_alerts_must_be_mapping(base_raw):
+    base_raw["alerts"] = []
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_alerts_rejects_malformed_quiet_hours(base_raw):
+    base_raw["alerts"] = {"quiet_hours": "nope"}
+    with pytest.raises(SystemExit, match="quiet_hours"):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_alerts_rejects_out_of_range_quiet_hours(base_raw):
+    base_raw["alerts"] = {"quiet_hours": "25:00-08:00"}
+    with pytest.raises(SystemExit, match="quiet_hours"):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_alerts_rejects_non_numeric_pct(base_raw):
+    base_raw["alerts"] = {"price_drop_realert_pct": "loads"}
+    with pytest.raises(SystemExit, match="price_drop_realert_pct"):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_alerts_rejects_non_numeric_cooldown(base_raw):
+    base_raw["alerts"] = {"cooldown_hours": "forever"}
+    with pytest.raises(SystemExit, match="cooldown_hours"):
+        cfg_mod.from_mapping(base_raw)
+
+
+def test_parse_quiet_hours_wrap_and_normal():
+    assert cfg_mod.parse_quiet_hours("23:00-08:00") == (23 * 60, 8 * 60)
+    assert cfg_mod.parse_quiet_hours("09:30-17:45") == (9 * 60 + 30, 17 * 60 + 45)
