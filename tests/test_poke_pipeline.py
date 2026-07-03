@@ -388,3 +388,61 @@ def test_dry_run_with_fake_candidates_suppresses_side_effects(tmp_path):
     row = st.db.execute("SELECT COUNT(*) FROM deal_alerts").fetchone()[0]
     assert row == 0
     assert m["dry_run"] is True
+
+
+# --- CLI ----------------------------------------------------------------------
+
+def test_cli_requires_once_or_dry_run(tmp_path):
+    assert pipeline.main([], cfg=_cfg(), state=State(db_path=tmp_path / "s.db")) == 2
+
+
+def test_cli_unknown_source_returns_2(tmp_path):
+    rc = pipeline.main(["--once", "--sources", "bogus"], cfg=_cfg(),
+                       state=State(db_path=tmp_path / "s.db"))
+    assert rc == 2
+
+
+def test_cli_dry_run_writes_nothing_zero_network(tmp_path, monkeypatch):
+    from scanner.retailers import http as retailer_http
+    import requests as requests_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("network in CLI --dry-run")
+
+    monkeypatch.setattr(retailer_http, "get", _boom)
+    monkeypatch.setattr(requests_mod, "get", _boom)
+    monkeypatch.setattr(requests_mod, "post", _boom)
+
+    out = tmp_path / "out"
+    rc = pipeline.main(["--dry-run", "--out", str(out)], cfg=_cfg(),
+                       state=State(db_path=tmp_path / "s.db"))
+    assert rc == 0
+    assert not (out / "data" / "poke").exists()   # nothing written on a dry run
+
+
+def test_cli_once_writes_board_and_manifest(tmp_path):
+    import glob
+
+    out = tmp_path / "out"
+    notifier = FakeNotifier()
+    rc = pipeline.main(
+        ["--once", "--out", str(out)], cfg=_cfg(),
+        state=State(db_path=tmp_path / "s.db"),
+        sources=[FakeSource("s", [_candidate()])],
+        verifier=lambda c: _verification(verify_mod.VERIFIED_BUYABLE),
+        comp_lookup=lambda c, p: _comp_row(), notifier=notifier)
+    assert rc == 0
+    poke = out / "data" / "poke"
+    boards = glob.glob(str(poke / "*-discovery.json"))
+    manifests = glob.glob(str(poke / "*-discovery.manifest.json"))
+    assert len(boards) == 1 and len(manifests) == 1
+
+    import json as _json
+    manifest = _json.loads(open(manifests[0], encoding="utf-8").read())
+    assert manifest["candidates"] == 1
+    assert manifest["counts"]["alerted"] == 1
+    assert sum(manifest["counts"].values()) == manifest["candidates"]
+    assert "board" not in manifest       # board lives in its own file
+    board = _json.loads(open(boards[0], encoding="utf-8").read())
+    assert len(board["deals"]) == 1
+    assert len(notifier.calls) == 1

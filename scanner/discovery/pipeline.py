@@ -40,6 +40,7 @@ from .. import market as market_mod
 from .. import resale
 from ..comps import engine as comps_engine
 from ..retailers import http as retailer_http
+from ..state import State
 from . import ledger as ledger_mod
 from . import schema, score
 from . import sweep as sweep_mod
@@ -400,3 +401,72 @@ def run_once(
     # invariant: no silent drops
     assert sum(counts.values()) == len(candidates), "manifest counts must reconcile"
     return manifest
+
+
+# ------------------------------------------------------------ CLI
+
+def main(argv: list[str] | None = None, *, cfg: Any = None, sources: list | None = None,
+         verifier: Verifier | None = None, comp_lookup: CompLookup | None = None,
+         notifier: Any = None, state: Any = None, catalog: dict | None = None,
+         now_ts: int | None = None, now_dt: datetime | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m scanner.discovery.pipeline",
+        description="Run the discovery deal pipeline once (not a daemon).")
+    parser.add_argument("--once", action="store_true",
+                        help="run a single one-shot pass (the scheduler invokes this)")
+    parser.add_argument("--sources", default="",
+                        help="comma-separated adapter slugs (default: discovery.sources)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="validate + report only: zero network, no alerts, no writes")
+    parser.add_argument("--out", default=None,
+                        help="output root (default: repo root; writes data/poke/)")
+    args = parser.parse_args(argv)
+
+    if not args.once and not args.dry_run:
+        parser.print_usage()
+        print("nothing to do: pass --once (or --dry-run to validate without side effects)")
+        return 2
+
+    cfg = cfg or cfg_mod.load()
+    root = Path(args.out) if args.out else cfg_mod.ROOT
+    source_slugs = ([s.strip() for s in args.sources.split(",") if s.strip()]
+                    if args.sources else None)
+    state = state if state is not None else State()
+    poke_dir = root / "data" / "poke"
+    ledger_path = None if args.dry_run else poke_dir / "price_history.jsonl"
+
+    try:
+        manifest = run_once(
+            cfg, sources=sources, verifier=verifier, comp_lookup=comp_lookup,
+            notifier=notifier, state=state, catalog=catalog, source_slugs=source_slugs,
+            now_ts=now_ts, now_dt=now_dt, dry_run=args.dry_run, ledger_path=ledger_path)
+    except PipelineConfigError as exc:
+        print(f"CONFIG ERROR: {exc}")
+        return 2
+
+    counts = manifest["counts"]
+    summary = " ".join(f"{k}={v}" for k, v in counts.items())
+    print(f"candidates={manifest['candidates']} {summary} "
+          f"quiet_hours={manifest['quiet_hours']} dry_run={manifest['dry_run']}")
+    degraded = [s for s in manifest["sources"] if s["state"] not in ("WORKING",)]
+    for s in degraded:
+        print(f"  source {s['slug']}: {s['state']} - {s.get('detail', '')}")
+
+    if args.dry_run:
+        print("dry-run: no board/manifest written, no alerts, no network.")
+        return 0
+
+    poke_dir.mkdir(parents=True, exist_ok=True)
+    sweep_id = manifest["sweep_id"]
+    board_path = poke_dir / f"{sweep_id}.json"
+    board_path.write_text(
+        json.dumps(manifest["board"], indent=2, ensure_ascii=False), encoding="utf-8")
+    (poke_dir / f"{sweep_id}.manifest.json").write_text(
+        json.dumps({k: v for k, v in manifest.items() if k != "board"},
+                   indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"board: {board_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
