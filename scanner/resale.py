@@ -531,6 +531,19 @@ def _quantile(values: list[float], q: float) -> float:
     return values[lower] + (values[upper] - values[lower]) * (pos - lower)
 
 
+def matched_prices(product: dict[str, Any], payload: dict[str, Any]) -> list[float]:
+    """Sorted listing totals (price+shipping) for title-matched active listings."""
+    prices = [
+        price
+        for item in payload.get("itemSummaries") or []
+        if isinstance(item, dict) and _title_allowed(product, item)
+        for price in [_listing_total(item)]
+        if price is not None
+    ]
+    prices.sort()
+    return prices
+
+
 def quote_from_search_payload(
     product_key: str,
     product: dict[str, Any],
@@ -540,14 +553,7 @@ def quote_from_search_payload(
     basis: str = "active fixed-price asking median",
 ) -> dict[str, Any]:
     query = product_query(product)
-    prices = [
-        price
-        for item in payload.get("itemSummaries") or []
-        if isinstance(item, dict) and _title_allowed(product, item)
-        for price in [_listing_total(item)]
-        if price is not None
-    ]
-    prices.sort()
+    prices = matched_prices(product, payload)
     base = {
         "productKey": product_key,
         "source": source,
@@ -623,7 +629,7 @@ class EbayResaleClient:
         self._token_expires_at = int(self.clock()) + int(payload.get("expires_in") or 0)
         return token
 
-    def estimate(self, product_key: str, product: dict[str, Any], checked_at: int) -> dict[str, Any]:
+    def search_payload(self, product: dict[str, Any]) -> dict[str, Any]:
         query = product_query(product)
         response = self.session.get(
             EBAY_SEARCH_URL,
@@ -639,7 +645,11 @@ class EbayResaleClient:
             timeout=20,
         )
         response.raise_for_status()
-        return quote_from_search_payload(product_key, product, response.json(), checked_at)
+        return response.json()
+
+    def estimate(self, product_key: str, product: dict[str, Any], checked_at: int) -> dict[str, Any]:
+        return quote_from_search_payload(
+            product_key, product, self.search_payload(product), checked_at)
 
 
 class PublicEbaySearchClient:

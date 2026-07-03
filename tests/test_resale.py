@@ -263,3 +263,43 @@ def test_resale_cache_snapshot_uses_public_search_without_auth(monkeypatch):
     assert snapshot["confidenceCounts"] == {"high": 0, "medium": 0, "low": 0, "none": 1}
     assert snapshot["products"]["booster"]["status"] == "pending"
     assert snapshot["products"]["booster"]["confidence"] == "none"
+
+
+def test_matched_prices_sorted_and_filtered():
+    from scanner import resale
+    product = {"name": "Prismatic Evolutions Elite Trainer Box", "type": "ETB",
+               "resale_query": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed"}
+    payload = {"itemSummaries": [
+        {"title": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed",
+         "price": {"value": "199.99", "currency": "USD"}},
+        {"title": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed",
+         "price": {"value": "149.99", "currency": "USD"}},
+        {"title": "empty box only Prismatic Evolutions",   # negative-title filtered
+         "price": {"value": "9.99", "currency": "USD"}},
+    ]}
+    assert resale.matched_prices(product, payload) == [149.99, 199.99]
+
+
+def test_search_payload_split_keeps_estimate_identical(monkeypatch):
+    from scanner import resale
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"itemSummaries": [
+                {"title": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed",
+                 "price": {"value": "150.00", "currency": "USD"}},
+            ]}
+
+    class FakeSession:
+        def get(self, url, **kwargs): return FakeResp()
+        def post(self, url, **kwargs): raise AssertionError("no token call expected")
+
+    client = resale.EbayResaleClient(resale.ResaleCredentials(token="t"), session=FakeSession())
+    product = {"name": "Prismatic Evolutions Elite Trainer Box", "type": "ETB",
+               "resale_query": "Pokemon TCG Prismatic Evolutions Elite Trainer Box sealed"}
+    payload = client.search_payload(product)
+    assert payload["itemSummaries"][0]["price"]["value"] == "150.00"
+    row = client.estimate("k", product, 123)
+    assert row["status"] == "ok" and row["estimate"] == "$150.00"
