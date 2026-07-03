@@ -10,10 +10,29 @@ import re
 
 from .render import element_ids, nav_anchors, section_html
 
-# Stock markers that must NEVER appear in the Buyable now section: a row there
-# must carry verified positive stock evidence (in_stock/limited), not unknown,
-# out-of-stock, or unverifiable. Belt over the STOP-gate suspenders.
-_NON_BUYABLE_STOCK_MARKERS = ("stock-unknown", "stock-out_of_stock", "stock-unverifiable")
+# A row in the Buyable now section must carry verified POSITIVE stock
+# (in_stock/limited) AND non-empty evidence. Belt over the STOP-gate suspenders.
+# Matches only the stock cell's class attribute (never the escaped free-text
+# evidence, which could legitimately contain a 'stock-...' token).
+_STOCK_CLASS_RE = re.compile(r'class="[^"]*\bstock-(\w+)"')
+_POSITIVE_STOCK_TITLE_RE = re.compile(
+    r'class="stock stock-(?:in_stock|limited)" title="([^"]*)"')
+_POSITIVE_STATUSES = ("in_stock", "limited")
+
+
+def _buyable_now_fails(html: str) -> list[str]:
+    section = section_html(html, "buyable-now")
+    fails: list[str] = []
+    for m in _STOCK_CLASS_RE.finditer(section):
+        if m.group(1) not in _POSITIVE_STATUSES:
+            fails.append("Buyable now section contains a non-positive stock row "
+                         f"(stock-{m.group(1)})")
+            return fails
+    for m in _POSITIVE_STOCK_TITLE_RE.finditer(section):
+        if not m.group(1).strip():
+            fails.append("Buyable now section contains a row without stock evidence")
+            return fails
+    return fails
 
 
 def golden_check(html: str, min_rows: int) -> list[str]:
@@ -32,10 +51,5 @@ def golden_check(html: str, min_rows: int) -> list[str]:
     for src, date in rows:
         if not src or not date:
             fails.append("a deal row is missing source_url or captured_at")
-    buyable = section_html(html, "buyable-now")
-    for marker in _NON_BUYABLE_STOCK_MARKERS:
-        if marker in buyable:
-            fails.append("Buyable now section contains a row without positive stock evidence "
-                         f"({marker})")
-            break
+    fails.extend(_buyable_now_fails(html))
     return fails

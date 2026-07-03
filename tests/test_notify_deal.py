@@ -110,8 +110,23 @@ def test_unsafe_buy_url_filtered_from_embed_and_ntfy(monkeypatch):
     n.send_deal(_deal(buy_url="javascript:alert(1)"), push=True)
     discord_blob = spy.to("discord.test")[0]["data"]
     assert "javascript:alert" not in discord_blob
+    embed = json.loads(discord_blob)["embeds"][0]
+    assert "url" not in embed          # unsafe buy_url -> url omitted, never "" (Discord 400)
     ntfy_headers = json.dumps(spy.to("ntfy.sh")[0]["headers"])
     assert "javascript:alert" not in ntfy_headers
+    assert "Click" not in spy.to("ntfy.sh")[0]["headers"]   # no unsafe Click header
+
+
+def test_ntfy_title_is_ascii_safe_for_unicode_item(monkeypatch):
+    """A non-Latin-1 listing title in the ntfy Title header would crash real
+    requests (UnicodeEncodeError, not RequestException). It must be sanitized."""
+    spy = _PostSpy()
+    monkeypatch.setattr("scanner.notify.requests.post", spy)
+    Notifier(ntfy_topic="poke-deals").send_deal(
+        _deal(item="Pokémon ETB — Prismatic™"), push=True)
+    title = spy.to("ntfy.sh")[0]["headers"]["Title"]
+    title.encode("latin-1")                        # must not raise (real requests would)
+    assert all(ord(c) < 128 for c in title)
 
 
 def test_console_only_when_no_channels_configured(monkeypatch, capsys):

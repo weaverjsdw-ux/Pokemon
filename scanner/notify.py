@@ -19,6 +19,14 @@ def _safe_url(url: str) -> str:
         return ""
 
 
+def _ascii_header(value: str) -> str:
+    """HTTP header values are latin-1 in requests; a non-encodable char (em-dash,
+    ™, a Japanese set name in an untrusted listing title) raises UnicodeEncodeError
+    -- a ValueError, NOT a RequestException -- which would escape the send and
+    abort the whole run. Coerce to a safe ASCII subset so a notify never crashes."""
+    return str(value).encode("ascii", "ignore").decode("ascii")
+
+
 def _ago(ts: int | None) -> str:
     """Compact human delta like '3m', '2h', '4d' for a unix timestamp."""
     if not ts:
@@ -190,8 +198,10 @@ class Notifier:
                 f"https://ntfy.sh/{self.ntfy_topic}",
                 data=alert.line().encode("utf-8"),
                 headers={
-                    "Title": f"{alert.retailer}: {alert.product_name}",
-                    "Click": alert.url,
+                    # header values are latin-1 in requests; keep them ASCII-safe
+                    # so a non-Latin-1 product name never crashes the notify.
+                    "Title": _ascii_header(f"{alert.retailer}: {alert.product_name}"),
+                    "Click": _ascii_header(_safe_url(alert.url)),
                     "Tags": "package",
                 },
                 timeout=10,
@@ -215,7 +225,6 @@ class Notifier:
         title = f"{alert.verdict_headline or 'BUYABLE'}: {alert.item}"
         embed: dict = {
             "title": title[:250],
-            "url": _safe_url(alert.buy_url),
             "color": color,
             "fields": [
                 {"name": "Retailer", "value": f"{alert.retailer} ({alert.source_adapter})",
@@ -251,6 +260,11 @@ class Notifier:
             embed["fields"].append(
                 {"name": "⚠ Warnings", "value": ", ".join(alert.warn_flags)[:1000],
                  "inline": False})
+        safe_buy = _safe_url(alert.buy_url)
+        if safe_buy:
+            # Discord 400s (and silently drops) an embed with an empty-string url;
+            # omit the key entirely when the buy link is unsafe/absent.
+            embed["url"] = safe_buy
         return embed
 
     def _discord_deal(self, alert: DealAlert) -> None:
@@ -267,10 +281,10 @@ class Notifier:
 
     def _ntfy_deal(self, alert: DealAlert) -> None:
         headers = {
-            "Title": f"{alert.verdict_headline or 'BUYABLE'}: {alert.item}"[:250],
+            "Title": _ascii_header(f"{alert.verdict_headline or 'BUYABLE'}: {alert.item}")[:250],
             "Tags": "moneybag",
         }
-        click = _safe_url(alert.buy_url)
+        click = _ascii_header(_safe_url(alert.buy_url))
         if click:
             headers["Click"] = click
         try:

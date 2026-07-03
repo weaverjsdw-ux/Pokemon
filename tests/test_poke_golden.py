@@ -57,8 +57,23 @@ def test_golden_passes_with_evidenced_buyable_row():
 
 
 def test_golden_fails_if_buyable_row_lacks_evidence():
-    """Belt over the STOP-gate suspenders: even if a bad row reached the Buyable
-    now section, golden must catch a row without positive stock evidence."""
+    """Belt over the STOP-gate suspenders: a Buyable now row whose stock cell has
+    NO evidence (empty title) must fail even though its status marker is positive."""
+    import re
+    from scanner.discovery.render import section_html
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [_positive_row()]
+    html = render_sweep(swp)
+    sec = section_html(html, "buyable-now")
+    # blank the evidence (title) on the positive stock span, keeping the positive marker
+    bad_sec = re.sub(r'(class="stock stock-(?:in_stock|limited)" title=")[^"]*(")',
+                     r"\1\2", sec)
+    assert bad_sec != sec            # the tamper actually removed the evidence
+    fails = golden_check(html.replace(sec, bad_sec), min_rows=0)
+    assert any("evidence" in f.lower() for f in fails)
+
+
+def test_golden_fails_if_buyable_row_has_nonpositive_status():
     from scanner.discovery.render import section_html
     swp = json.loads(json.dumps(SWEEP))
     swp["deals"] = [_positive_row()]
@@ -66,4 +81,13 @@ def test_golden_fails_if_buyable_row_lacks_evidence():
     sec = section_html(html, "buyable-now")
     tampered = html.replace(sec, sec.replace("stock-in_stock", "stock-unknown"))
     fails = golden_check(tampered, min_rows=0)
-    assert any("buyable" in f.lower() for f in fails)
+    assert any("non-positive" in f.lower() for f in fails)
+
+
+def test_golden_buyable_belt_tolerates_evidence_text_with_stock_token():
+    """A legit in_stock row whose evidence literally contains a 'stock-...' token
+    must NOT be misread as a non-positive marker (belt is class-scoped)."""
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [_positive_row(stock_evidence="note: stock-unknown appeared in the raw text")]
+    html = render_sweep(swp)
+    assert golden_check(html, min_rows=0) == []
