@@ -128,6 +128,43 @@ def test_buy_url_is_scheme_filtered_like_source_url():
     assert "javascript:alert" not in html
 
 
+def test_buyable_now_section_present_and_positive_only():
+    from scanner.discovery.render import section_html
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [
+        _stocked_row(item="Verified ETB"),
+        _stocked_row(item="Unknown ETB", stock_status="unknown", stock_evidence="",
+                     buy_url="", stock_checked_at="", stock_method=""),
+    ]
+    html = render_sweep(swp)
+    assert 'id="buyable-now"' in html
+    sec = section_html(html, "buyable-now")
+    assert "Verified ETB" in sec        # positive-verified stock shown at the top
+    assert "Unknown ETB" not in sec     # unknown-stock excluded from Buyable now
+
+
+def test_buyable_now_shows_weak_comp_verified_row_labeled_not_hidden():
+    from scanner.discovery.render import section_html
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [_stocked_row(item="Weak Comp ETB", price_confidence="est",
+                                 comp_confidence="low", derivation_method="comp_inference",
+                                 badges=["EST"], source_url="https://ex.com/x")]
+    html = render_sweep(swp)
+    sec = section_html(html, "buyable-now")
+    assert "Weak Comp ETB" in sec       # a weak-comp verified-stock row is NOT hidden
+    assert "EST" in sec                 # it is labeled honestly
+
+
+def test_buyable_now_empty_still_renders_section():
+    from scanner.discovery.render import section_html
+    swp = json.loads(json.dumps(SWEEP))
+    swp["deals"] = [_stocked_row(stock_status="unknown", stock_evidence="", buy_url="",
+                                 stock_checked_at="", stock_method="")]
+    html = render_sweep(swp)
+    assert 'id="buyable-now"' in html   # section (and its nav anchor) always exists
+    assert "None this sweep" in section_html(html, "buyable-now")
+
+
 def test_render_drops_javascript_uri_from_href():
     # An untrusted javascript: source_url must never become a clickable href.
     # (deal_price is a string-ish javascript payload only in source_url; the row

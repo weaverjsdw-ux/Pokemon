@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import re
 
-from .render import element_ids, nav_anchors
+from .render import element_ids, nav_anchors, section_html
+
+# Stock markers that must NEVER appear in the Buyable now section: a row there
+# must carry verified positive stock evidence (in_stock/limited), not unknown,
+# out-of-stock, or unverifiable. Belt over the STOP-gate suspenders.
+_NON_BUYABLE_STOCK_MARKERS = ("stock-unknown", "stock-out_of_stock", "stock-unverifiable")
 
 
 def golden_check(html: str, min_rows: int) -> list[str]:
@@ -27,4 +32,10 @@ def golden_check(html: str, min_rows: int) -> list[str]:
     for src, date in rows:
         if not src or not date:
             fails.append("a deal row is missing source_url or captured_at")
+    buyable = section_html(html, "buyable-now")
+    for marker in _NON_BUYABLE_STOCK_MARKERS:
+        if marker in buyable:
+            fails.append("Buyable now section contains a row without positive stock evidence "
+                         f"({marker})")
+            break
     return fails

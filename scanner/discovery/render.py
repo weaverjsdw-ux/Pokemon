@@ -117,6 +117,14 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
 
     steals = [d for d in deals if "STEAL" in d.get("badges", [])]
     watch_out = [d for d in deals if d.get("authenticity_risk") or d.get("warn_reason")]
+    # Buyable now: only rows with VERIFIED positive stock evidence + a buy link.
+    # Weak-comp rows qualify (they are genuinely buyable) and are shown, labeled,
+    # not hidden. Unknown/negative/unverifiable stock stays in the reference
+    # sections below. The STOP gate already guarantees a positive-stock row
+    # carries evidence; this filter + the golden check are belt-and-suspenders.
+    buyable = [d for d in deals
+               if str(d.get("stock_status") or "") in _POSITIVE_STOCK
+               and d.get("stock_evidence") and d.get("buy_url")]
 
     # category sections (every section id used in nav must exist)
     cats: dict[str, list[dict]] = {}
@@ -131,7 +139,7 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
             f'<section id="{anchor}"><h2>{_esc(key)}</h2>{_table(cats[key])}</section>'
         )
 
-    nav_ids = ["freshness", "watchlist", "top-steals", *cat_nav,
+    nav_ids = ["freshness", "buyable-now", "watchlist", "top-steals", *cat_nav,
                "promo-codes", "bundled-offers", "watch-out", "sources"]
     nav_html = "".join(f'<a href="#{a}">{a.replace("-", " ").title()}</a>' for a in nav_ids)
 
@@ -184,6 +192,7 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
         out = out.replace(k, v)
     injects = {
         "<!-- INJECT: NAV -->": nav_html,
+        "<!-- INJECT: BUYABLE_NOW -->": _table(buyable),
         "<!-- INJECT: WATCHLIST -->": wl_html,
         "<!-- INJECT: TOP_STEALS -->": _table(steals),
         "<!-- INJECT: CATEGORY_SECTIONS -->": "".join(cat_sections),
@@ -195,6 +204,14 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
     for marker, value in injects.items():
         out = out.replace(marker, value)
     return out
+
+
+def section_html(html: str, section_id: str) -> str:
+    """Inner HTML of <section id="section_id">...</section> ("" if absent).
+    Lets golden inspect a single section (e.g. buyable-now) in isolation."""
+    m = re.search(rf'<section id="{re.escape(section_id)}">(.*?)</section>',
+                  html, re.DOTALL)
+    return m.group(1) if m else ""
 
 
 def nav_anchors(html: str) -> list[str]:
