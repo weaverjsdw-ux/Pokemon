@@ -88,3 +88,11 @@ def test_junk_titles_are_rejected_everywhere():
 def test_unrelated_title_matches_nothing():
     key, set_name = _match("Disney Lorcana TCG Illumineer's Trove Sealed")
     assert key is None and set_name == ""
+
+
+def test_accented_pokemon_titles_still_match():
+    # real Slickdeals titles say "Pokémon" — the é must not break token matching
+    key, _ = _match("Pokémon TCG: Prismatic Evolutions Elite Trainer Box")
+    assert key == "prismatic_etb"
+    key2, set_name = _match("Pokémon TCG Paldean Fates Tin")
+    assert key2 is None and set_name == "Paldean Fates"

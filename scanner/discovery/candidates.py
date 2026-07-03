@@ -11,9 +11,24 @@ without a catalog product; Ring 3 = neither (wildcard, matched fields empty).
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass
 
 from .. import resale
+
+
+def _ascii_fold(text: str) -> str:
+    """'Pokémon' -> 'Pokemon', 'Evolution—Ascended' -> 'Evolution Ascended'.
+
+    Real listing titles carry diacritics and em-dashes; dropping them naively
+    either splits tokens (é) or merges neighbors (—), silently unmatching the
+    title. Decompose accents away, turn other non-ASCII into spaces."""
+    folded = []
+    for ch in unicodedata.normalize("NFKD", text):
+        if unicodedata.combining(ch):
+            continue
+        folded.append(ch if ord(ch) < 128 else " ")
+    return "".join(folded)
 
 
 @dataclass(frozen=True)
@@ -40,7 +55,7 @@ def stable_listing_id(url: str) -> str:
 
 def junk_title(title: str) -> bool:
     """Empty boxes, code cards, non-English prints, lots — never candidates."""
-    lower = title.lower()
+    lower = _ascii_fold(title).lower()
     return any(part in lower for part in resale.NEGATIVE_TITLE_PARTS)
 
 
@@ -55,6 +70,7 @@ def match_title(
     (ETB vs bundle share set tokens), the most specific wins — the one whose
     required-token set is largest.
     """
+    title = _ascii_fold(title)
     if junk_title(title):
         return None, ""
     item = {"title": title}
