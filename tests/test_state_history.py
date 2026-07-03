@@ -162,3 +162,79 @@ def test_expired_mark_without_price_keeps_last_known_price(tmp_path):
     row = s.listing_history("slickdeals", "1")
     assert row["price"] == 49.99          # price trajectory never nulled
     assert row["status"] == "expired" and row["lastSeen"] == 2000
+
+
+# --- deal_alerts dedupe (Slice 4) ---------------------------------------------
+
+HOUR = 3600
+
+
+def _decide(s, price, status, ts, *, cooldown=24.0, drop=5.0):
+    return s.should_deal_alert(
+        "ebay_browse", "item-1", price, status, now=ts,
+        cooldown_hours=cooldown, price_drop_realert_pct=drop)
+
+
+def test_deal_alert_new_listing_fires(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    fire, reason = _decide(s, 50.0, "in_stock", 1000)
+    assert fire is True and "new" in reason.lower()
+
+
+def test_deal_alert_same_price_in_cooldown_suppressed(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    fire, reason = _decide(s, 50.0, "in_stock", 1000 + 1 * HOUR)
+    assert fire is False and "cooldown" in reason.lower()
+
+
+def test_deal_alert_price_drop_at_threshold_refires(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    # 47.50 is exactly a 5% drop; at-or-above threshold re-alerts, still in cooldown.
+    fire, reason = _decide(s, 47.50, "in_stock", 1000 + 1 * HOUR)
+    assert fire is True and "drop" in reason.lower()
+
+
+def test_deal_alert_small_drop_below_threshold_suppressed(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    fire, _ = _decide(s, 48.0, "in_stock", 1000 + 1 * HOUR)  # 4% drop < 5%
+    assert fire is False
+
+
+def test_deal_alert_status_flip_refires(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    fire, reason = _decide(s, 50.0, "limited", 1000 + 1 * HOUR)
+    assert fire is True and "status" in reason.lower()
+
+
+def test_deal_alert_cooldown_expiry_refires(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    fire, reason = _decide(s, 50.0, "in_stock", 1000 + 25 * HOUR)
+    assert fire is True and "cooldown" in reason.lower()
+
+
+def test_deal_alert_baseline_is_last_alerted_not_last_seen(tmp_path):
+    """Repeated suppressed sightings must NOT advance the cooldown or price
+    baseline — should_deal_alert is read-only, record fires only on alert."""
+    s = State(db_path=tmp_path / "state.db")
+    s.record_deal_alert("ebay_browse", "item-1", 50.0, "in_stock", 1000)
+    # sighting within cooldown, no material change -> suppressed, no record
+    assert _decide(s, 49.0, "in_stock", 1000 + 2 * HOUR)[0] is False
+    assert _decide(s, 49.0, "in_stock", 1000 + 10 * HOUR)[0] is False
+    # cooldown measured from the ORIGINAL alert (1000), so 25h later still fires
+    assert _decide(s, 49.0, "in_stock", 1000 + 25 * HOUR)[0] is True
+    # a cumulative >=5% drop measured vs the last ALERTED price (50), not last seen
+    assert _decide(s, 47.4, "in_stock", 1000 + 3 * HOUR)[0] is True  # 5.2% vs 50
+
+
+def test_discovery_runs_roundtrip(tmp_path):
+    s = State(db_path=tmp_path / "state.db")
+    assert s.get_last_run("slickdeals") is None
+    s.set_last_run("slickdeals", 12345)
+    assert s.get_last_run("slickdeals") == 12345
+    s.set_last_run("slickdeals", 20000)   # upsert, single row
+    assert s.get_last_run("slickdeals") == 20000

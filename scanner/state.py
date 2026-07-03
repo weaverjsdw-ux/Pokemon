@@ -122,6 +122,26 @@ class State:
             )
             """
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deal_alerts (
+                source TEXT NOT NULL,
+                listing_id TEXT NOT NULL,
+                price REAL,
+                status TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                PRIMARY KEY (source, listing_id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discovery_runs (
+                source TEXT PRIMARY KEY,
+                last_run INTEGER NOT NULL
+            )
+            """
+        )
         db.commit()
 
     def should_alert(
@@ -187,6 +207,75 @@ class State:
             return None
         return {"source": source, "listingId": listing_id, "price": row[0],
                 "status": row[1], "firstSeen": row[2], "lastSeen": row[3]}
+
+    def should_deal_alert(
+        self,
+        source: str,
+        listing_id: str,
+        price: float | None,
+        status: str,
+        *,
+        now: int,
+        cooldown_hours: float,
+        price_drop_realert_pct: float,
+    ) -> tuple[bool, str]:
+        """Decide whether a discovered deal should alert. READ-ONLY: the
+        baseline in deal_alerts is written by record_deal_alert only when an
+        alert actually fires, so cooldown/price are always measured against the
+        last *alerted* state, never the last *seen* state."""
+        row = self.db.execute(
+            "SELECT price, status, ts FROM deal_alerts WHERE source=? AND listing_id=?",
+            (source, listing_id),
+        ).fetchone()
+        if row is None:
+            return True, "new listing"
+        prev_price, prev_status, prev_ts = row
+        if status != prev_status:
+            return True, f"status flip: {prev_status} -> {status}"
+        if (price is not None and prev_price is not None and prev_price > 0
+                and price < prev_price):
+            drop_pct = (prev_price - price) / prev_price * 100.0
+            if drop_pct >= price_drop_realert_pct:
+                return True, f"price drop {drop_pct:.0f}% (${prev_price:.2f} -> ${price:.2f})"
+        if (now - int(prev_ts)) >= cooldown_hours * 3600:
+            return True, "cooldown elapsed"
+        return False, "within cooldown, unchanged"
+
+    def record_deal_alert(
+        self,
+        source: str,
+        listing_id: str,
+        price: float | None,
+        status: str,
+        ts: int,
+    ) -> None:
+        """Persist the last-alerted baseline. Call ONLY when an alert fires."""
+        self.db.execute(
+            """
+            INSERT INTO deal_alerts(source, listing_id, price, status, ts)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(source, listing_id)
+            DO UPDATE SET price=excluded.price, status=excluded.status, ts=excluded.ts
+            """,
+            (source, listing_id, price, status, ts),
+        )
+        self.db.commit()
+
+    def get_last_run(self, source: str) -> int | None:
+        row = self.db.execute(
+            "SELECT last_run FROM discovery_runs WHERE source=?", (source,)
+        ).fetchone()
+        return int(row[0]) if row is not None else None
+
+    def set_last_run(self, source: str, ts: int) -> None:
+        self.db.execute(
+            """
+            INSERT INTO discovery_runs(source, last_run) VALUES (?, ?)
+            ON CONFLICT(source) DO UPDATE SET last_run=excluded.last_run
+            """,
+            (source, ts),
+        )
+        self.db.commit()
 
     def record_observation(
         self,
