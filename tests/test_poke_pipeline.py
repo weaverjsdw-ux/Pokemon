@@ -492,6 +492,28 @@ def test_cli_once_writes_dashboard_with_buyable_now(tmp_path):
     assert "Fake ETB" in section_html(html, "buyable-now")   # verified row is Buyable now
 
 
+def test_cli_golden_failure_halts_dashboard_but_keeps_json_evidence(tmp_path, monkeypatch):
+    """Belt-3 HALT behavior on the discovery lane: if a golden check fails, the
+    dashboard is withheld (rc 1) but the board + manifest JSON evidence is kept.
+    The STOP gate precedes golden so a real bad row can't reach it - inject a
+    golden failure to prove the halt path is wired and truthful."""
+    import glob
+    monkeypatch.setattr(pipeline.golden_mod, "golden_check",
+                        lambda html, min_rows: ["injected golden failure"])
+    out = tmp_path / "out"
+    rc = pipeline.main(
+        ["--once", "--out", str(out)], cfg=_cfg(),
+        state=State(db_path=tmp_path / "s.db"),
+        sources=[FakeSource("s", [_candidate()])],
+        verifier=lambda c: _verification(verify_mod.VERIFIED_BUYABLE),
+        comp_lookup=lambda c, p: _comp_row(), notifier=FakeNotifier())
+    assert rc == 1                                             # halted
+    poke = out / "data" / "poke"
+    assert glob.glob(str(poke / "*-discovery.json"))          # JSON evidence kept
+    assert glob.glob(str(poke / "*-discovery.manifest.json"))
+    assert glob.glob(str(out / "dashboards" / "*.html")) == []  # dashboard withheld
+
+
 def test_manifest_records_per_candidate_outcomes(tmp_path):
     st = State(db_path=tmp_path / "s.db")
     cands = [_candidate("a1"), _candidate("b2"), _candidate("c3"), _candidate("d4")]
