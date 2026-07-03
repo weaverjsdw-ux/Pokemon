@@ -98,11 +98,10 @@ ntfy_topic: ""
 # keys when you only want part of the catalog.
 products: all_tcg
 
-# --- In-house comp engine (Task 8 / Slice 1) ---
-# This is a placeholder configuration block for the comps engine. The actual engine
-# selection and behavior is controlled by this configuration.
+# In-house comp engine (TCGplayer + PriceCharting + eBay triangulation).
 comps:
   engine: legacy            # 'inhouse' = multi-source comp engine (Slice 6 flips default)
   agreement_tolerance_pct: 20
   ebay_floor_sanity_pct: 50
   cache_ttl_seconds: 21600  # 6h
+  politeness_seconds: 1.0   # min gap between live source fetches
