@@ -45,3 +45,59 @@ def test_pc_transport_error():
     quote = PriceChartingSource(cfg=None, client=FakePcClient(
         exc=requests.ConnectionError("boom"))).fetch("k", PRODUCT, 1)
     assert quote.status == "error" and quote.price is None
+
+
+from scanner.comps.ebay import EbayAskSource
+
+
+class _NoAuthCfg:
+    ebay_browse_api_token = ""
+    ebay_client_id = ""
+    ebay_client_secret = ""
+    ebay_marketplace_id = "EBAY_US"
+
+
+class FakeEbayClient:
+    def __init__(self, payload=None, exc=None):
+        self.payload, self.exc = payload, exc
+    def search_payload(self, product):
+        if self.exc: raise self.exc
+        return self.payload
+
+
+def test_ebay_not_configured_degrades_cleanly(monkeypatch):
+    # Operator is still waiting on eBay developer-program acceptance: this IS the
+    # production path today. Env creds must not leak in.
+    for var in ("EBAY_BROWSE_API_TOKEN", "EBAY_OAUTH_TOKEN", "EBAY_CLIENT_ID",
+                "EBAY_CLIENT_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    ask = EbayAskSource(cfg=_NoAuthCfg()).fetch("k", PRODUCT, 1)
+    assert ask.quote.status == "not_configured"
+    assert ask.floor is None and ask.count is None
+    assert "ebay-keyset-setup" in ask.quote.detail
+
+
+def test_ebay_ok_median_floor_count():
+    payload = {"itemSummaries": [
+        {"title": "Pokemon TCG Destined Rivals Elite Trainer Box sealed",
+         "price": {"value": "170.00", "currency": "USD"}},
+        {"title": "Pokemon TCG Destined Rivals Elite Trainer Box sealed",
+         "price": {"value": "180.00", "currency": "USD"}},
+        {"title": "Pokemon TCG Destined Rivals Elite Trainer Box sealed",
+         "price": {"value": "200.00", "currency": "USD"}},
+    ]}
+    ask = EbayAskSource(cfg=None, client=FakeEbayClient(payload)).fetch("k", PRODUCT, 1)
+    assert ask.quote.status == "ok" and ask.quote.price == 180.0   # median
+    assert ask.floor == 170.0 and ask.count == 3
+    assert ask.quote.sample_size == 3 and ask.quote.kind == model.ACTIVE_ASK
+
+
+def test_ebay_no_matches():
+    ask = EbayAskSource(cfg=None, client=FakeEbayClient({"itemSummaries": []})).fetch("k", PRODUCT, 1)
+    assert ask.quote.status == "no_match" and ask.floor is None
+
+
+def test_ebay_transport_error():
+    ask = EbayAskSource(cfg=None, client=FakeEbayClient(
+        exc=requests.ConnectionError("down"))).fetch("k", PRODUCT, 1)
+    assert ask.quote.status == "error"
