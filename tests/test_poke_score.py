@@ -60,6 +60,27 @@ def test_steal_requires_verified_and_threshold():
     assert "STEAL" not in thin
 
 
+def test_active_ask_comp_basis_never_steals():
+    # spec 4.3: an active_ask-based comp never produces a STEAL badge, even on
+    # a verified row over the discount threshold — asks are not sold comps.
+    row = _row(deal_price=39.99, market_comp=60.0, pct_off=33,
+               comp_basis="ebay active_ask median (n=6)")
+    assert "STEAL" not in assign_badges(row, CFG)
+
+
+def test_legacy_asking_basis_never_steals():
+    # the legacy eBay fallback words it differently; the belt catches it too
+    row = _row(deal_price=39.99, market_comp=60.0, pct_off=33,
+               comp_basis="active fixed-price asking median")
+    assert "STEAL" not in assign_badges(row, CFG)
+
+
+def test_sold_derived_comp_basis_keeps_steal():
+    row = _row(deal_price=39.99, market_comp=60.0, pct_off=33,
+               comp_basis="min(tcgplayer,pricecharting) agree@20%")
+    assert "STEAL" in assign_badges(row, CFG)
+
+
 def test_est_row_gets_est_badge_never_steal():
     badges = assign_badges(_row(price_confidence="est", comp_confidence="low",
                                 derivation_method="comp_inference",

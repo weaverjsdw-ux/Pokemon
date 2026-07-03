@@ -58,10 +58,15 @@ def assign_badges(row: DealRow, cfg) -> list[str]:
     if row.price_confidence == "est":
         badges.append("EST")
     pct = row.pct_off if row.pct_off is not None else compute_pct_off(row.deal_price, row.market_comp)
+    # An ask-basis comp (active listings, not sold data) can never anchor a
+    # STEAL, no matter how verified the deal price is (spec 4.3).
+    basis = row.comp_basis.lower()
+    ask_basis = "active_ask" in basis or "asking" in basis
     steal_ok = (
         row.price_confidence == "verified"
         and not row.authenticity_risk
         and not row.stale
+        and not ask_basis
         and pct is not None
         and pct >= cfg.poke.steal_pct
     )
