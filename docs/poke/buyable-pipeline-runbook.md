@@ -16,19 +16,24 @@ presenting a number the system cannot source.
 
 ## 0. Current gate state (read before a live run)
 
-As of 2026-07-03 the pipeline is fully built and green (520 tests), but two
-operator unlocks are still pending and one cutover is deliberately **not** done:
+As of 2026-07-03 the pipeline is fully built and green (568 tests), but two
+operator unlocks are still pending, one cutover is deliberately **not** done,
+and the new Slickdeals resolver needs a live selector probe:
 
 | Item | State | Effect until done |
 | --- | --- | --- |
 | eBay developer keyset | **PENDING** (`docs/poke/ebay-keyset-setup.md`) | `ebay_browse` adapter and the eBay comp source report `NEEDS_API_KEY` and yield nothing. Do **not** treat eBay lanes as active. |
 | 6 unseeded `ppt_id`s | **PENDING** (~36 PPT credits, after daily reset) | Those 6 catalog items have no TCGplayer id; comp coverage is thinner for them. Not required for the discovery lane. |
 | `comps.engine` cutover to `inhouse` | **NOT DONE — do not do it** (see §10) | Legacy comp path stays active. This is correct. |
+| Slickdeals merchant-page resolver (Slice 6B) | **BUILT, network-mocked; selectors PROBE-PENDING** (see §5.1) | Slickdeals candidates now resolve thread → merchant page → live verify. The extraction selectors are modeled on documented Slickdeals markup but **not confirmed against a live thread**. Resolver degrades (never guesses), so a stale selector under-alerts, not mis-alerts. Confirm with a one-thread live probe (§11) before trusting the lane. |
 | Live network smoke | **operator-gated** (see §11) | Tests are network-mocked; a live run happens only with explicit go-ahead. |
 
 A prior one-off `--sources slickdeals` live GET was run in a Slice-5 session
-(3 real candidates, all honestly `unverifiable`, zero credits). From here
-forward, **any** live network run requires explicit operator go-ahead (§11).
+(3 real candidates, all honestly `unverifiable` — no resolver existed yet, zero
+credits). Slice 6B now wires that resolver, so a *new* live `--sources
+slickdeals` pass would actually fetch each thread's merchant page and verify
+stock+price. From here forward, **any** live network run requires explicit
+operator go-ahead (§11).
 
 ---
 
@@ -125,7 +130,7 @@ Each candidate ends in exactly one bucket:
 | `suppressed_dupe` | Would alert, but same listing already alerted (within cooldown, no ≥5% price drop, no status flip). | no |
 | `out_of_stock` | Verifier saw an affirmative out-of-stock. | no |
 | `price_mismatch` | Live price differs from the advertised price by >5%. | no |
-| `unverifiable` | Could not confirm buyability (no wired resolver, page unparseable, blocked, page unavailable, parser-suspect, or a lying "verified" object caught by the alert gate). | no |
+| `unverifiable` | Could not confirm buyability: eBay/catalog lane has no same-listing check wired yet, **or** a Slickdeals thread could not be resolved to a safe merchant page (drift, blocked, dead redirect, unsafe/internal link — §5.1), **or** the merchant page was unparseable / blocked / unavailable / parser-suspect, **or** a lying "verified" object was caught by the alert gate. | no |
 | `no_comp` | No usable comp from any source, or a comp with no attribution URL. | no |
 | `below_min_discount` | Comped, but `pct_off < poke.min_discount_pct`. | no |
 | `below_confidence` | A Ring-3 (wildcard) candidate whose comp confidence < `discovery.min_alert_confidence`. | no |
@@ -172,6 +177,63 @@ When you see it: the upstream HTML/JSON changed. Re-capture the fixture, update
 the selectors in the relevant parser, and confirm the drift canary in
 `tests/test_parser_drift.py` still fires on a gutted fixture. Never "fix" it by
 loosening the parser into guessing — a wrong number is worse than none.
+
+### 5.2 Slickdeals merchant-page resolver (Slice 6B)
+
+A Slickdeals candidate's `url` is a **discussion thread** (`slickdeals.net/f/…`),
+not a buy page. Before it can be verified, the resolver
+(`scanner/discovery/resolve.py`) turns that thread into a real merchant/buy URL,
+which is then fed into the same page verifier every other lane uses
+(`verify.verify_page`). Wiring: `pipeline.default_verifier` routes any
+`source == "slickdeals"` candidate through `verify.verify_slickdeals_candidate`.
+
+How it resolves (one polite GET of the thread, then at most 5 redirect hops):
+
+1. **`u2=` outbound param** on the "See Deal" link → URL-decode the merchant URL.
+2. **Direct merchant href** on the CTA (an absolute off-slickdeals link).
+3. **Redirect endpoint** (a slickdeals `/rd/…` link) → follow the HTTP redirect
+   chain (hop-capped, each hop scheme-checked) to the merchant landing URL.
+
+Every resolved URL is then **scheme-allowlisted** (`http`/`https` only) and
+rejected if it is empty, an unsafe scheme (`javascript:`/`data:`/…), hostless,
+or still on a slickdeals host (an unresolved internal / tracking-only shell).
+Nothing is guessed: a thread with no recognizable outbound structure resolves to
+`PARSER_SUSPECT` (drift), a 403/429 to `SOURCE_BLOCKED` (no evasion), a dead
+redirect to `unverifiable`. The **Slickdeals ad price is discovery evidence
+only** — it is passed to the verifier as the *expected* price (a drift check);
+the alertable `verified_price` always comes from reading the merchant page.
+
+**Expect `price_mismatch` to be common on this lane.** Slickdeals deal prices are
+frequently coupon/promo-gated or stale, so the live merchant list price often
+differs from the advertised figure by >5% → `price_mismatch`, no alert. That is
+the honest outcome, not a bug; the lane will alert only when the merchant page
+independently confirms both positive stock *and* a matching live price.
+
+> **Selectors are operator-probe-pending.** The extraction rules are modeled on
+> documented Slickdeals markup and unit-tested against **synthetic/representative**
+> fixtures (headers in `tests/fixtures/discovery/slickdeals_thread_*.html`), **not**
+> confirmed against a live thread page (that GET is operator-gated, §11). Because
+> the resolver degrades rather than guesses, an out-of-date selector makes the
+> lane *under*-alert (safe), never mis-alert. Do the one-thread live probe in §11
+> before relying on Slickdeals-sourced alerts, and update the selectors +
+> re-capture the fixture if the markup differs.
+>
+> **The one non-under-alert risk — wrong anchor.** The resolver takes the *first*
+> "See Deal"-marked anchor that resolves to a safe merchant URL. On a real thread
+> with a related-deals sidebar or several deal buttons, that first anchor could be
+> a *neighboring* deal, so the pipeline would verify (and possibly alert on) the
+> wrong merchant URL against this candidate's title/price. The live probe must
+> therefore confirm the resolved URL is the thread's **primary** CTA, not a
+> sidebar/footer link. If real threads carry multiple deal anchors, tighten
+> `_see_deal_hrefs`/the orchestrator to the primary CTA before trusting the lane.
+>
+> **Big-box merchant pages may not parse.** `verify_page` reads schema.org markup
+> from a plain `requests` GET. Target/Walmart/Best Buy and similar frequently serve
+> a JS shell or an anti-bot page to plain requests, so even with correct selectors
+> the live merchant check often lands in `parser_suspect`/`blocked`/`price_mismatch`.
+> That is the honest, safe (under-alert) outcome — the lane is simply **low-yield**
+> until a merchant serves parseable markup, and is never a reason to loosen the
+> parser into guessing.
 
 ---
 
@@ -336,10 +398,23 @@ confirm all of:
       and set `POKEMON_SCANNER_STATE_DB` to a throwaway db so dedupe history is
       isolated too.
 
+**This first Slickdeals pass doubles as the resolver selector probe (§5.2).**
+After the run, open the manifest and read `outcomes[]`: if Slickdeals candidates
+carry a `slickdeals_resolve:{u2_param|direct_href|redirect_chain}+page_fetch`
+method (i.e. they reached a real merchant page), the selectors match live markup.
+If **every** Slickdeals candidate is `unverifiable` with a `drift` reason ("no
+See-Deal outbound link…"), the thread markup differs from the representative
+fixtures — capture one real thread's HTML, update the selectors in
+`scanner/discovery/resolve.py`, refresh the fixture, and re-run the suite before
+trusting the lane. This is expected, not alarming: the resolver under-alerts
+rather than mis-alerts by design.
+
 **Success = the pipeline told the truth:** the manifest shows ≥1 candidate
 reaching `alerted` (with buy link + verified price + evidence) **or** every
-candidate honestly classified (`unverifiable`/`out_of_stock`/`no_comp`/…) with a
-reason string, and the counts reconcile. No silent drops.
+candidate honestly classified (`unverifiable`/`out_of_stock`/`price_mismatch`/
+`no_comp`/…) with a reason string, and the counts reconcile. No silent drops.
+(A first Slickdeals pass landing entirely in `unverifiable`/`price_mismatch` is a
+truthful outcome — see §5.2 on why `price_mismatch` is common there.)
 
 Suggested first smoke (after go-ahead), in PowerShell:
 
