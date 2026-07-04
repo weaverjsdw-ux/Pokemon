@@ -17,12 +17,13 @@ tests never touch the network. Doctrine, all load-bearing:
 * **No silent drops.** Every candidate lands in exactly one terminal bucket and
   the manifest counts reconcile with the candidate total.
 
-Slice-4 scope (advisor-reviewed): the default verifier honestly degrades every
-current live source to ``unverifiable`` (a slickdeals URL is a deal-thread, not
-a merchant page; eBay item lookup needs the pending keyset; catalog-retailer
-verification would check a *different* listing than the one discovered). The
-VERIFIED_BUYABLE -> alert path is proven by tests with injected verifiers and
-lands live behind the Slice-6 merchant resolver.
+Verifier scope: the default verifier resolves a **slickdeals** thread to its
+real merchant page and verifies stock+price there (Slice 6B,
+``verify.verify_slickdeals_candidate``); every other current live source still
+honestly degrades to ``unverifiable`` (eBay item lookup needs the pending
+keyset; catalog-retailer verification would check a *different* listing than the
+one discovered). The VERIFIED_BUYABLE -> alert path is proven by tests with
+injected verifiers and, for slickdeals, end-to-end from a resolved thread.
 """
 from __future__ import annotations
 
@@ -88,16 +89,25 @@ def _in_quiet_hours(now_dt: datetime, quiet_hours: str) -> bool:
 
 # ------------------------------------------------------------ default stages
 
-def default_verifier(cfg: Any) -> Verifier:
-    """Route by candidate origin. No current live source has a same-listing
-    buyability check wired, so every candidate honestly degrades to
-    unverifiable (network-free) until the Slice-6 merchant-page resolver /
-    eBay item lookup land."""
+def default_verifier(cfg: Any, http_get: Callable | None = None) -> Verifier:
+    """Route by candidate origin. Slickdeals candidates are resolved to a real
+    merchant page and verified there (Slice 6B, ``verify.verify_slickdeals_candidate``
+    -> ``verify_page``); every other current live source still honestly degrades
+    to unverifiable (network-free) until its same-listing check (eBay item lookup,
+    catalog-retailer matching) lands in a later slice.
+
+    ``http_get`` is threaded into the fetching verifier so a caller that injects
+    a network stub into ``run_once`` gets a hermetic verify stage too (the
+    ``run_once`` "pure of network beyond injected stages" contract). Left None on
+    a real ``--once`` run, it defaults to ``retailers/http.py``; ``--dry-run``
+    swaps this out entirely for ``_dry_run_verifier``."""
 
     def verify(candidate: CandidateDeal) -> StockVerification:
+        if candidate.source == "slickdeals":
+            return verify_mod.verify_slickdeals_candidate(candidate, http_get=http_get)
         reason = (f"no same-listing buyability check wired for source "
-                  f"{candidate.source!r}; a merchant-page resolver / eBay item "
-                  f"lookup land in a later slice")
+                  f"{candidate.source!r}; an eBay item lookup / catalog-retailer "
+                  f"match land in a later slice")
         return StockVerification(
             state=verify_mod.UNKNOWN_NO_ALERT, stock_status="unverifiable",
             verified_price=None, expected_price=candidate.price, price_matches=None,
@@ -105,6 +115,18 @@ def default_verifier(cfg: Any) -> Verifier:
             method="none", evidence="", degraded_reason=reason)
 
     return verify
+
+
+def _dry_run_verifier(candidate: CandidateDeal) -> StockVerification:
+    """The verify stage in --dry-run: network-free by construction (no thread
+    fetch, no merchant-page GET), so the zero-network guarantee never depends on
+    a candidate's source. Every candidate honestly degrades to unverifiable."""
+    return StockVerification(
+        state=verify_mod.UNKNOWN_NO_ALERT, stock_status="unverifiable",
+        verified_price=None, expected_price=candidate.price, price_matches=None,
+        buy_url="", checked_at=verify_mod._now_iso(), source=candidate.source,
+        method="none", evidence="",
+        degraded_reason="dry-run: purchasability verification skipped (no network)")
 
 
 def default_comp_lookup(cfg: Any) -> CompLookup:
@@ -340,7 +362,12 @@ def run_once(
     else:
         source_instances = list(sources)
 
-    verifier = verifier or default_verifier(cfg)
+    if verifier is None:
+        # dry-run uses a network-free verifier so zero-network is structural, not
+        # incidental on the live resolver happening not to fetch. A live run
+        # threads any injected http_get into the verifier so an instrumented
+        # caller stays hermetic (not just the DISCOVER stage).
+        verifier = _dry_run_verifier if dry_run else default_verifier(cfg, http_get=http_get)
     if comp_lookup is None:
         # the default comp path touches the network; in --dry-run it is replaced
         # with a network-free stub so zero-network is structural, not incidental.

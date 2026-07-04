@@ -13,6 +13,7 @@ extends here verbatim.
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from ..main import _price_to_float
 from ..retailers import ALL as RETAILER_REGISTRY
 from ..retailers import http as retailer_http
 from ..retailers.base import StockResult
+from . import resolve as resolve_mod
 from .schema import POSITIVE_STOCK, STOCK_STATUSES
 
 # Terminal verification states. UNKNOWN_NO_ALERT is the catch-all: whatever
@@ -341,9 +343,12 @@ _NOT_BUYABLE_NOW = {"PreSale", "PreOrder", "BackOrder"}
 # grab can pair the target's stock with an unrelated product's price (the
 # Walmart adapter uses the same proximity idea).
 _PRICE_WINDOW_CHARS = 1500
-# "1,299.99" is a US thousands group; "39,99" is a locale decimal we refuse to
-# guess at (stripping the comma would fabricate a 100x price).
-_US_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?")
+# Accept a plain integer/decimal ("1299.99", "999.99") OR a US thousands group
+# ("1,299.99", "1,234,567.89"); refuse a locale decimal ("39,99" — stripping the
+# comma would fabricate a 100x price) and any other comma placement. schema.org
+# mandates the plain form, so the first alternative is the common one and MUST
+# accept prices >= $1000 (the old `\d{1,3}(?:,\d{3})*` rejected "1299.99").
+_US_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 
 
 def _page_price(text: str) -> float | None:
@@ -434,4 +439,51 @@ def verify_page(
         expected_price=expected_price, price_matches=matches, buy_url=url,
         checked_at=checked_at, source=source, method="page_fetch",
         evidence=evidence, degraded_reason=reason,
+    )
+
+
+# ------------------------------------------------ slickdeals resolve -> verify
+
+# Resolver-local failure vocabulary -> verification terminal states. A thread
+# that could not be fetched or parsed lands in the honest failure state; a
+# resolved-but-unsafe/internal link is UNKNOWN_NO_ALERT (unactionable, not drift).
+_RESOLVE_STATE = {
+    "blocked": SOURCE_BLOCKED,
+    "unavailable": PAGE_UNAVAILABLE,
+    "drift": PARSER_SUSPECT,
+    "unresolved": UNKNOWN_NO_ALERT,
+}
+
+
+def verify_slickdeals_candidate(
+    candidate: Any,
+    *,
+    http_get: Callable[..., Any] | None = None,
+    checked_at: str = "",
+) -> StockVerification:
+    """Resolve a Slickdeals thread candidate to its merchant URL, then verify
+    that page. The Slickdeals ad price is discovery evidence only — it is passed
+    as the *expected* price (a drift check); ``verified_price`` always comes from
+    the merchant page. A candidate that cannot be resolved to a safe merchant URL
+    never reaches ``verify_page`` and never carries a buy link.
+    """
+    checked_at = checked_at or _now_iso()
+    res = resolve_mod.resolve_slickdeals_merchant(
+        candidate.url, http_get=http_get, checked_at=checked_at)
+    if not res.ok:
+        return _unverified(
+            _RESOLVE_STATE.get(res.failure_kind, UNKNOWN_NO_ALERT),
+            source="slickdeals",
+            method=f"slickdeals_resolve:{res.failure_kind or 'none'}",
+            reason=res.degraded_reason, expected_price=candidate.price,
+            checked_at=checked_at, evidence=res.evidence or res.degraded_reason)
+    # Feed the RESOLVED merchant URL into the existing page verifier unchanged.
+    v = verify_page(res.resolved_url, expected_price=candidate.price,
+                    checked_at=checked_at, http_get=http_get)
+    # Preserve the full audit trail: original thread URL + resolved merchant URL
+    # + resolution method, alongside the page verifier's own evidence.
+    return dataclasses.replace(
+        v,
+        method=f"slickdeals_resolve:{res.method}+{v.method}",
+        evidence=_clip(f"resolved {candidate.url} -> {res.resolved_url}; {v.evidence}"),
     )
