@@ -1,0 +1,24 @@
+<!--
+  SYNTHETIC / REPRESENTATIVE fixture — NOT a live capture.
+  Models the documented Slickdeals thread "See Deal" outbound pattern where the
+  merchant destination is carried in a url-encoded `u2=` query param on the
+  outbound click link. Selectors here are operator-probe-pending: confirm
+  against one real thread page (operator-gated live GET) before trusting the
+  slickdeals->verify lane. The resolver degrades (never guesses) when markup
+  drifts, so an out-of-date selector under-alerts rather than mis-alerting.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Pokémon TCG Mega Evolution Ascended Heroes Box $49.99 - Slickdeals</title></head>
+<body>
+  <div class="threadHeader"><h1>Pokémon TCG Mega Evolution Ascended Heroes Mega EX Box $49.99</h1></div>
+  <div class="dealDetails">
+    <a class="dealButton" data-role="seeDealButton"
+       href="https://slickdeals.net/?sdtid=19710354&amp;sdsc=&amp;u2=https%3A%2F%2Fwww.walmart.com%2Fip%2FPokemon-TCG-Mega-Evolution-Ascended-Heroes-Mega-EX-Box%2F123456789&amp;pv=1">See Deal</a>
+  </div>
+  <div class="threadComments">
+    <a href="/f/19710354-pokemon-tcg-mega-evolution#commentsHeader">Jump to comments</a>
+    <a href="https://slickdeals.net/newsearch.php?q=pokemon">More Pokémon deals</a>
+  </div>
+</body>
+</html>

@@ -571,3 +571,173 @@ def test_comp_lookup_exception_becomes_no_comp(tmp_path):
                        comp_lookup=boom)
     assert m["counts"]["no_comp"] == 1
     assert notifier.calls == []
+
+
+# --- Slice 6B: default verifier routes slickdeals through the resolver --------
+
+from types import SimpleNamespace  # noqa: E402
+
+from scanner.discovery import verify as _verify_real  # noqa: E402
+
+SD_THREAD = "https://slickdeals.net/f/19710354-mega"
+SD_MERCHANT = "https://www.walmart.com/ip/pokemon-mega-ex-box/123456789"
+
+
+def _sd_thread_html():
+    enc = "https%3A%2F%2Fwww.walmart.com%2Fip%2Fpokemon-mega-ex-box%2F123456789"
+    return (f'<a class="dealButton" data-role="seeDealButton" '
+            f'href="https://slickdeals.net/?u2={enc}&amp;pv=1">See Deal</a>')
+
+
+def _sd_merchant_html(price="49.99"):
+    return ('<html><body><script type="application/ld+json">'
+            f'{{"offers":{{"price":"{price}",'
+            f'"availability":"https://schema.org/InStock"}}}}</script></body></html>')
+
+
+def _sd_get():
+    def _get(url, **kwargs):
+        if url == SD_THREAD:
+            return SimpleNamespace(status_code=200, text=_sd_thread_html(), headers={}, url=url)
+        if url == SD_MERCHANT:
+            return SimpleNamespace(status_code=200, text=_sd_merchant_html(), headers={}, url=url)
+        raise AssertionError(f"unexpected GET {url}")
+    return _get
+
+
+def _sd_candidate(listing_id="19710354", *, ring1=True, price=49.99):
+    return CandidateDeal(
+        source="slickdeals", listing_id=listing_id, item_name="Fake ETB sealed",
+        price=price, shipping=None, url=SD_THREAD, retailer="Walmart", seen_at=CHECKED,
+        evidence_excerpt="Fake ETB | $49.99",
+        matched_product_key="fake_etb" if ring1 else None,
+        matched_set="FakeSet" if ring1 else "")
+
+
+def test_default_verifier_routes_slickdeals_to_resolver(monkeypatch):
+    seen = {}
+
+    def fake_sd(candidate, **kwargs):
+        seen["c"] = candidate
+        return _verification(verify_mod.VERIFIED_BUYABLE)
+
+    monkeypatch.setattr(pipeline.verify_mod, "verify_slickdeals_candidate", fake_sd)
+    verifier = pipeline.default_verifier(_cfg())
+    sd = _candidate(source="slickdeals")
+    v = verifier(sd)
+    assert seen["c"] is sd                       # slickdeals candidate went to the resolver
+    assert v.state == verify_mod.VERIFIED_BUYABLE
+
+
+def test_default_verifier_leaves_other_sources_unverifiable(monkeypatch):
+    def fake_sd(candidate, **kwargs):
+        raise AssertionError("resolver called for a non-slickdeals source")
+
+    monkeypatch.setattr(pipeline.verify_mod, "verify_slickdeals_candidate", fake_sd)
+    verifier = pipeline.default_verifier(_cfg())
+    v = verifier(_candidate("e1", source="ebay_browse"))
+    assert v.state == verify_mod.UNKNOWN_NO_ALERT
+    assert v.stock_status == "unverifiable"
+
+
+def test_dry_run_default_verifier_slickdeals_is_zero_network(tmp_path, monkeypatch):
+    """The REAL default verifier must touch NO network in --dry-run even with a
+    slickdeals candidate present (structural, not incidental on zero candidates)."""
+    calls = _network_spy(monkeypatch)
+    st = State(db_path=tmp_path / "s.db")
+    m = pipeline.run_once(
+        _cfg(), sources=[FakeSource("slickdeals", [_sd_candidate()])],
+        verifier=None, comp_lookup=None, state=st, catalog=dict(CATALOG),
+        now_ts=1000, now_dt=NOON, dry_run=True)
+    assert calls == []                           # resolver did not fetch
+    assert m["counts"]["unverifiable"] == 1
+
+
+def test_slickdeals_resolved_candidate_alerts_end_to_end(tmp_path):
+    """A slickdeals thread candidate, resolved to a verified in-stock merchant
+    page, alerts through the pipeline with the RESOLVED merchant URL as buy_url —
+    and only because the fresh StockVerification passed assert_alertable."""
+    st = State(db_path=tmp_path / "s.db")
+    sd_get = _sd_get()
+
+    def verifier(c):
+        return _verify_real.verify_slickdeals_candidate(c, http_get=sd_get, checked_at=CHECKED)
+
+    m, notifier = _run(cfg=_cfg(), state=st, sources=[FakeSource("s", [_sd_candidate()])],
+                       verifier=verifier, comp_lookup=lambda c, p: _comp_row())
+    assert len(notifier.calls) == 1
+    deal, _push = notifier.calls[0]
+    assert deal.buy_url == SD_MERCHANT           # the merchant URL, not the thread
+    assert deal.verified_price == 49.99
+    assert m["counts"]["alerted"] == 1
+
+
+def test_slickdeals_unresolvable_candidate_does_not_alert(tmp_path):
+    """A slickdeals thread with no See-Deal outbound structure (drift) never
+    alerts — it lands unverifiable with an honest reason."""
+    st = State(db_path=tmp_path / "s.db")
+
+    def drift_get(url, **kwargs):
+        return SimpleNamespace(status_code=200, text="<html>discussion only</html>",
+                               headers={}, url=url)
+
+    def verifier(c):
+        return _verify_real.verify_slickdeals_candidate(c, http_get=drift_get, checked_at=CHECKED)
+
+    m, notifier = _run(cfg=_cfg(), state=st, sources=[FakeSource("s", [_sd_candidate()])],
+                       verifier=verifier, comp_lookup=lambda c, p: _comp_row())
+    assert notifier.calls == []
+    assert m["counts"]["unverifiable"] == 1
+
+
+def test_default_verifier_threads_injected_http_get(tmp_path, monkeypatch):
+    """A non-dry-run run_once given an http_get stub must NOT reach real network
+    through the default verifier's slickdeals branch — the injected stage
+    contract covers the verifier, not just DISCOVER."""
+    calls = _network_spy(monkeypatch)
+    st = State(db_path=tmp_path / "s.db")
+
+    def stub_get(url, **kwargs):
+        return SimpleNamespace(status_code=200, text="<html>no cta</html>",
+                               headers={}, url=url)
+
+    m = pipeline.run_once(
+        _cfg(), sources=[FakeSource("slickdeals", [_sd_candidate()])],
+        verifier=None, state=st, catalog=dict(CATALOG),
+        now_ts=1000, now_dt=NOON, http_get=stub_get)
+    assert calls == []                           # default verifier used the stub
+    assert m["counts"]["unverifiable"] == 1      # thread had no CTA -> drift
+
+
+def test_slickdeals_mixed_batch_manifest_reconciles(tmp_path):
+    """A batch of slickdeals candidates with different resolution outcomes routed
+    through the REAL resolver: one alerts, one is drift (unverifiable), one is a
+    dead redirect (unverifiable). Counts must reconcile with no silent drops."""
+    st = State(db_path=tmp_path / "s.db")
+    good = _sd_candidate("19710354")
+    drift = _sd_candidate("19710357")
+    dead = _sd_candidate("19710358")
+
+    # all three share SD_THREAD as their thread URL; disambiguate by listing_id
+    def per_candidate_get(listing_id):
+        if listing_id == "19710354":
+            return _sd_get()
+        if listing_id == "19710357":
+            return lambda url, **k: SimpleNamespace(status_code=200,
+                                                    text="<html>no cta</html>", headers={}, url=url)
+        return lambda url, **k: SimpleNamespace(status_code=404, text="", headers={}, url=url)
+
+    def verifier(c):
+        return _verify_real.verify_slickdeals_candidate(
+            c, http_get=per_candidate_get(c.listing_id), checked_at=CHECKED)
+
+    m, notifier = _run(cfg=_cfg(), state=st,
+                       sources=[FakeSource("s", [good, drift, dead])],
+                       verifier=verifier, comp_lookup=lambda c, p: _comp_row())
+    counts = m["counts"]
+    assert m["candidates"] == 3
+    assert sum(counts.values()) == 3                 # no silent drops
+    assert counts["alerted"] == 1
+    assert counts["unverifiable"] == 2               # drift + dead redirect
+    assert len(notifier.calls) == 1
+    assert notifier.calls[0][0].buy_url == SD_MERCHANT

@@ -491,6 +491,28 @@ def test_page_price_outside_window_is_not_paired_with_stock():
     assert v.verified_price is None
 
 
+def test_page_high_ticket_price_without_thousands_separator_parses():
+    # schema.org mandates NO thousands separator, so "1299.99" is the compliant
+    # form. A sealed booster case (>$1000) in stock must verify, not silently drop
+    # to UNKNOWN because the number was >= $1000.
+    text = ('<html><body><script type="application/ld+json">'
+            '{"offers":{"price":"1299.99",'
+            '"availability":"https://schema.org/InStock"}}</script></body></html>')
+    v = _page_from_text(text, expected=1299.99)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.verified_price == 1299.99
+
+
+def test_page_grouped_thousands_price_still_parses():
+    # the (non-compliant but common) grouped form must keep working too
+    text = ('<html><body><script type="application/ld+json">'
+            '{"offers":{"price":"1,299.99",'
+            '"availability":"https://schema.org/InStock"}}</script></body></html>')
+    v = _page_from_text(text, expected=1299.99)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.verified_price == 1299.99
+
+
 def test_page_locale_decimal_price_is_refused_not_fabricated():
     text = ('<html><body><script type="application/ld+json">'
             '{"offers":{"price":"39,99",'
@@ -517,3 +539,137 @@ def test_page_escaped_slash_jsonld_parses():
     v = _page_from_text(text)
     assert v.state == verify.VERIFIED_BUYABLE
     assert v.verified_price == 39.99
+
+
+# ------------------------------ slickdeals candidate resolve+verify (Slice 6B)
+
+from scanner.discovery.candidates import CandidateDeal  # noqa: E402
+
+DISC_FIXTURES = Path("tests/fixtures/discovery")
+SD_THREAD = "https://slickdeals.net/f/19710354-pokemon-tcg-mega-evolution"
+SD_MERCHANT = ("https://www.walmart.com/ip/"
+               "Pokemon-TCG-Mega-Evolution-Ascended-Heroes-Mega-EX-Box/123456789")
+SD_THREAD_HTML = (DISC_FIXTURES / "slickdeals_thread_u2.html").read_text(encoding="utf-8")
+
+
+def _sd_candidate(price=49.99, url=SD_THREAD):
+    return CandidateDeal(
+        source="slickdeals", listing_id="19710354", item_name="Mega Evolution Box",
+        price=price, shipping=None, url=url, retailer="Walmart", seen_at=CHECKED_AT,
+        evidence_excerpt="Mega Evolution Box | $49.99",
+        matched_product_key=None, matched_set="Mega Evolution")
+
+
+def _merchant_html(price="49.99", avail="InStock"):
+    return ('<html><body><script type="application/ld+json">'
+            f'{{"offers":{{"price":"{price}",'
+            f'"availability":"https://schema.org/{avail}"}}}}</script></body></html>')
+
+
+def _sd_get(thread_html=SD_THREAD_HTML, merchant_html=None):
+    body = merchant_html if merchant_html is not None else _merchant_html()
+
+    def _get(url, **kwargs):
+        if url == SD_THREAD:
+            return SimpleNamespace(status_code=200, text=thread_html, headers={}, url=url)
+        if url == SD_MERCHANT:
+            return SimpleNamespace(status_code=200, text=body, headers={}, url=url)
+        raise AssertionError(f"unexpected GET {url}")
+    return _get
+
+
+def test_slickdeals_candidate_resolves_and_verifies_buyable():
+    c = _sd_candidate(price=49.99)
+    v = verify.verify_slickdeals_candidate(c, http_get=_sd_get(), checked_at=CHECKED_AT)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.buy_url == SD_MERCHANT                 # resolved merchant URL, not the thread
+    assert v.verified_price == 49.99
+    assert SD_THREAD in v.evidence and SD_MERCHANT in v.evidence   # both URLs preserved
+    assert "slickdeals_resolve" in v.method and "page_fetch" in v.method
+    assert v.checked_at == CHECKED_AT
+    verify.assert_alertable(v)                       # a verified merchant page CAN alert
+
+
+def test_slickdeals_price_is_expectation_only_verified_price_from_page():
+    # slickdeals ad says $51 but the merchant page says $49.99 (within 5%): the
+    # VERIFIED price is the page's, never the slickdeals discovery price.
+    c = _sd_candidate(price=51.00)
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=_sd_get(merchant_html=_merchant_html("49.99")), checked_at=CHECKED_AT)
+    assert v.state == verify.VERIFIED_BUYABLE
+    assert v.verified_price == 49.99                # page price, never the $51 ad
+    assert v.expected_price == 51.00
+
+
+def test_slickdeals_merchant_price_mismatch_does_not_alert():
+    c = _sd_candidate(price=30.00)                  # stale/coupon-gated ad price
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=_sd_get(merchant_html=_merchant_html("49.99")), checked_at=CHECKED_AT)
+    assert v.state == verify.PRICE_MISMATCH
+    assert v.verified_price == 49.99
+    assert not verify.alert_allowed(v)
+
+
+def test_slickdeals_merchant_out_of_stock_does_not_alert():
+    c = _sd_candidate()
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=_sd_get(merchant_html=_merchant_html(avail="OutOfStock")),
+        checked_at=CHECKED_AT)
+    assert v.state == verify.OUT_OF_STOCK
+    assert not verify.alert_allowed(v)
+
+
+def test_slickdeals_resolution_drift_is_parser_suspect_no_alert():
+    nocta = (DISC_FIXTURES / "slickdeals_thread_nocta.html").read_text(encoding="utf-8")
+    c = _sd_candidate(url="https://slickdeals.net/f/19710357-discussion")
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=lambda url, **k: SimpleNamespace(status_code=200, text=nocta,
+                                                     headers={}, url=url),
+        checked_at=CHECKED_AT)
+    assert v.state == verify.PARSER_SUSPECT
+    assert v.stock_status == "unverifiable"
+    assert v.buy_url == "" and not verify.alert_allowed(v)
+
+
+def test_slickdeals_resolution_blocked_maps_to_source_blocked():
+    c = _sd_candidate()
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=lambda url, **k: SimpleNamespace(status_code=403, text="",
+                                                     headers={}, url=url),
+        checked_at=CHECKED_AT)
+    assert v.state == verify.SOURCE_BLOCKED and not verify.alert_allowed(v)
+
+
+def test_slickdeals_resolution_transport_failure_is_page_unavailable():
+    c = _sd_candidate()
+
+    def _boom(url, **k):
+        raise requests.ConnectTimeout("timed out")
+    v = verify.verify_slickdeals_candidate(c, http_get=_boom, checked_at=CHECKED_AT)
+    assert v.state == verify.PAGE_UNAVAILABLE and not verify.alert_allowed(v)
+
+
+def test_slickdeals_unsafe_u2_maps_to_unknown_no_alert():
+    html = ('<a class="dealButton" data-role="seeDealButton" '
+            'href="https://slickdeals.net/?u2=javascript%3Aalert(1)">See Deal</a>')
+    c = _sd_candidate()
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=lambda url, **k: SimpleNamespace(status_code=200, text=html,
+                                                     headers={}, url=url),
+        checked_at=CHECKED_AT)
+    assert v.state == verify.UNKNOWN_NO_ALERT and not verify.alert_allowed(v)
+
+
+def test_slickdeals_merchant_in_stock_without_price_does_not_alert():
+    # merchant page shows InStock but no parseable price (locale-decimal, refused)
+    # -> stock kept, alert refused. Resolving a real URL never manufactures a price.
+    merchant = ('<html><body><script type="application/ld+json">'
+                '{"offers":{"price":"49,99",'
+                '"availability":"https://schema.org/InStock"}}</script></body></html>')
+    c = _sd_candidate()
+    v = verify.verify_slickdeals_candidate(
+        c, http_get=_sd_get(merchant_html=merchant), checked_at=CHECKED_AT)
+    assert v.state == verify.UNKNOWN_NO_ALERT
+    assert v.stock_status == "in_stock"          # stock evidence preserved
+    assert v.verified_price is None              # never fabricated from "49,99"
+    assert not verify.alert_allowed(v)
