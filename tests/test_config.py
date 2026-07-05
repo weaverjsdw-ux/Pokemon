@@ -296,6 +296,57 @@ def test_poke_rejects_non_numeric_daily_credit_cap():
         })
 
 
+def test_opportunity_defaults_when_absent():
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.opportunity.live_min_expected_net == 25.0
+    assert cfg.opportunity.live_min_roi_pct == 30.0
+    assert cfg.opportunity.live_min_confidence == "medium"
+    assert cfg.opportunity.stale_after_days == 30
+    assert cfg.opportunity.max_hold_days == {}
+    assert cfg.opportunity.exit_venue == {}
+
+
+def test_opportunity_overrides_parse():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "opportunity": {
+            "live_min_expected_net": 40,
+            "live_min_roi_pct": 35,
+            "live_min_confidence": "HIGH",
+            "stale_after_days": 21,
+            "max_hold_days": {"sealed_retail_arbitrage": 45, "sealed_momentum_watch": 90},
+            "exit_venue": {"sealed_retail_arbitrage": "ebay"},
+        },
+    })
+    assert cfg.opportunity.live_min_expected_net == 40.0
+    assert cfg.opportunity.live_min_roi_pct == 35.0
+    assert cfg.opportunity.live_min_confidence == "high"
+    assert cfg.opportunity.stale_after_days == 21
+    assert cfg.opportunity.max_hold_days == {"sealed_retail_arbitrage": 45, "sealed_momentum_watch": 90}
+    assert cfg.opportunity.exit_venue == {"sealed_retail_arbitrage": "ebay"}
+
+
+def test_opportunity_rejects_bad_live_confidence():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({
+            "locations": {"home": "A", "work": "B"},
+            "opportunity": {"live_min_confidence": "certain"},
+        })
+
+
+def test_opportunity_must_be_mapping():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}, "opportunity": []})
+
+
+def test_opportunity_rejects_non_numeric_hold_days():
+    with pytest.raises(SystemExit):
+        cfg_mod.from_mapping({
+            "locations": {"home": "A", "work": "B"},
+            "opportunity": {"max_hold_days": {"sealed_retail_arbitrage": "soon"}},
+        })
+
+
 @pytest.fixture
 def base_raw():
     """Minimal valid raw config mapping for comps tests."""

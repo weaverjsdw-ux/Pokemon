@@ -71,6 +71,22 @@ class AlertsCfg:
     cooldown_hours: float = 24.0        # otherwise no repeat alert until this elapses
 
 
+@dataclass
+class OpportunityCfg:
+    """Money Hypothesis Lab (Phase C) business policy.
+
+    Fees, tax, shipping, and the PAPER buy floor are intentionally NOT here — they
+    are cited from deal_intelligence (correct units + the $0.40 fixed fee) so
+    opportunity net/ROI matches the alert path exactly. Only genuinely-new business
+    policy lives here; unset per-type values surface as TBD_OPERATOR_POLICY."""
+    live_min_expected_net: float = 25.0   # stricter than paper buy_floor_net (15) — TBD_OPERATOR_POLICY
+    live_min_roi_pct: float = 30.0        # stricter than paper buy_floor_roi (20) — TBD_OPERATOR_POLICY
+    live_min_confidence: str = "medium"   # TBD_OPERATOR_POLICY
+    stale_after_days: int = 30            # default mirrors poke.staleness_days
+    max_hold_days: dict[str, int] = field(default_factory=dict)  # empty => TBD per trade type
+    exit_venue: dict[str, str] = field(default_factory=dict)     # empty => TBD per trade type
+
+
 def parse_quiet_hours(value: str) -> tuple[int, int]:
     """('23:00-08:00') -> (1380, 480) minutes-of-day. Wrap (start > end) allowed.
 
@@ -130,6 +146,7 @@ class Config:
     comps: CompsCfg = field(default_factory=CompsCfg)
     discovery: DiscoveryCfg = field(default_factory=DiscoveryCfg)
     alerts: AlertsCfg = field(default_factory=AlertsCfg)
+    opportunity: OpportunityCfg = field(default_factory=OpportunityCfg)
 
 
 def load(path: Path | None = None) -> Config:
@@ -302,6 +319,40 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         cooldown_hours=_num(alerts_raw, "cooldown_hours", 24.0, "alerts.cooldown_hours"),
     )
 
+    opp_raw = raw.get("opportunity")
+    if opp_raw is None:
+        opp_raw = {}
+    if not isinstance(opp_raw, dict):
+        raise SystemExit("config.yaml: opportunity must be a mapping.")
+    live_conf = str(opp_raw.get("live_min_confidence", "medium")).strip().lower()
+    if live_conf not in VALID_CONFIDENCE:
+        raise SystemExit(
+            "config.yaml: opportunity.live_min_confidence must be one of "
+            + ", ".join(sorted(VALID_CONFIDENCE)))
+    hold_raw = opp_raw.get("max_hold_days") or {}
+    venue_raw = opp_raw.get("exit_venue") or {}
+    if not isinstance(hold_raw, dict) or not isinstance(venue_raw, dict):
+        raise SystemExit(
+            "config.yaml: opportunity.max_hold_days and opportunity.exit_venue must be mappings.")
+    try:
+        max_hold_days = {str(k): int(v) for k, v in hold_raw.items()}
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: opportunity.max_hold_days values must be integers.")
+    exit_venue = {str(k): str(v) for k, v in venue_raw.items()}
+    try:
+        opportunity_cfg = OpportunityCfg(
+            live_min_expected_net=_num(opp_raw, "live_min_expected_net", 25.0,
+                                       "opportunity.live_min_expected_net"),
+            live_min_roi_pct=_num(opp_raw, "live_min_roi_pct", 30.0,
+                                  "opportunity.live_min_roi_pct"),
+            live_min_confidence=live_conf,
+            stale_after_days=int(opp_raw.get("stale_after_days", 30)),
+            max_hold_days=max_hold_days,
+            exit_venue=exit_venue,
+        )
+    except (TypeError, ValueError):
+        raise SystemExit("config.yaml: opportunity.stale_after_days must be an integer.")
+
     return Config(
         home_address=home,
         work_address=work,
@@ -346,6 +397,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         comps=comps_cfg,
         discovery=discovery_cfg,
         alerts=alerts_cfg,
+        opportunity=opportunity_cfg,
     )
 
 

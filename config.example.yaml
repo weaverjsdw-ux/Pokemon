@@ -66,6 +66,24 @@ deal_intelligence:
     buy_floor_roi: 20
     min_buy_confidence: medium   # comps weaker than this never show BUY
 
+# --- Money Hypothesis Lab (Phase C) business policy ---
+# NOTE: fees, tax, shipping, and the PAPER buy floor are NOT re-declared here — they
+# are cited from deal_intelligence above (correct units + the $0.40 fixed fee) so an
+# opportunity's expected net/ROI matches exactly what the alert path shows. Only
+# genuinely-new business policy lives here. Unset per-type values below surface as
+# TBD_OPERATOR_POLICY and are never invented.
+opportunity:
+  live_min_expected_net: 25.00   # TBD_OPERATOR_POLICY — stricter than the paper $15 floor
+  live_min_roi_pct: 30.0         # TBD_OPERATOR_POLICY — stricter than the paper 20% floor
+  live_min_confidence: medium    # TBD_OPERATOR_POLICY — confidence floor to mark LIVE_PACKET_ELIGIBLE
+  stale_after_days: 30           # mirrors poke.staleness_days
+  max_hold_days:                 # expected hold per trade type (unset types => TBD_OPERATOR_POLICY)
+    sealed_retail_arbitrage: 45
+    sealed_momentum_watch: 90
+  exit_venue:                    # assumed resale venue per trade type (unset => TBD_OPERATOR_POLICY)
+    sealed_retail_arbitrage: ebay
+    sealed_momentum_watch: ebay
+
 # Optional PokemonPriceTracker market source. Optional-preferred, never required:
 # scanning runs fully without it. Free tier ~100 credits/day < full-catalog need,
 # so keep preferred:false + 24h TTL on free tier, or pay Standard for 4h cadence.
