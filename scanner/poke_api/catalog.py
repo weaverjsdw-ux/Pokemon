@@ -35,7 +35,7 @@ class AssetCatalogError(Exception):
 
 def normalize_grade_key(grader, grade) -> str:
     """('PSA','10') -> 'psa10'; ('CGC','9.5') -> 'cgc9.5'. Lowercased, spaces
-    stripped, ``{grader}{grade}`` concatenated — the 1:1 PPT ``salesByGrade`` key."""
+    stripped, ``{grader}{grade}`` concatenated — the 1:1 external ``salesByGrade`` key."""
     return f"{str(grader).strip()}{str(grade).strip()}".lower().replace(" ", "")
 
 

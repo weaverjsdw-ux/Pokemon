@@ -3,8 +3,8 @@
 Builds deterministic opportunities from the read-first comp + ledger momentum +
 optional verified deal candidates the private API already produces, and drives
 the paper-trade ledger (record a decision, mark an outcome later, replay what
-the signals did). Read path is network-free and PPT-free; writes go to the
-append-only ``paper_decisions.jsonl``.
+the signals did). Read path is network-free and spends 0 external credits; writes
+go to the append-only ``paper_decisions.jsonl``.
 
 ``resolve_comp_row``/``_ledger_comp_row`` live here (not in ``router``) so both
 the API endpoints and this orchestrator share one read-first comp resolution;
@@ -60,7 +60,7 @@ def resolve_comp_row(comp_provider, observations, key, product):
 def resolve_asset_comp_row(observations, asset_key, asset):
     """Read-first asset comp resolution: the latest ledger market_comp for the
     asset's identity (offline), else None. There is no in-house comp cache/engine
-    for raw/graded (those are keyed to the sealed ppt_id), so this is ledger-only;
+    for raw/graded (those key off the TCGplayer id), so this is ledger-only;
     a live source is reached only via the ``sources`` resolvers on ``refresh=true``.
     Never constructs a network source."""
     ikey = history_mod.item_key_for_asset(asset)

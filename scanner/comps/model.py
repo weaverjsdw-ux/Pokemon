@@ -75,8 +75,15 @@ def resolve(
     *,
     tolerance_pct: float = 20.0,
     floor_sanity_pct: float = 50.0,
+    allow_ask_only: bool = True,
 ) -> NormalizedComp:
-    """Spec 4.3 precedence table. UNKNOWN means comp None - never invent a number."""
+    """Spec 4.3 precedence table. UNKNOWN means comp None - never invent a number.
+
+    ``allow_ask_only`` (default ``True``, preserving the sealed/discovery contract):
+    when ``False`` an ask-only source set (no sold-derived quote) can NEVER become the
+    comp — it degrades to no-comp with the ask retained in ``sources`` as context. The
+    raw asset path (``poke_api.sources.resolve_raw_comp``) passes ``False`` so a raw
+    single is never priced off active asks alone (D.5 policy)."""
     sources = tuple(q for q in (tcg, pc, ebay.quote if ebay else None) if q is not None)
     floor = ebay.floor if ebay else None
     count = ebay.count if ebay else None
@@ -124,8 +131,11 @@ def resolve(
                      "single sold-derived source, no corroboration")
 
     if e_ok and (count or 0) >= ASK_MIN_SAMPLE:
-        return build(ebay.quote.price, f"ebay active_ask median (n={count})", "low",
-                     "ask-basis only: median of active fixed-price listings, not sold comps")
+        if allow_ask_only:
+            return build(ebay.quote.price, f"ebay active_ask median (n={count})", "low",
+                         "ask-basis only: median of active fixed-price listings, not sold comps")
+        return build(None, "none", "unknown",
+                     "ask-only: active listings are context, not a comp (no sold-derived source)")
 
     return build(None, "none", "unknown", "no usable source; no comp invented")
 

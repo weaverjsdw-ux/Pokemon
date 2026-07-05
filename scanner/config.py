@@ -391,7 +391,10 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         buy_floor_roi=_num(verdict_raw, "buy_floor_roi", 20.0, "deal_intelligence.verdict.buy_floor_roi"),
         min_buy_confidence=min_conf,
         market_preferred=bool(market_raw.get("preferred", False)),
-        market_api_key=str(market_raw.get("api_key", "") or os.getenv("PPT_API_KEY", "")),
+        market_api_key=str(market_raw.get("api_key", "")
+                            # provider-neutral env preferred; PPT_API_KEY kept as legacy compat
+                            or os.getenv("CARD_PRICE_API_KEY")
+                            or os.getenv("PPT_API_KEY", "")),
         market_cache_ttl_seconds=market_cache_ttl,
         poke=poke_cfg,
         comps=comps_cfg,

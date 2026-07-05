@@ -230,6 +230,29 @@ def test_deal_intelligence_overrides_parse():
     assert cfg.market_cache_ttl_seconds == 3600
 
 
+def test_market_api_key_from_neutral_env(monkeypatch):
+    """Provider-neutral env var configures the external card key (D.5)."""
+    monkeypatch.delenv("PPT_API_KEY", raising=False)
+    monkeypatch.setenv("CARD_PRICE_API_KEY", "neutral-key")
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.market_api_key == "neutral-key"
+
+
+def test_market_api_key_legacy_ppt_env_still_works(monkeypatch):
+    """Legacy PPT_API_KEY remains a working compat fallback."""
+    monkeypatch.delenv("CARD_PRICE_API_KEY", raising=False)
+    monkeypatch.setenv("PPT_API_KEY", "legacy-key")
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.market_api_key == "legacy-key"
+
+
+def test_market_api_key_prefers_neutral_env_over_legacy(monkeypatch):
+    monkeypatch.setenv("CARD_PRICE_API_KEY", "neutral-key")
+    monkeypatch.setenv("PPT_API_KEY", "legacy-key")
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.market_api_key == "neutral-key"
+
+
 def test_invalid_min_buy_confidence_rejected():
     with pytest.raises(SystemExit):
         cfg_mod.from_mapping({

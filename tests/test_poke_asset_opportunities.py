@@ -133,3 +133,30 @@ def test_signals_activation_stays_sealed_scoped():
     # assets are present, but the dormancy report counts sealed products only
     payload = router.handle_get("/api/poke/signals", {}, _deps(products=SEALED))
     assert payload["activation"]["products_seen"] == 1
+
+
+# --- #5 /opportunities performs NO live/billed source calls -------------------
+
+class _CountingCardClient:
+    """A card client that records (and refuses) any lookup — proves /opportunities
+    never reaches a billable source (it is read-first, 0 credits)."""
+    def __init__(self):
+        self.calls = 0
+
+    def raw_quote(self, asset, checked_at):
+        self.calls += 1
+        raise AssertionError("/opportunities must not make a billed raw call")
+
+    def graded_smart(self, asset, checked_at):
+        self.calls += 1
+        raise AssertionError("/opportunities must not make a billed graded call")
+
+
+def test_opportunities_never_calls_a_billed_source():
+    client = _CountingCardClient()
+    deps = router.PokeApiDeps(
+        products=SEALED, assets=ASSETS, read_observations=lambda: list(OBS),
+        comp_provider=_Stub(), today="2026-07-05", cfg=_cfg(), card_client=client)
+    payload = router.handle_get("/api/poke/opportunities", {}, deps)
+    assert client.calls == 0                                  # 0 external calls, 0 credits
+    assert payload["summary"]["live_packet_eligible"] == 0    # and still dormant

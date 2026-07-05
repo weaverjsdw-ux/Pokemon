@@ -1,9 +1,12 @@
-"""Owned API response shaping + a PokemonPriceTracker-compatible sealed facade.
+"""Owned API response shaping + a drop-in-compatible sealed facade.
 
 Adapts the existing legacy comp rows (comps/model.to_legacy_row, market.py,
 cached rows) into a stable owned shape so callers never touch source internals,
-and emits a payload close enough to PPT's ``/sealed-products`` for local
-drop-in compatibility. Pure: no network, no PPT call, always 0 credits.
+and emits a payload close enough to a common external ``/sealed-products`` shape
+for local drop-in compatibility. Pure: no network, no external provider call,
+always 0 credits. (Retained provider-shaped field names — ``ppt_id``,
+``unopenedPrice`` — are documented compat aliases, not the program's identity;
+``tcgPlayerId`` is the preferred key.)
 """
 from __future__ import annotations
 
@@ -15,7 +18,10 @@ from . import history as history_mod
 
 
 def _tcg_player_id(product: dict) -> str | None:
-    raw = str(product.get("ppt_id") or product.get("ppt_query") or "").strip()
+    # ``ppt_id`` / ``ppt_query`` are the sealed catalog's (products.yaml) legacy field
+    # names for the TCGplayer product id — retained as config compat, read here only.
+    raw = str(product.get("tcgplayer_id") or product.get("ppt_id")
+              or product.get("ppt_query") or "").strip()
     return raw or None
 
 
@@ -42,7 +48,7 @@ def comp_response(product_key: str, product: dict, comp_row: dict, *,
                   cache_hit: bool | None = None) -> dict[str, Any]:
     """Adapt a legacy comp row (CompEngine / market / cache) into owned shape.
 
-    Numeric ``estimate`` (and its PPT alias ``unopenedPrice``) come from
+    Numeric ``estimate`` (and its compat alias ``unopenedPrice``) come from
     market.comp_from_row so a no-match/degraded row honestly reports None,
     never an invented number."""
     row = comp_row or {}
@@ -99,7 +105,7 @@ def no_comp_response(product_key: str, product: dict, *, status: str,
 def price_points(observations, item_key: str, *,
                  kind: str = history_mod.MARKET_COMP) -> list[dict[str, Any]]:
     """Chronological {date, price, source, confidence} points for an item from
-    the ledger observations - the PPT ``priceHistory`` array shape."""
+    the ledger observations - the common ``priceHistory`` array shape."""
     points = []
     for obs in history_mod.filter_observations(observations, item_key=item_key, kind=kind):
         price = history_mod._comp_value(obs)
@@ -119,10 +125,10 @@ def sealed_facade(product_key: str, product: dict, comp_row: dict | None, *,
                   price_history: list | None = None, momentum: dict | None = None,
                   last_scraped_at: str | None = None,
                   updated_at: str | None = None) -> dict[str, Any]:
-    """PPT-compatible ``/sealed-products`` payload built entirely from local data.
+    """Drop-in-compatible ``/sealed-products`` payload built entirely from local data.
 
     ``{data: {...}, metadata: {source: 'local', apiCallsConsumed: {total: 0}}}``.
-    Structurally 0 credits - this never calls PokemonPriceTracker."""
+    Structurally 0 credits - this never calls any external price provider."""
     row = comp_row or {}
     comp, _conf = market_mod.comp_from_row(row)
     data = {

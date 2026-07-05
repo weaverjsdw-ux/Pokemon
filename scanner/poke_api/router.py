@@ -11,7 +11,8 @@ module only routes and wires the read-first comp policy:
 * ``refresh=true``: call the injected comp provider's ``estimate`` (CompEngine).
 
 The comp provider and ledger reader are dependency-injected via ``PokeApiDeps``
-so tests are hermetic; ``build_deps`` wires the real, still-PPT-free defaults.
+so tests are hermetic; ``build_deps`` wires the real defaults, which spend 0
+external credits (no provider call on any read path).
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ class PokeApiDeps:
     read_candidates: Callable[[], list[dict]] = lambda: []
     candidates_path: Any = None
     # Track D: raw/graded assets (default empty so every sealed-only test is
-    # unchanged) and the dormant PPT /cards client (None unless configured).
+    # unchanged) and the dormant external card price client (None unless configured).
     # ``assets_error`` is set (assets left empty) when the asset catalog fails to
     # load — the failure is contained to the asset routes so a malformed
     # assets.yaml never takes the sealed catalog offline (surfaced, never silent).
@@ -157,7 +158,9 @@ def _sealed_products(deps: PokeApiDeps, query: dict) -> dict:
 
     match_key = match_product = None
     for key, product in deps.products.items():
-        if str(product.get("ppt_id") or product.get("ppt_query") or "").strip() == tcg_id:
+        # match on the product's TCGplayer id (preferred ``tcgplayer_id``, with the
+        # legacy ``ppt_id`` / ``ppt_query`` catalog fields retained as compat).
+        if (model_mod._tcg_player_id(product) or "") == tcg_id:
             match_key, match_product = key, product
             break
     if match_product is None:
@@ -203,16 +206,23 @@ def _today_ts(today: str | None) -> int:
 
 def _resolve_asset_source(deps: PokeApiDeps, asset: dict, checked_at: int) -> dict:
     """Run the raw/graded source resolver (refresh path). With no configured card
-    client this returns an honest ``none`` row and touches no network."""
+    client this returns an honest ``none`` row and touches no network. Any unexpected
+    error is contained to THIS asset route (never a 500 / never a crash) and degrades
+    to an honest error row — the credit bound still stands (the request was billable)."""
     comps = getattr(deps.cfg, "comps", None)
     tol = float(getattr(comps, "agreement_tolerance_pct", 20.0))
     floor = float(getattr(comps, "ebay_floor_sanity_pct", 50.0))
-    if str(asset.get("asset_class")) == catalog_mod.RAW:
-        return sources_mod.resolve_raw_comp(
-            asset, checked_at=checked_at, ppt_client=deps.card_client,
-            tolerance_pct=tol, floor_sanity_pct=floor)
-    return sources_mod.resolve_graded_comp(
-        asset, checked_at=checked_at, ppt_client=deps.card_client)
+    try:
+        if str(asset.get("asset_class")) == catalog_mod.RAW:
+            return sources_mod.resolve_raw_comp(
+                asset, checked_at=checked_at, ppt_client=deps.card_client,
+                tolerance_pct=tol, floor_sanity_pct=floor)
+        return sources_mod.resolve_graded_comp(
+            asset, checked_at=checked_at, ppt_client=deps.card_client)
+    except Exception as exc:  # noqa: BLE001 - contained honest degrade, never crashes the route
+        detail = f"asset source resolve failed: {str(exc)[:150]}"
+        return {"status": "error", "estimate": "", "confidence": "none",
+                "confidenceReason": detail, "detail": detail, "sources": []}
 
 
 def _assets(deps: PokeApiDeps) -> dict:
@@ -226,10 +236,14 @@ def _asset_comp(deps: PokeApiDeps, asset_key: str, query: dict) -> dict:
         return _asset_not_found(asset_key)
 
     if _truthy(query.get("refresh")):
+        credits = sources_mod.expected_asset_credits(asset, card_client=deps.card_client)
         row = _resolve_asset_source(deps, asset, _today_ts(deps.today))
-        return _ok(asset_model_mod.asset_comp_response(asset_key, asset, row))
+        return _ok(asset_model_mod.asset_comp_response(
+            asset_key, asset, row, api_calls=credits.total,
+            api_calls_estimated=credits.estimated, source=credits.source))
 
     # read-first: latest ledger comp for this identity (offline), else honest none.
+    # Read paths spend 0 credits (source "local") — the default in both responses.
     row = lab_mod.resolve_asset_comp_row(deps.read_observations(), asset_key, asset)
     if row:
         return _ok(asset_model_mod.asset_comp_response(asset_key, asset, row))
@@ -284,7 +298,7 @@ def _asset_momentum(deps: PokeApiDeps, asset_key: str) -> dict:
 
 
 def _cards(deps: PokeApiDeps, query: dict) -> dict:
-    """PPT-``/cards``-compatible resolve by ``tcgPlayerId`` + an explicit ``condition``
+    """Drop-in-compatible ``/cards`` resolve by ``tcgPlayerId`` + an explicit ``condition``
     (raw) or ``grade``/``grade_key`` (graded) discriminator. One id maps to several
     assets, so an id with no discriminator that matches >1 asset returns an
     ``ambiguous`` facade (never a guessed variant). Read-first, 0 credits."""
@@ -438,7 +452,8 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
 
 class ReadFirstCompProvider:
     """Default provider. ``cached`` reads only the in-house comp cache (State /
-    sqlite - no network). ``estimate`` lazily builds a CompEngine (PPT-free) and
+    sqlite - no network). ``estimate`` lazily builds a CompEngine (0 external credits
+    by default) and
     fetches. Constructing this does no I/O; State/CompEngine are built on first
     use so a read-only request never opens a network comp source."""
 
@@ -474,7 +489,7 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
                candidate_for: Callable[[str, dict], dict | None] | None = None,
                candidates_path: Path | None = None,
                assets_path: Path | None = None) -> PokeApiDeps:
-    """Wire the real, PPT-free defaults from config. ``today``/``ledger_path``/
+    """Wire the real defaults from config (0 external credits by default). ``today``/``ledger_path``/
     ``decisions_path``/``candidates_path`` are overridable so callers stay
     deterministic in tests.
 

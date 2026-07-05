@@ -89,12 +89,12 @@ opportunity:
   #   - max acceptable buy price per candidate/trade-type
   #   - per-trade-type confidence-floor overrides (live_min_confidence is global today)
 
-# Optional PokemonPriceTracker market source. Optional-preferred, never required:
+# Optional external card-price market source. Optional-preferred, never required:
 # scanning runs fully without it. Free tier ~100 credits/day < full-catalog need,
 # so keep preferred:false + 24h TTL on free tier, or pay Standard for 4h cadence.
 market:
   preferred: false
-  api_key: ""               # or PPT_API_KEY env var
+  api_key: ""               # or CARD_PRICE_API_KEY env var; PPT_API_KEY is legacy compat
   cache_ttl_seconds: 86400  # 24h on free tier; lower only on a paid tier
 
 # --- /poke AI deal-research pipeline (discovery sweeps) ---
