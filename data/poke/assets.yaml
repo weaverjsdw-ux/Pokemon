@@ -26,7 +26,7 @@ umbreon_ex_161_raw_nm:
   set: "Prismatic Evolutions"
   card_number: "161"
   condition: "NM"
-  # tcgplayer_id: ""        # map the exact TCGplayer product id to enable a comp
+  tcgplayer_id: "610516"   # Umbreon ex - 161/131; verified 2026-07-05
   # pricecharting_slug: ""
   # ebay_query: "Umbreon ex 161 Prismatic Evolutions raw NM"
 
@@ -45,7 +45,7 @@ umbreon_ex_161_psa10:
   grader: "PSA"
   grade: "10"
   # grade_key derived as psa10; map tcgplayer_id + configure PPT to resolve a comp
-  # tcgplayer_id: ""
+  tcgplayer_id: "610516"   # Umbreon ex - 161/131; verified 2026-07-05
 
 umbreon_ex_161_psa9:
   asset_class: graded
