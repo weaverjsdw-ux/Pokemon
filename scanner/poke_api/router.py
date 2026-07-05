@@ -19,9 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .. import resale
 from . import history as history_mod
+from . import lab as lab_mod
 from . import model as model_mod
+from . import paper_ledger as ledger_mod
 
 _PREFIX = "/api/poke/"
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -31,11 +32,20 @@ _TRUTHY = {"1", "true", "yes", "on"}
 class PokeApiDeps:
     """Injected dependencies. ``read_observations`` returns the ledger records
     (read fresh per request); ``comp_provider`` exposes ``cached``/``estimate``;
-    ``today`` (ISO date) drives momentum staleness."""
+    ``today`` (ISO date) drives momentum staleness.
+
+    Phase C adds: ``cfg`` (the full Config — opportunity scoring reuses its fees/
+    thresholds/business policy), ``candidate_for`` (optional verified deal per
+    product; a future discovery wire, defaults to none so the read API works
+    without it), ``read_decisions`` (paper-ledger rows), and ``decisions_path``."""
     products: dict[str, dict[str, Any]]
     read_observations: Callable[[], list[dict]]
     comp_provider: Any
     today: str | None = None
+    cfg: Any = None
+    candidate_for: Callable[[str, dict], dict | None] = lambda key, product: None
+    read_decisions: Callable[[], list[dict]] = lambda: []
+    decisions_path: Any = None
 
 
 # ---------------------------------------------------------------- payload helpers
@@ -56,28 +66,6 @@ def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in _TRUTHY
 
 
-def _ledger_comp_row(obs: dict, product_key: str, product: dict) -> dict:
-    """Shape a latest ledger market_comp observation into a legacy comp row so
-    model.comp_response can adapt it. Estimate is money-formatted exactly like the
-    real comp rows, so comp_from_row parses it back to a number."""
-    price = history_mod._comp_value(obs)
-    src = history_mod.source_of(obs)
-    url = str(obs.get("source_url") or "")
-    return {
-        "productKey": product_key,
-        "status": "ok",
-        "estimate": resale._money(price) if price is not None else "",
-        "confidence": str(obs.get("comp_confidence") or "low"),
-        "confidenceReason": "latest recorded market_comp (no fresh comp cache)",
-        "compBasis": "ledger latest",
-        "sources": [{"source": src, "status": "ok", "price": price, "url": url}],
-        "sourceUrl": url,
-        "url": url,
-        "checkedAt": obs.get("capture_date"),
-        "cacheHit": False,
-    }
-
-
 # ---------------------------------------------------------------- endpoints
 
 def _products(deps: PokeApiDeps) -> dict:
@@ -95,14 +83,9 @@ def _comp(deps: PokeApiDeps, product_key: str, query: dict) -> dict:
         return _ok(model_mod.comp_response(product_key, product, row))
 
     # read-only: cached comp first (offline), then latest ledger comp (offline).
-    cached = deps.comp_provider.cached(product_key, product)
-    if cached:
-        return _ok(model_mod.comp_response(product_key, product, cached))
-
-    ikey = history_mod.item_key_for_product(product, product_key)
-    latest = history_mod.latest(deps.read_observations(), ikey)
-    if latest is not None:
-        row = _ledger_comp_row(latest, product_key, product)
+    row = lab_mod.resolve_comp_row(
+        deps.comp_provider, deps.read_observations(), product_key, product)
+    if row:
         return _ok(model_mod.comp_response(product_key, product, row))
 
     return _ok(model_mod.no_comp_response(
@@ -168,10 +151,7 @@ def _sealed_products(deps: PokeApiDeps, query: dict) -> dict:
 
     observations = deps.read_observations()
     ikey = history_mod.item_key_for_product(match_product, match_key)
-    row = deps.comp_provider.cached(match_key, match_product)
-    if not row:
-        latest = history_mod.latest(observations, ikey)
-        row = _ledger_comp_row(latest, match_key, match_product) if latest else None
+    row = lab_mod.resolve_comp_row(deps.comp_provider, observations, match_key, match_product)
     summary = history_mod.momentum(observations, ikey, today=deps.today)
     return model_mod.sealed_facade(
         match_key, match_product, row,
@@ -180,6 +160,37 @@ def _sealed_products(deps: PokeApiDeps, query: dict) -> dict:
         last_scraped_at=summary.get("last_seen"),
         updated_at=summary.get("last_seen"),
     )
+
+
+# ---------------------------------------------------------------- Phase C (Lab)
+
+def _opportunities(deps: PokeApiDeps) -> dict:
+    """Scored opportunities across the catalog + a summary. Read-first, no
+    network, 0 credits (mirrors the rest of the owned API)."""
+    opps = lab_mod.build_opportunities(deps, as_of=deps.today)
+    return _ok({"count": len(opps), "summary": lab_mod.summary(opps), "opportunities": opps})
+
+
+def _opportunity(deps: PokeApiDeps, product_key: str) -> dict:
+    product = deps.products.get(product_key)
+    if product is None:
+        return _not_found(product_key)
+    o = lab_mod.build_opportunity_row(
+        deps, product_key, product, deps.read_observations(), as_of=deps.today)
+    return _ok({"opportunity": o})
+
+
+def _paper_decisions(deps: PokeApiDeps) -> dict:
+    """Current paper decision + latest outcome per opportunity (the replay fold).
+    Immutable history lives in the ledger; this is a read-time projection."""
+    current = ledger_mod.current_by_id(deps.read_decisions())
+    items = [{"opportunity_id": oid, **slot} for oid, slot in current.items()]
+    return _ok({"count": len(items), "decisions": items})
+
+
+def _signals(deps: PokeApiDeps) -> dict:
+    """Which hypotheses are working over time (hit-rate + mean realized net)."""
+    return _ok({"signals": ledger_mod.signals_report(deps.read_decisions())})
 
 
 # ---------------------------------------------------------------- dispatch
@@ -195,6 +206,14 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
         return _products(deps)
     if segments == ["sealed-products"]:
         return _sealed_products(deps, query)
+    if segments == ["opportunities"]:
+        return _opportunities(deps)
+    if segments == ["paper-decisions"]:
+        return _paper_decisions(deps)
+    if segments == ["signals"]:
+        return _signals(deps)
+    if len(segments) == 2 and segments[0] == "opportunities":
+        return _opportunity(deps, segments[1])
     if len(segments) == 3 and segments[0] == "products":
         _, key, leaf = segments
         if leaf == "comp":
@@ -242,15 +261,24 @@ class ReadFirstCompProvider:
 
 
 def build_deps(cfg: Any, *, ledger_path: Path | None = None,
-               today: str | None = None) -> PokeApiDeps:
-    """Wire the real, PPT-free defaults from config. ``today``/``ledger_path``
-    are overridable so callers stay deterministic in tests."""
+               decisions_path: Path | None = None, today: str | None = None,
+               candidate_for: Callable[[str, dict], dict | None] | None = None
+               ) -> PokeApiDeps:
+    """Wire the real, PPT-free defaults from config. ``today``/``ledger_path``/
+    ``decisions_path`` are overridable so callers stay deterministic in tests.
+
+    ``candidate_for`` is an optional verified-deal provider (a future discovery
+    wire); it defaults to none so the read API works with catalog + ledger alone."""
     from .. import config as cfg_mod
 
     path = ledger_path or (cfg_mod.ROOT / "data" / "poke" / "price_history.jsonl")
+    dpath = decisions_path or (cfg_mod.ROOT / "data" / "poke" / "paper_decisions.jsonl")
 
     def read_observations() -> list[dict]:
         return history_mod.read_ledger(path).observations
+
+    def read_decisions() -> list[dict]:
+        return ledger_mod.read_rows(dpath)
 
     if today is None:
         from datetime import date
@@ -261,4 +289,8 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         read_observations=read_observations,
         comp_provider=ReadFirstCompProvider(cfg),
         today=today,
+        cfg=cfg,
+        candidate_for=candidate_for or (lambda key, product: None),
+        read_decisions=read_decisions,
+        decisions_path=dpath,
     )
