@@ -176,3 +176,13 @@ def test_candidates_activation_active_with_verified_candidate():
     assert a["verified_candidates"] == 1
     assert a["live_packet_eligible_count"] == 1          # verified entry + confident comp
     assert a["dormant"] is False
+
+
+def test_new_endpoints_spend_no_credits():
+    """Required test 12 — /signals and /candidates/report now score the catalog on
+    every hit; assert they stay off the network (no PPT estimate, 0 credits)."""
+    deps, provider = _deps(cached={"jt_bb": _arb_row()}, candidate_rows=[_verified_row()])
+    router.handle_get("/api/poke/signals", {}, deps)
+    router.handle_get("/api/poke/candidates/report", {}, deps)
+    router.handle_get("/api/poke/candidates", {}, deps)
+    assert provider.estimate_calls == 0                  # read-first only, never a network comp
