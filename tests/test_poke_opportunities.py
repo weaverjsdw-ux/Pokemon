@@ -130,6 +130,20 @@ def test_classify_no_edge(cfg):
                               cfg=cfg) == "sealed_no_edge"
 
 
+def test_classify_arbitrage_survives_thin_ledger(cfg):
+    # a verified deal + comp is actionable arbitrage even with no price history
+    assert opp.classify_trade(market_comp=90.0, momentum_status="no_history", stale=False,
+                              entry_price=40.0, discount_pct=55.0, momentum_delta_pct=None,
+                              cfg=cfg) == "sealed_retail_arbitrage"
+
+
+def test_classify_no_history_without_entry_is_catalog_gap(cfg):
+    # comp present but no history and nothing to act on => improve data first
+    assert opp.classify_trade(market_comp=90.0, momentum_status="no_history", stale=False,
+                              entry_price=None, discount_pct=None, momentum_delta_pct=None,
+                              cfg=cfg) == "sealed_catalog_gap"
+
+
 # ---------------------------------------------------------------- decide()
 
 def _decide(cfg, **kw):

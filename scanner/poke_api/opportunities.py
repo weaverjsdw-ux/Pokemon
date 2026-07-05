@@ -148,14 +148,20 @@ def compute_margin(entry_price, comp, confidence, product, cfg):
 def classify_trade(*, market_comp, momentum_status, stale, entry_price,
                    discount_pct, momentum_delta_pct, cfg) -> str:
     """Deterministic, first-match-wins, facts only. Independent of the eventual
-    decision (a failing arbitrage is still that *hypothesis*)."""
-    if market_comp is None or momentum_status == "no_history":
+    decision (a failing arbitrage is still that *hypothesis*).
+
+    A verified entry price + a comp is actionable arbitrage even with a thin
+    ledger, so the arbitrage check precedes the no-history catalog_gap check; a
+    weak comp is still demoted to WATCH downstream by the fee-adjusted verdict."""
+    if market_comp is None:
         return "sealed_catalog_gap"
     if stale:
         return "sealed_stale_comp"
     if (entry_price is not None and discount_pct is not None
             and discount_pct >= cfg.poke.min_discount_pct):
         return "sealed_retail_arbitrage"
+    if momentum_status == "no_history":
+        return "sealed_catalog_gap"
     if momentum_status == "ok" and momentum_delta_pct is not None and momentum_delta_pct > 0:
         return "sealed_momentum_watch"
     return "sealed_no_edge"
