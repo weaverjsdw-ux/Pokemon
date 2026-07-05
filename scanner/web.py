@@ -20,7 +20,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import yaml
 
@@ -44,6 +44,7 @@ from .main import (
     safe_demo_stores,
 )
 from .notify import Notifier, StockAlert
+from .poke_api import router as poke_router
 from .priority import product_priority
 from .retailers import ALL as RETAILER_REGISTRY
 from .retailers.base import StockResult, Store
@@ -1222,14 +1223,34 @@ def _should_autostart() -> bool:
         return False
 
 
+def handle_poke_get(path: str, query: dict[str, str]) -> dict[str, Any] | None:
+    """Dispatch an owned sealed-price API GET (/api/poke/...) through the router.
+
+    Read-first and structurally PPT-free: builds deps from the current config and
+    the ledger; the router never calls PokemonPriceTracker. Returns None for a
+    path that is not a poke route so the caller falls through to its 404."""
+    try:
+        cfg, _ = _load_current_config()
+    except SystemExit as exc:
+        return {"ok": False, "error": _safe_error_text(str(exc)), "httpStatus": 500}
+    return poke_router.handle_get(path, query, poke_router.build_deps(cfg))
+
+
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "TcgMsrpScannerUI/1.0"
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/status":
             self._send_json(status_payload())
             return
+        if path.startswith("/api/poke"):
+            query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            result = handle_poke_get(path, query)
+            if result is not None:
+                self._send_json(result)
+                return
         if path == "/" or path == "/index.html":
             self._send_file(ASSETS_DIR / "index.html")
             return
