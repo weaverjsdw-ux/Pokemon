@@ -51,6 +51,12 @@ class VerifiedCandidate:
     retailer: str
     confidence: str
     asset_class: str = "sealed"
+    # Session E — precise raw/graded identity so an asset candidate never collides
+    # with a sealed product (or a different condition/grade) that shares a key string.
+    # candidate_id does NOT hash these, so existing sealed ids/rows are unchanged.
+    asset_key: str = ""
+    condition: str = ""
+    grade_key: str = ""
     entry_verified: bool = False   # True only when the entry-evidence gate passes
     reason: str = ""               # why NOT entry-verified (the blocker), else ""
     raw_snapshot: dict = field(default_factory=dict)
@@ -100,10 +106,14 @@ def make_candidate(*, source, product_key, listing_id="", item_name="",
                    entry_price=None, buy_url="", observed_at="", stock_status="unknown",
                    stock_evidence="", stock_checked_at="", evidence_method="",
                    source_url="", retailer="", confidence="none", asset_class="sealed",
+                   asset_key="", condition="", grade_key="",
                    raw_snapshot=None) -> VerifiedCandidate:
     """Normalize a raw candidate into a ``VerifiedCandidate``. Never rejects — a
     candidate that fails the entry gate is kept as an evidence row with
-    ``entry_price=None`` and ``entry_verified=False`` (the blocker in ``reason``)."""
+    ``entry_price=None`` and ``entry_verified=False`` (the blocker in ``reason``).
+
+    ``asset_key`` / ``condition`` / ``grade_key`` (Session E) carry the precise
+    raw/graded identity for an asset candidate; they are absent ("") for sealed."""
     listing_id = listing_id or _stable_listing_id(source, buy_url or source_url or item_name)
     ok, reason = entry_evidence_ok(
         stock_status=stock_status, buy_url=buy_url, entry_price=entry_price,
@@ -118,8 +128,9 @@ def make_candidate(*, source, product_key, listing_id="", item_name="",
         stock_status=str(stock_status), stock_evidence=str(stock_evidence),
         stock_checked_at=str(stock_checked_at), evidence_method=str(evidence_method),
         source_url=str(source_url), retailer=str(retailer), confidence=str(confidence),
-        asset_class=str(asset_class or "sealed"), entry_verified=ok,
-        reason="" if ok else reason, raw_snapshot=dict(raw_snapshot or {}))
+        asset_class=str(asset_class or "sealed"), asset_key=str(asset_key or ""),
+        condition=str(condition or ""), grade_key=str(grade_key or ""),
+        entry_verified=ok, reason="" if ok else reason, raw_snapshot=dict(raw_snapshot or {}))
 
 
 # ---------------------------------------------------------------- ledger
@@ -175,6 +186,9 @@ def to_opportunity_candidate(record: dict) -> dict:
         "retailer": record.get("retailer"),
         "source": record.get("source"),
         "asset_class": record.get("asset_class") or "sealed",
+        "asset_key": record.get("asset_key") or "",
+        "condition": record.get("condition") or "",
+        "grade_key": record.get("grade_key") or "",
         "item_name": record.get("item_name"),
         "url": record.get("buy_url") or record.get("source_url"),
         "matched_product_key": record.get("product_key"),
@@ -189,15 +203,42 @@ def to_opportunity_candidate(record: dict) -> dict:
     }
 
 
+_ASSET_CLASSES = frozenset({"raw", "graded"})
+
+
 def current_entry_candidates(rows) -> dict[str, dict]:
-    """Latest entry-verified candidate per product_key (latest wins by
+    """Latest entry-verified SEALED candidate per product_key (latest wins by
     ``observed_at``; ties -> last appended). Evidence-only rows are ignored here —
-    they inform the activation report, not the buy wire."""
+    they inform the activation report, not the buy wire.
+
+    Session E: raw/graded rows are EXCLUDED so a sealed opportunity never absorbs an
+    asset candidate that shares a key string (the folds are disjoint by asset_class)."""
     out: dict[str, dict] = {}
     for r in rows:
         if not r.get("entry_verified"):
             continue
+        if str(r.get("asset_class") or "sealed") in _ASSET_CLASSES:
+            continue
         key = r.get("product_key")
+        if not key:
+            continue
+        cur = out.get(key)
+        if cur is None or str(r.get("observed_at") or "") >= str(cur.get("observed_at") or ""):
+            out[key] = r
+    return out
+
+
+def current_asset_entry_candidates(rows) -> dict[str, dict]:
+    """Latest entry-verified RAW/GRADED candidate per ``asset_key`` (Session E). The
+    counterpart of ``current_entry_candidates`` for the asset keyspace — keyed on the
+    explicit ``asset_key`` (never ``product_key``, which may equal a sealed key)."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        if not r.get("entry_verified"):
+            continue
+        if str(r.get("asset_class") or "sealed") not in _ASSET_CLASSES:
+            continue
+        key = r.get("asset_key")
         if not key:
             continue
         cur = out.get(key)
@@ -218,6 +259,37 @@ def candidate_for_provider(rows) -> Callable[[str, dict], dict | None]:
         return to_opportunity_candidate(rec) if rec else None
 
     return candidate_for
+
+
+def _asset_identity_matches(rec: dict, asset: dict) -> bool:
+    """A stored asset candidate matches an asset only when class AND identity agree —
+    raw on ``condition``, graded on ``grade_key`` — so a psa10 candidate never
+    attaches to a psa9 slab and a graded candidate never attaches to a raw single."""
+    asset_class = str(asset.get("asset_class") or "").strip().lower()
+    if str(rec.get("asset_class") or "") != asset_class:
+        return False
+    if asset_class == "graded":
+        return str(rec.get("grade_key") or "") == str(asset.get("grade_key") or "")
+    if asset_class == "raw":
+        return (str(rec.get("condition") or "").lower()
+                == str(asset.get("condition") or "").lower())
+    return False
+
+
+def asset_candidate_for_provider(rows) -> Callable[[str, dict], dict | None]:
+    """Build an ``asset_candidate_for(asset_key, asset)`` provider (Session E) — the
+    raw/graded counterpart of ``candidate_for_provider``. Returns an entry-verified
+    asset candidate ONLY when its class + identity match the asset (collision-proof),
+    else None (honest dormancy)."""
+    current = current_asset_entry_candidates(rows)
+
+    def asset_candidate_for(asset_key: str, asset: dict) -> dict | None:
+        rec = current.get(asset_key)
+        if not rec or not _asset_identity_matches(rec, asset):
+            return None
+        return to_opportunity_candidate(rec)
+
+    return asset_candidate_for
 
 
 # ---------------------------------------------------------------- manifest replay

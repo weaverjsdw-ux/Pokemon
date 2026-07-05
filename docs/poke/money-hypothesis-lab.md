@@ -276,10 +276,43 @@ The dormancy / activation report (same shape as `candidates-report`).
 
 `GET /api/poke/signals` also carries the `activation` block alongside `signals`.
 
+## Session E — personal edge layer (on top of the Lab)
+
+Session E adds the program's **own decision layer** over this spine:
+`scanner/poke_api/edge.py` emits a first-class `EdgePacket` per subject (sealed **and**
+raw/graded), with an explainable `decision_hint`, `blockers`, `source_posture`, and
+(for raw) a `grading_ev` block. `edge_packet_id` uses the **same recipe** as
+`opportunity_id`, so a decision recorded from an edge packet (`edge_cli.py record`)
+lands in this same `paper_decisions.jsonl` and replays through `signals`.
+
+What E adds over Phase C / Track D:
+
+- **Raw/graded verified-entry route.** `candidates.py` now carries `asset_key` /
+  `condition` / `grade_key` and a **disjoint** asset fold (`current_asset_entry_candidates`
+  / `asset_candidate_for_provider`), so a raw/graded single can become buy-shaped —
+  but **only** through a verified asset candidate (the same STOP-class
+  `entry_evidence_ok` gate). A D-era raw/graded WATCH row is never promoted to live off
+  a comp alone; `opportunities.py` is untouched.
+- **Grading EV** (`grading_ev.py`): the "buy raw, grade, sell the slab" hypothesis.
+  Blocks on any missing input (raw entry, raw comp, graded comp, grading fee, resale
+  fees, gem rate); the gem rate is an operator assumption (`gem_rate` +
+  `gem_rate_source` on the asset), so grading EV is capped at PAPER_BUY (never LIVE).
+- **Divergence audit** (`divergence.py`): an off-hot-path, operator-gated comparison of
+  our comp vs the external provider. Read paths remain 0 credits; external mode needs
+  `--yes` + a key and prints/limits the spend. **PPT/external comparison is audit-only.**
+- **Endpoints** (read-only, 0 credits): `GET /api/poke/edge-packets`,
+  `/api/poke/edge-packets/{id}`, `/api/poke/edge-summary`. **CLI**: `edge_cli.py list /
+  show / record / outcome / divergence-audit`.
+
+See [`private-price-api.md`](private-price-api.md#session-e--personal-edge-layer) and the
+[edge-layer runbook](edge-layer-runbook.md).
+
 ## Limitations
 
-- **Sealed-only.** Singles/graded are Phase D; `asset_class` is present for
-  forward-compatibility.
+- **Singles/graded now have a buy route (Session E).** Raw/graded assets are buy-shaped
+  **only** through the E verified-entry route (a verified asset candidate); with none
+  they stay WATCH/DATA_NEEDED evidence. Grading-EV-driven LIVE eligibility is a
+  documented follow-on (gem rate is an operator assumption, capped at PAPER_BUY).
 - **Verified-entry wire is live, evidence-gated.** Arbitrage / live-packet paths
   activate from the `verified_candidates.jsonl` ledger (manual intake or manifest
   replay). eBay Browse is prepared but keyset-gated (`not_configured` until

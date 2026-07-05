@@ -138,3 +138,12 @@ def test_asset_summary_shape():
     assert s["asset_class"] == "graded"
     assert s["grader"] == "PSA" and s["grade"] == "10" and s["grade_key"] == "psa10"
     assert s["card_number"] == "161"
+
+
+def test_asset_summary_surfaces_gem_rate():
+    """Session E — an operator gem-rate assumption (with its source/date) is surfaced
+    on the asset summary so grading EV can consume it (never invented)."""
+    raw = {**RAW_NM, "gem_rate": 0.4, "gem_rate_source": "operator_assumption 2026-07-05"}
+    s = catalog.asset_summary("umbreon_raw_nm", raw)
+    assert s["gem_rate"] == 0.4
+    assert s["gem_rate_source"] == "operator_assumption 2026-07-05"

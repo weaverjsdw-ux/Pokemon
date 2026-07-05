@@ -75,3 +75,16 @@ acceptance requirement that E must include an off-hot-path comparison between th
 homegrown `/api/poke` outputs and PPT/external-provider outputs. Any unexplained
 material divergence must be classified and fixed or explicitly documented as an
 intentional source-policy difference.
+
+**Session E is BUILT (2026-07-05).** The divergence-audit acceptance requirement is
+satisfied by `scanner/poke_api/divergence.py` (+ `edge_cli.py divergence-audit`): a
+dry/**local** mode compares our comp vs a recorded `ppt_cards` observation at 0
+credits, and an operator-gated **external** mode (needs `market.api_key` + `--yes`,
+prints the estimated spend, hard-stops on the remaining-credit floor) compares against
+a live provider call. A material **unexplained** divergence fails the audit and is
+documented as blocking; explained categories (stale, ask-vs-sold, source policy,
+mapping error, confidence method, provider payload) are surfaced for investigation.
+See [`private-price-api.md` → Session E](private-price-api.md#session-e--personal-edge-layer)
+and the [edge-layer runbook](edge-layer-runbook.md). No live/billed calls were made
+building Session E — the divergence audit's external mode is exercised in tests via
+injected fake clients only.

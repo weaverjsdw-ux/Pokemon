@@ -23,6 +23,7 @@ from typing import Any, Callable
 from . import asset_model as asset_model_mod
 from . import candidates as candidates_mod
 from . import catalog as catalog_mod
+from . import edge as edge_mod
 from . import history as history_mod
 from . import lab as lab_mod
 from . import model as model_mod
@@ -53,6 +54,10 @@ class PokeApiDeps:
     decisions_path: Any = None
     read_candidates: Callable[[], list[dict]] = lambda: []
     candidates_path: Any = None
+    # Session E: the raw/graded verified-entry wire (keyed on asset_key). Defaults to
+    # none so an asset stays WATCH/DATA_NEEDED evidence until a verified asset candidate
+    # exists — the ONLY way a single becomes buy-shaped (never live off a comp alone).
+    asset_candidate_for: Callable[[str, dict], dict | None] = lambda key, asset: None
     # Track D: raw/graded assets (default empty so every sealed-only test is
     # unchanged) and the dormant external card price client (None unless configured).
     # ``assets_error`` is set (assets left empty) when the asset catalog fails to
@@ -396,6 +401,31 @@ def _candidates_report(deps: PokeApiDeps) -> dict:
     return _ok({"activation": lab_mod.activation_report(opps, deps.read_candidates())})
 
 
+# ---------------------------------------------------------------- Session E (edge)
+
+def _edge_packets(deps: PokeApiDeps) -> dict:
+    """All personal-edge packets (sealed + raw/graded), score desc. Read-first, no
+    network, 0 credits — never reaches a billed source (same belt as /opportunities)."""
+    packets = edge_mod.build_edge_packets(deps, as_of=deps.today)
+    return _ok({"count": len(packets), "summary": edge_mod.edge_summary(packets),
+                "edge_packets": packets})
+
+
+def _edge_packet(deps: PokeApiDeps, edge_packet_id: str) -> dict:
+    """One edge packet by id; a clear 404 for an unknown id."""
+    for p in edge_mod.build_edge_packets(deps, as_of=deps.today):
+        if p["edge_packet_id"] == edge_packet_id:
+            return _ok({"edge_packet": p})
+    return _error(404, f"unknown edge_packet_id: {edge_packet_id!r}",
+                  edge_packet_id=edge_packet_id)
+
+
+def _edge_summary(deps: PokeApiDeps) -> dict:
+    """Compact edge roll-up (counts by decision / asset_class / trade_type / posture)."""
+    packets = edge_mod.build_edge_packets(deps, as_of=deps.today)
+    return _ok({"summary": edge_mod.edge_summary(packets)})
+
+
 # ---------------------------------------------------------------- dispatch
 
 def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | None:
@@ -423,6 +453,12 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
         return _candidates(deps)
     if segments == ["candidates", "report"]:
         return _candidates_report(deps)
+    if segments == ["edge-packets"]:
+        return _edge_packets(deps)
+    if segments == ["edge-summary"]:
+        return _edge_summary(deps)
+    if len(segments) == 2 and segments[0] == "edge-packets":
+        return _edge_packet(deps, segments[1])
     if len(segments) == 2 and segments[0] == "opportunities":
         return _opportunity(deps, segments[1])
     if len(segments) == 3 and segments[0] == "products":
@@ -517,6 +553,11 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
     if candidate_for is None:
         candidate_for = candidates_mod.candidate_for_provider(read_candidates())
 
+    # Session E: fold the raw/graded verified-entry provider from the SAME candidate
+    # ledger (disjoint from the sealed fold by asset_class). Empty ledger => none, so
+    # assets stay honestly WATCH/DATA_NEEDED until a verified asset candidate lands.
+    asset_candidate_for = candidates_mod.asset_candidate_for_provider(read_candidates())
+
     if today is None:
         from datetime import date
         today = date.today().isoformat()
@@ -551,4 +592,5 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         assets=assets,
         card_client=sources_mod.card_client_from_config(cfg),
         assets_error=assets_error,
+        asset_candidate_for=asset_candidate_for,
     )

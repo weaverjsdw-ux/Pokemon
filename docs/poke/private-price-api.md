@@ -28,10 +28,14 @@ ladder:
   separate raw/graded asset catalog, honest source adapters, per-identity
   history/momentum, owned asset endpoints, and conservative (never-live)
   raw/graded WATCH opportunities.
-- E — Personal edge layer *(future; strategy/ranking/decision packets —
-  deliberately NOT built in D/D.5)*. **Blocked** until the D.5 hardening gates and
-  at least one operator-approved live smoke (real external provider shape) are
-  satisfied — see *Provider-neutral boundary (D.5)* below.
+- **E — Personal edge layer** — BUILT (2026-07-05); see *Session E* below. Adds
+  first-class **edge packets** (an explainable decision per subject across sealed /
+  raw / graded), a raw/graded verified-entry buy route, grading EV, source posture,
+  read-only 0-credit edge endpoints, an edge CLI, and an operator-gated API-vs-external
+  **divergence audit**. Unblocked by the D.5 gates + the operator-approved D.5 live
+  smoke (see [`live-smoke-result-d5-external-card-source.md`](live-smoke-result-d5-external-card-source.md)).
+  **E is our own decision layer, not a PPT clone** — external/PPT output is an optional
+  adapter or an off-hot-path audit oracle only.
 
 Code: `scanner/poke_api/` — `history.py` (pure ledger reads/index/momentum),
 `model.py` (response shaping + drop-in-compatible facade), `router.py` (dispatch +
@@ -331,6 +335,86 @@ posture:
   sealed routes stay healthy.
 - **Still WATCH-only.** Raw/graded assets remain WATCH-grade evidence rows, never
   live-eligible, regardless of the numbers.
-- **E remains blocked** until these D.5 gates hold *and* at least one
-  operator-approved live smoke validates the real external provider shape. No live
-  or billed calls happen in D.5.
+- **E is now unblocked and BUILT** (2026-07-05): the D.5 gates hold and the
+  operator-approved D.5 live smoke validated the real external provider shape. No
+  live or billed calls happen in D.5 itself; see *Session E* below for E's own
+  (still operator-gated, audit-only) external surface.
+
+---
+
+## Session E — Personal edge layer
+
+E is the program's **own decision layer** on top of the owned A–D evidence spine. It
+is **not** a PPT clone: external/PPT output is an optional adapter or an off-hot-path
+audit oracle only, never a source of truth, never on a read path. Code:
+`scanner/poke_api/edge.py` (packet model + builders + `decide_edge` + `source_posture`),
+`grading_ev.py` (raw→graded EV), `divergence.py` (audit), `edge_cli.py` (CLI).
+
+**Edge packets.** For every subject (sealed product or raw/graded asset) E emits a
+first-class `EdgePacket` — an explainable decision understandable without reading
+internals. Every numeric field carries provenance (`comp_provenance` /
+`entry_provenance` / `grading_ev`) or is `null` (STOP-class). Key fields:
+`decision_hint` (`REJECT | WATCH | DATA_NEEDED | PAPER_BUY | LIVE_PACKET_ELIGIBLE`),
+`trade_type`, `score`, `blockers`, `evidence`, `risks`, `source_stack`,
+`source_posture`, `expected_net`/`expected_roi_pct`, `provider_dependency`, and an
+`input_snapshot` for append-only auditability. `edge_packet_id` uses the **same
+recipe** as `opportunity_id` (`sha256(subject_key | trade_type | as_of)`), so a paper
+decision recorded from a packet unifies with the Phase C ledger.
+
+**Decision policy.** `LIVE_PACKET_ELIGIBLE` is strictly stricter than `PAPER_BUY` and
+reachable **only** through the verified evidence spine: verified entry + attributed
+comp + fresh data + sufficient confidence + fee-adjusted `BUY` verdict + the stricter
+live floor + a live-eligible trade type (`sealed_retail_arbitrage`,
+`raw_verified_arbitrage`, `graded_verified_arbitrage`). No comp → `DATA_NEEDED` (no
+dollars). Money math is the exact alert-path composition — no new math.
+
+**Raw/graded become buy-shaped ONLY through the new E verified-entry route.** A
+raw/graded single is live/paper-eligible **only** when a verified asset candidate
+(`asset_key`-keyed, `entry_evidence_ok`-gated) exists. A D-era raw/graded
+WATCH-with-comp row is **never** promoted to live off a comp alone — `opportunities.py`
+(the D layer) is untouched and keeps its "assets never live in D" guarantee. The
+sealed and asset candidate folds are **disjoint by `asset_class`**, so an asset
+candidate never attaches to a sealed opportunity (and vice-versa) even on a shared key.
+
+**Grading EV** (`grading_ev.py`, raw→graded): requires raw entry + raw comp + graded
+comp for the target grade + grading fee + resale fees + a gem rate. **Missing any →
+blocked** (`DATA_NEEDED`/`WATCH` + named blocker) — never an invented gem rate/comp/fee.
+The gem rate is an operator assumption (asset `gem_rate` + `gem_rate_source`, or an
+`operator_assumption` label), so a grading-EV opportunity is capped at **PAPER_BUY**
+(never LIVE). Grading fee = `poke.grading_cost_all_in` (stamped: PSA Regular $79.99
+all-in, value tiers paused 2026-06). The raw→graded pairing is matched on
+`tcgplayer_id` + an explicit target `grade_key` — never guessed.
+
+**Source posture** (deterministic, from data provenance not live-call state): each
+packet exposes a list of `source_posture` tags — `local_only`,
+`local_plus_external_audit`, `external_only`, `missing_comp`, `stale_comp`,
+`single_source`, `ask_only_context`. An ask-only active listing is context, never
+sold-comp truth.
+
+**Endpoints (all GET, read-only, 0 credits):**
+
+- `GET /api/poke/edge-packets` — all edge packets + a summary, score desc.
+- `GET /api/poke/edge-packets/{edge_packet_id}` — one packet (404 for an unknown id).
+- `GET /api/poke/edge-summary` — compact roll-up (counts by decision / asset_class /
+  trade_type / posture, live count, top blockers).
+
+These never call a billed provider — proven by a counting/failing card-client test on
+every edge route (same belt as `/opportunities`).
+
+**Divergence audit** (`divergence.py`, off the hot path, operator tool — never a read
+endpoint). Compares our `/api/poke` comp against the external provider and classifies
+any disagreement (`agree`, `mapping_error`, `stale_local`, `stale_external`,
+`source_policy_difference`, `ask_vs_sold_difference`, `fee_assumption_difference`,
+`confidence_method_difference`, `provider_payload_issue`,
+`unexplained_material_divergence`, `no_external_reference`). Dry/**local** mode (default)
+classifies our recorded local comp vs a recorded `ppt_cards` observation at **0
+network / 0 credits**. **External** mode is money-class: refuses without
+`market.api_key`, prints the estimated spend, refuses without operator `--yes`, and
+hard-stops before the next subject below the remaining-credit floor (15). A **material
+UNEXPLAINED divergence fails the audit** and is documented as blocking. We investigate
+divergences — we do **not** tune blindly to PPT; every material row says whether ours or
+theirs is more defensible. See the [edge-layer runbook](edge-layer-runbook.md).
+
+**Report surface.** `GET /api/poke/edge-summary` (JSON) and `edge_cli.py list` / `show`
+are the report surface this session. A dashboard "Edge" card is a scoped follow-on
+(the read API + CLI ship now; the SPA card is not required for the core).

@@ -1,0 +1,122 @@
+"""Raw -> graded grading EV (Session E Slice D).
+
+Pure, STOP-class expected-value math for the "buy a raw single, grade it, sell the
+slab" hypothesis. Reuses the exact alert-path fee model (``margin.net_margin`` on
+eBay) — no new money math. It **blocks on any missing required input** (raw entry,
+raw comp, graded comp for the target grade, grading fee, resale fees, gem rate) and
+**never invents** a gem rate, a comp, or a fee: absent → ``status: blocked`` with a
+named blocker and ``None`` dollars.
+
+The gem rate is inherently an operator assumption (not verified-data confidence), so a
+grading-EV opportunity is capped at PAPER-grade conviction (``actionable``); the edge
+layer never promotes it to LIVE. Every number in the output carries a cited
+assumption line. No network, no clock.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from .. import margin as margin_mod
+
+
+def _pos(value) -> float | None:
+    """A strictly-positive float, else None (STOP-class: 0/None/negative is no input)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
+               fees: margin_mod.FeeModel, tax_rate: float, est_shipping: float,
+               target_grade: str = "", ship_insurance: float = 0.0,
+               downside_comp=None, buy_floor_net: float = 15.0,
+               gem_rate_basis: str = "", grading_fee_basis: str = "") -> dict[str, Any]:
+    """(status, expected_net, expected_roi_pct, downside_net, ...) for grading a raw
+    single to ``target_grade``. Blocks (dollars ``None``) unless every required input
+    is present and valid; ``gem_rate`` must be in ``(0, 1]``."""
+    blockers: list[str] = []
+    entry = _pos(raw_entry)
+    rcomp = _pos(raw_comp)
+    gcomp = _pos(graded_comp)
+    fee = None
+    try:
+        fee = float(grading_fee)
+    except (TypeError, ValueError):
+        fee = None
+    if entry is None:
+        blockers.append("no verified raw entry price")
+    if rcomp is None:
+        blockers.append("no raw comp")
+    if gcomp is None:
+        blockers.append(f"no graded comp for target grade {target_grade or '(unspecified)'}")
+    if fee is None or fee < 0:
+        blockers.append("no grading fee assumption (source/date required)")
+    gem = None
+    if gem_rate is None:
+        blockers.append("no gem rate assumption (never invented - supply operator_assumption or a sourced rate)")
+    else:
+        try:
+            gem = float(gem_rate)
+        except (TypeError, ValueError):
+            gem = None
+        if gem is None or not (0.0 < gem <= 1.0):
+            blockers.append("gem rate must be a probability in (0, 1]")
+            gem = None
+
+    if blockers:
+        return {
+            "status": "blocked",
+            "target_grade": target_grade,
+            "expected_net": None, "expected_roi_pct": None,
+            "downside_net": None, "upside_net": None, "cost": None,
+            "gem_rate": gem_rate, "gem_rate_basis": gem_rate_basis,
+            "grading_fee": grading_fee, "grading_fee_basis": grading_fee_basis,
+            "assumptions": [],
+            "blockers": blockers,
+            "reason": "grading EV blocked: " + "; ".join(blockers),
+        }
+
+    ship_ins = float(ship_insurance or 0.0)
+    cost = round(margin_mod.cost_basis(entry, tax_rate) + fee + ship_ins, 2)
+    upside = margin_mod.net_margin(cost, gcomp, "ebay", est_shipping, fees).dollar_margin
+    down_basis = _pos(downside_comp)
+    down_price = down_basis if down_basis is not None else rcomp
+    downside = margin_mod.net_margin(cost, down_price, "ebay", est_shipping, fees).dollar_margin
+    expected_net = round(gem * upside + (1.0 - gem) * downside, 2)
+    expected_roi_pct = round(expected_net / cost * 100.0, 2) if cost > 0 else None
+
+    down_label = (f"lower-grade comp ${down_basis:.2f} supplied"
+                  if down_basis is not None
+                  else f"downside modeled at raw comp ${rcomp:.2f} (no lower-grade/PSA9 comp supplied)")
+    assumptions = [
+        f"raw entry ${entry:.2f} + grading fee ${fee:.2f}"
+        + (f" + ship/insurance ${ship_ins:.2f}" if ship_ins else "")
+        + f" = landed cost ${cost:.2f}",
+        f"grading fee basis: {grading_fee_basis or 'poke.grading_cost_all_in (config)'}",
+        f"gem rate {gem:.2%} basis: {gem_rate_basis or 'operator_assumption'}",
+        f"upside: sell {target_grade or 'target grade'} @ ${gcomp:.2f} on eBay (after fees+tax) -> net ${upside:.2f}",
+        f"downside: {down_label}; grading fee sunk -> net ${downside:.2f}",
+        f"EV = {gem:.2%} x ${upside:.2f} + {1-gem:.2%} x ${downside:.2f} = ${expected_net:.2f}",
+    ]
+    status = "actionable" if expected_net >= buy_floor_net else "watch"
+    reason = (f"grading EV ${expected_net:.2f} net / {expected_roi_pct:.1f}% ROI "
+              f"({'clears' if status == 'actionable' else 'below'} paper buy floor "
+              f"${buy_floor_net:.2f}); gem rate is an operator assumption (never LIVE)")
+    return {
+        "status": status,
+        "target_grade": target_grade,
+        "expected_net": expected_net,
+        "expected_roi_pct": expected_roi_pct,
+        "downside_net": downside,
+        "upside_net": upside,
+        "cost": cost,
+        "gem_rate": gem,
+        "gem_rate_basis": gem_rate_basis or "operator_assumption",
+        "grading_fee": round(fee, 2),
+        "grading_fee_basis": grading_fee_basis or "poke.grading_cost_all_in (config)",
+        "assumptions": assumptions,
+        "blockers": [],
+        "reason": reason,
+    }

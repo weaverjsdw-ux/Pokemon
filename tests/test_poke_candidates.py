@@ -192,3 +192,72 @@ def test_ebay_source_configured_maps_records_as_evidence():
     # advertised price is NOT a verified entry without a live check => evidence-only
     assert rec["entry_verified"] is False
     assert rec["entry_price"] is None
+
+
+# ------------------------------------------------ Session E — asset-keyed candidates
+
+RAW_NM_ASSET = {"asset_class": "raw", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+                "card_number": "161", "condition": "NM"}
+PSA10_ASSET = {"asset_class": "graded", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+               "card_number": "161", "grader": "PSA", "grade": "10", "grade_key": "psa10"}
+PSA9_ASSET = {"asset_class": "graded", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+              "card_number": "161", "grader": "PSA", "grade": "9", "grade_key": "psa9"}
+
+
+def _asset_candidate(asset_key, asset_class, *, grade_key="", condition="", price=400.0,
+                     observed_at="2026-07-05"):
+    return cand.make_candidate(
+        source="manual_verified", product_key=asset_key, asset_key=asset_key,
+        asset_class=asset_class, grade_key=grade_key, condition=condition,
+        entry_price=price, buy_url="https://shop/x", stock_status="verified_buyable",
+        stock_evidence="operator verified page price + stock", stock_checked_at=observed_at,
+        observed_at=observed_at, retailer="Example")
+
+
+def test_asset_candidate_carries_identity():
+    """Session E Slice B — a graded asset candidate keeps its precise identity."""
+    c = _asset_candidate("umbreon_psa10", "graded", grade_key="psa10")
+    assert c.entry_verified is True
+    assert c.asset_key == "umbreon_psa10"
+    assert c.grade_key == "psa10"
+    assert c.asset_class == "graded"
+    assert c.entry_price == 400.0
+
+
+def test_sealed_fold_excludes_asset_rows_even_on_shared_key():
+    """A sealed and an asset candidate sharing the SAME key string must land in
+    disjoint folds — the sealed fold never absorbs an asset candidate."""
+    shared = "umbreon"
+    sealed_row = cand.build_record(cand.make_candidate(
+        source="manual_verified", product_key=shared, asset_class="sealed",
+        entry_price=50.0, buy_url="https://s", stock_status="verified_buyable",
+        stock_evidence="e", stock_checked_at="2026-07-05", observed_at="2026-07-05"))
+    asset_row = cand.build_record(_asset_candidate(shared, "graded", grade_key="psa10"))
+    rows = [sealed_row, asset_row]
+
+    sealed_fold = cand.current_entry_candidates(rows)
+    asset_fold = cand.current_asset_entry_candidates(rows)
+    assert set(sealed_fold) == {shared}
+    assert sealed_fold[shared]["asset_class"] == "sealed"      # not the graded row
+    assert set(asset_fold) == {shared}
+    assert asset_fold[shared]["asset_class"] == "graded"       # keyed on asset_key
+
+
+def test_asset_candidate_for_matches_identity():
+    """asset_candidate_for returns a candidate ONLY when asset_class + identity match
+    (collision-proof across raw/graded/condition)."""
+    rows = [cand.build_record(_asset_candidate("umbreon_psa10", "graded", grade_key="psa10"))]
+    provider = cand.asset_candidate_for_provider(rows)
+    assert provider("umbreon_psa10", PSA10_ASSET) is not None            # exact match
+    assert provider("umbreon_psa10", PSA10_ASSET)["verified_price"] == 400.0
+    assert provider("umbreon_psa9", PSA9_ASSET) is None                  # grade mismatch
+    assert provider("umbreon_raw_nm", RAW_NM_ASSET) is None              # class mismatch
+
+
+def test_asset_candidate_for_ignores_unverified_rows():
+    unverified = cand.build_record(cand.make_candidate(
+        source="manifest_replay", product_key="umbreon_psa10", asset_key="umbreon_psa10",
+        asset_class="graded", grade_key="psa10", stock_status="unverifiable",
+        observed_at="2026-07-05"))
+    provider = cand.asset_candidate_for_provider([unverified])
+    assert provider("umbreon_psa10", PSA10_ASSET) is None                # evidence-only, not a buy

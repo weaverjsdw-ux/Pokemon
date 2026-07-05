@@ -24,9 +24,11 @@ GRADED = "graded"
 ASSET_CLASSES = frozenset({RAW, GRADED})
 
 # Fields surfaced on an asset summary / carried onto opportunities + comps.
+# ``gem_rate`` / ``gem_rate_source`` (Session E) are optional operator assumptions the
+# grading-EV path consumes — never required, never invented (absent => grading EV blocks).
 _SUMMARY_FIELDS = (
     "name", "set", "card_number", "condition", "grader", "grade", "grade_key",
-    "tcgplayer_id", "pricecharting_slug", "ebay_query")
+    "tcgplayer_id", "pricecharting_slug", "ebay_query", "gem_rate", "gem_rate_source")
 
 
 class AssetCatalogError(Exception):
