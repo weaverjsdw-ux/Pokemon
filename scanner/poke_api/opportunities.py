@@ -312,6 +312,8 @@ def build_opportunity(product_key, product, comp, momentum, candidate, cfg, *, a
     momentum_status = str(momentum.get("status") or "no_history")
     momentum_delta_pct = momentum.get("delta_pct")
     stale = bool(comp.get("stale")) or bool(momentum.get("stale"))
+    # latest_confidence is the confidence backing the comp number that drives the
+    # decision (same one buy_verdict caps on), NOT momentum.latest_confidence.
     latest_confidence = confidence if confidence != "none" else None
 
     expected_net, expected_roi_pct, verdict_tier = compute_margin(
