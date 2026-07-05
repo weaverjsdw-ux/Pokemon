@@ -4,6 +4,7 @@ Injected fakes; no network, no PPT. refresh semantics of the read path unchanged
 from __future__ import annotations
 
 from scanner import config as cfg_mod
+from scanner.poke_api import candidates as cand
 from scanner.poke_api import paper_ledger as pl
 from scanner.poke_api import router
 
@@ -37,16 +38,21 @@ def _cfg():
     })
 
 
-def _deps(*, cached=None, candidates=None, decisions=None, today="2026-07-05"):
+def _deps(*, cached=None, candidates=None, decisions=None, candidate_rows=None,
+          today="2026-07-05"):
     provider = FakeProvider(cached or {})
+    candidate_for = (lambda k, p: (candidates or {}).get(k))
+    if candidate_rows is not None and candidates is None:
+        candidate_for = cand.candidate_for_provider(candidate_rows)
     return router.PokeApiDeps(
         products=PRODUCTS,
         read_observations=lambda: [],
         comp_provider=provider,
         today=today,
         cfg=_cfg(),
-        candidate_for=lambda k, p: (candidates or {}).get(k),
+        candidate_for=candidate_for,
         read_decisions=lambda: list(decisions or []),
+        read_candidates=lambda: list(candidate_rows or []),
     ), provider
 
 
@@ -126,3 +132,47 @@ def test_empty_paper_decisions_and_signals():
     deps, _ = _deps()
     assert router.handle_get("/api/poke/paper-decisions", {}, deps)["count"] == 0
     assert router.handle_get("/api/poke/signals", {}, deps)["signals"]["opportunities"] == 0
+
+
+# ---------------------------------------------------------------- candidate endpoints
+
+def _verified_row():
+    return cand.build_record(cand.make_candidate(
+        source="manual_verified", product_key="jt_bb", entry_price=40.0,
+        buy_url="https://shop/x", stock_status="verified_buyable", stock_evidence="e",
+        stock_checked_at="2026-07-05", observed_at="2026-07-05", retailer="Example"))
+
+
+def test_candidates_endpoint_lists_verified():
+    deps, _ = _deps(candidate_rows=[_verified_row()])
+    payload = router.handle_get("/api/poke/candidates", {}, deps)
+    assert payload["ok"] is True
+    assert payload["verified_candidates"] == 1
+    assert payload["candidates"][0]["verified_price"] == 40.0
+    assert payload["candidates"][0]["matched_product_key"] == "jt_bb"
+
+
+def test_candidates_report_endpoint_dormant():
+    deps, _ = _deps(cached={"jt_bb": _arb_row()})       # comp but no candidates
+    payload = router.handle_get("/api/poke/candidates/report", {}, deps)
+    assert payload["ok"] is True
+    a = payload["activation"]
+    assert a["dormant"] is True
+    assert a["verified_candidates"] == 0
+    assert a["no_entry_price_count"] == a["products_seen"]
+
+
+def test_signals_endpoint_includes_activation():
+    deps, _ = _deps(cached={"jt_bb": _arb_row()})
+    payload = router.handle_get("/api/poke/signals", {}, deps)
+    assert "activation" in payload
+    assert payload["activation"]["dormant"] is True
+
+
+def test_candidates_activation_active_with_verified_candidate():
+    deps, _ = _deps(cached={"jt_bb": _arb_row()}, candidate_rows=[_verified_row()])
+    payload = router.handle_get("/api/poke/candidates/report", {}, deps)
+    a = payload["activation"]
+    assert a["verified_candidates"] == 1
+    assert a["live_packet_eligible_count"] == 1          # verified entry + confident comp
+    assert a["dormant"] is False

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from . import candidates as candidates_mod
 from . import history as history_mod
 from . import lab as lab_mod
 from . import model as model_mod
@@ -46,6 +47,8 @@ class PokeApiDeps:
     candidate_for: Callable[[str, dict], dict | None] = lambda key, product: None
     read_decisions: Callable[[], list[dict]] = lambda: []
     decisions_path: Any = None
+    read_candidates: Callable[[], list[dict]] = lambda: []
+    candidates_path: Any = None
 
 
 # ---------------------------------------------------------------- payload helpers
@@ -189,8 +192,34 @@ def _paper_decisions(deps: PokeApiDeps) -> dict:
 
 
 def _signals(deps: PokeApiDeps) -> dict:
-    """Which hypotheses are working over time (hit-rate + mean realized net)."""
-    return _ok({"signals": ledger_mod.signals_report(deps.read_decisions())})
+    """Which hypotheses are working over time (hit-rate + mean realized net), plus
+    the activation/dormancy view (why there are no live packets today)."""
+    opps = lab_mod.build_opportunities(deps, as_of=deps.today)
+    return _ok({
+        "signals": ledger_mod.signals_report(deps.read_decisions()),
+        "activation": lab_mod.activation_report(opps, deps.read_candidates()),
+    })
+
+
+def _candidates(deps: PokeApiDeps) -> dict:
+    """Current verified (entry-bearing) candidates + ledger counts. Read-only, 0
+    credits. Evidence-only rows are counted but not returned as buy candidates."""
+    rows = deps.read_candidates()
+    current = candidates_mod.current_entry_candidates(rows)
+    items = [candidates_mod.to_opportunity_candidate(r) for r in current.values()]
+    return _ok({
+        "count": len(items),
+        "candidates_seen": len(rows),
+        "verified_candidates": len(items),
+        "candidates": items,
+    })
+
+
+def _candidates_report(deps: PokeApiDeps) -> dict:
+    """The candidate activation / dormancy report: why no live packets, the top
+    blockers, and which products are closest."""
+    opps = lab_mod.build_opportunities(deps, as_of=deps.today)
+    return _ok({"activation": lab_mod.activation_report(opps, deps.read_candidates())})
 
 
 # ---------------------------------------------------------------- dispatch
@@ -212,6 +241,10 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
         return _paper_decisions(deps)
     if segments == ["signals"]:
         return _signals(deps)
+    if segments == ["candidates"]:
+        return _candidates(deps)
+    if segments == ["candidates", "report"]:
+        return _candidates_report(deps)
     if len(segments) == 2 and segments[0] == "opportunities":
         return _opportunity(deps, segments[1])
     if len(segments) == 3 and segments[0] == "products":
@@ -262,23 +295,34 @@ class ReadFirstCompProvider:
 
 def build_deps(cfg: Any, *, ledger_path: Path | None = None,
                decisions_path: Path | None = None, today: str | None = None,
-               candidate_for: Callable[[str, dict], dict | None] | None = None
-               ) -> PokeApiDeps:
+               candidate_for: Callable[[str, dict], dict | None] | None = None,
+               candidates_path: Path | None = None) -> PokeApiDeps:
     """Wire the real, PPT-free defaults from config. ``today``/``ledger_path``/
-    ``decisions_path`` are overridable so callers stay deterministic in tests.
+    ``decisions_path``/``candidates_path`` are overridable so callers stay
+    deterministic in tests.
 
-    ``candidate_for`` is an optional verified-deal provider (a future discovery
-    wire); it defaults to none so the read API works with catalog + ledger alone."""
+    ``candidate_for`` is the verified-deal wire. When not injected, it defaults to
+    a provider folded from the append-only ``verified_candidates.jsonl`` ledger —
+    so a manually-added or manifest-replayed verified candidate flows into
+    opportunity scoring automatically. With an empty ledger it returns none, so the
+    read API stays honestly dormant on catalog + comp + momentum alone."""
     from .. import config as cfg_mod
 
     path = ledger_path or (cfg_mod.ROOT / "data" / "poke" / "price_history.jsonl")
     dpath = decisions_path or (cfg_mod.ROOT / "data" / "poke" / "paper_decisions.jsonl")
+    cpath = candidates_path or (cfg_mod.ROOT / "data" / "poke" / "verified_candidates.jsonl")
 
     def read_observations() -> list[dict]:
         return history_mod.read_ledger(path).observations
 
     def read_decisions() -> list[dict]:
         return ledger_mod.read_rows(dpath)
+
+    def read_candidates() -> list[dict]:
+        return candidates_mod.read_rows(cpath)
+
+    if candidate_for is None:
+        candidate_for = candidates_mod.candidate_for_provider(read_candidates())
 
     if today is None:
         from datetime import date
@@ -290,7 +334,9 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         comp_provider=ReadFirstCompProvider(cfg),
         today=today,
         cfg=cfg,
-        candidate_for=candidate_for or (lambda key, product: None),
+        candidate_for=candidate_for,
         read_decisions=read_decisions,
         decisions_path=dpath,
+        read_candidates=read_candidates,
+        candidates_path=cpath,
     )
