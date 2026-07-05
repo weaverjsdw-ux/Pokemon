@@ -24,10 +24,13 @@ The failure vocabulary here is resolver-local (``blocked``/``unavailable``/
 ``drift``/``unresolved``); the verifier maps it onto its own terminal states so
 this module never imports :mod:`scanner.discovery.verify` (no cycle).
 
-**Fixtures are synthetic/representative and operator-probe-pending** — the
-extraction selectors below model documented Slickdeals outbound patterns but are
-not confirmed against a live thread page. Because resolution degrades rather than
-guesses, a stale selector under-alerts (safe) instead of mis-alerting.
+**The featured "See Deal" selectors are live-confirmed** against a real thread
+capture (thread 19650840, 2026-07-04); the legacy synthetic markers are kept
+alongside. That featured CTA resolves to an internal ``/click`` redirect endpoint
+whose merchant landing is followed live but is not exercised offline, so that hop
+stays mocked in tests. Because resolution degrades rather than guesses, a stale
+selector — or a ``/click`` endpoint that stops redirecting — under-alerts (safe)
+instead of mis-alerting.
 """
 from __future__ import annotations
 
@@ -48,11 +51,25 @@ _HTTP_SCHEMES = ("http", "https")
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-# A "See Deal" outbound anchor is recognized by any of these markers (lowercased
-# tag text). Conservative on purpose: an unmarked anchor is never treated as the
-# buy link, so a discussion thread with only nav/comment links resolves to drift.
+# A "See Deal" outbound anchor is recognized by any of these markers (matched as
+# a lowercased substring of the anchor's opening tag). Conservative on purpose:
+# an unmarked anchor is never treated as the buy link, so a discussion thread
+# with only nav/comment links -- or a page of *related*-deal cards -- resolves to
+# drift rather than a guess.
+#
+# Two marker families, both load-bearing:
+#   * legacy synthetic/representative -- documented patterns modelled by the
+#     hand-authored fixtures; kept so those still resolve.
+#   * live-confirmed -- the current Vue-rendered "Get Deal at <store>" CTA on a
+#     real thread page (captured from thread 19650840 on 2026-07-04). Both live
+#     markers sit on the featured deal's outclick <a>. Related-deal cards
+#     (dealCardGrid__*) and in-post outclick links (data-cta="outclick" only, no
+#     see-deal marker) carry NEITHER, so they are deliberately not selected.
+# The featured CTA's href is an internal slickdeals /click redirect endpoint, so
+# resolution still degrades (never guesses) if that endpoint stops redirecting.
 _SEE_DEAL_MARKERS = ("data-role=\"seedealbutton\"", "seedeallink",
-                     "dealbutton", "dealbtn")
+                     "dealbutton", "dealbtn",
+                     "dealdetailsoutclickbutton", "data-qa-ddp-seedeal-button")
 _ANCHOR_RE = re.compile(r"<a\b[^>]*>", re.I)
 _HREF_RE = re.compile(r'\bhref="([^"]+)"', re.I)
 _U2_RE = re.compile(r"[?&]u2=([^&]+)")

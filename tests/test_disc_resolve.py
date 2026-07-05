@@ -11,6 +11,7 @@ guesses, so a stale selector under-alerts instead of mis-alerting.
 """
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -29,6 +30,32 @@ WALMART = ("https://www.walmart.com/ip/"
            "Pokemon-TCG-Mega-Evolution-Ascended-Heroes-Mega-EX-Box/123456789")
 TARGET = "https://www.target.com/p/pokemon-tcg-surging-sparks-booster-bundle/-/A-98765432"
 RD_ENDPOINT = "https://slickdeals.net/rd/12345/?tid=19710355&lno=1&tres=1"
+
+# --- Live capture (thread 19650840, 2026-07-04). See fixture header + test_live_* below.
+THREAD_LIVE = ("https://slickdeals.net/f/19650840-"
+               "pok-mon-tcg-mega-lucario-ex-league-battle-deck-27-95")
+# MOCKED merchant landing for the internal /click redirect. The approved live
+# capture was a SINGLE thread GET only; the /click -> merchant hop was NOT
+# fetched live, so this 302 target is a stand-in that exercises the resolver's
+# existing follow-chain. B0GRCDKMSW is the real Amazon ASIN from the thread.
+AMAZON_LIVE = "https://www.amazon.com/dp/B0GRCDKMSW"
+# Related-deal cards embedded in the same live thread page (OTHER threads).
+RELATED_THREAD_IDS = ("19719783", "19714542", "19719687")
+
+
+def _live_get(calls):
+    """Fake http_get for the live fixture: serves the thread, treats any
+    slickdeals ``/click`` as a 302 to the merchant, records every fetched URL,
+    and refuses any other GET (so a wrongly-selected anchor surfaces loudly)."""
+    def _get(url, **kwargs):
+        calls.append(url)
+        if url == THREAD_LIVE:
+            return _html_resp(_fixture("slickdeals_thread_live_19650840.html"))
+        parsed = urlparse(url)
+        if parsed.netloc.endswith("slickdeals.net") and parsed.path == "/click":
+            return _redirect_resp(AMAZON_LIVE)
+        raise AssertionError(f"unexpected GET: {url}")
+    return _get
 
 
 def _fixture(name):
@@ -142,6 +169,51 @@ def test_resolve_follows_multi_hop_redirect_chain():
     r = resolve.resolve_slickdeals_merchant(
         THREAD_REDIRECT, http_get=_get_map(mapping), checked_at=CHECKED_AT)
     assert r.ok is True and r.resolved_url == TARGET
+
+
+# ------------------------------------------------- live thread markup (Slice 6B)
+# Real captured markup from a current Slickdeals thread (see fixture header). The
+# featured "Get Deal at <store>" CTA is a Vue-rendered outclick button whose href
+# is an internal /click redirect; the resolver must recognize it AND ignore the
+# related-deal cards / in-post links / nav that share the page.
+
+def test_resolve_live_thread_outclick_cta_reaches_merchant():
+    # Selector repair proof: the current live CTA (dealDetailsOutclickButton /
+    # data-qa-ddp-seedeal-button) is recognized, and its internal /click href is
+    # followed off-slickdeals to the merchant.
+    calls = []
+    r = resolve.resolve_slickdeals_merchant(
+        THREAD_LIVE, http_get=_live_get(calls), checked_at=CHECKED_AT)
+    assert r.ok is True
+    assert r.resolved_url == AMAZON_LIVE
+    assert r.method == "redirect_chain"
+    assert r.failure_kind == "" and r.degraded_reason == ""
+    # Exactly two GETs: the thread, then the single /click endpoint it selected.
+    assert len(calls) == 2
+    assert calls[0] == THREAD_LIVE
+    assert urlparse(calls[1]).path == "/click"
+
+
+def test_resolve_live_thread_selects_only_featured_deal_ctas():
+    # Conservatism proof (negative): on the SAME real page, _see_deal_hrefs picks
+    # only the featured deal's outclick anchors (3 buttons + 1 deal image, all the
+    # same merchant) and NONE of the related-deal cards, the sticky image link,
+    # the in-post outclick link (data-cta only, no see-deal marker), or nav.
+    hrefs = resolve._see_deal_hrefs(_fixture("slickdeals_thread_live_19650840.html"))
+    assert len(hrefs) == 4
+    for h in hrefs:
+        assert h.startswith("https://slickdeals.net/click?")   # featured /click only
+        assert "u3=" not in h                                  # not the in-post link
+        assert "dealCardGrid" not in h and "/forums/" not in h
+    assert not any(rid in h for h in hrefs for rid in RELATED_THREAD_IDS)
+    # And end-to-end the resolution is the merchant, never a related thread card.
+    calls = []
+    r = resolve.resolve_slickdeals_merchant(
+        THREAD_LIVE, http_get=_live_get(calls), checked_at=CHECKED_AT)
+    assert r.resolved_url == AMAZON_LIVE
+    for rid in RELATED_THREAD_IDS:
+        assert rid not in r.resolved_url
+        assert not any(rid in u for u in calls)
 
 
 # ------------------------------------------------------------- follow_to_merchant

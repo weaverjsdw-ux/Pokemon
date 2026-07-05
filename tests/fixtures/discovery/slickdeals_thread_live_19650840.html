@@ -1,0 +1,72 @@
+<!--
+  LIVE CAPTURE (reduced) — REAL Slickdeals thread markup, not synthetic.
+
+  Source thread : https://slickdeals.net/f/19650840
+  Resolved URL  : https://slickdeals.net/f/19650840-pok-mon-tcg-mega-lucario-ex-league-battle-deck-27-95
+  Captured      : 2026-07-04 (operator-approved single live GET)
+  Client        : requests.get with resolve._UA + Accept: text/html, timeout=20
+                  (identical to resolve_slickdeals_merchant's own thread fetch),
+                  HTTP 200, 763 KB. No Cloudflare/JS challenge was served.
+
+  WHY REDUCED: resolve.py parses only the opening <a> tags via regex, so this
+  file preserves the real anchor tags VERBATIM (classes, data-* attributes and
+  hrefs exactly as captured) and drops the ~760 KB of Vue runtime / embedded
+  JSON / styling that the resolver never reads. Fidelity was confirmed at capture
+  time: resolve._see_deal_hrefs() run against the full 763 KB capture selected
+  exactly these 4 featured-deal /click anchors (no spurious match from the Vue
+  hydration JSON that also contains data-qa-ddp-seedeal-button), matching this
+  reduction. The pv=/au= query values are per-request Slickdeals attribution
+  tokens from the anonymous capture (not credentials).
+
+  WHAT THIS FIXTURE PROVES:
+   * The current live "Get Deal at <store>" CTA is a Vue-rendered outclick
+     button (class dealDetailsOutclickButton / data-qa-ddp-seedeal-button) whose
+     href is an internal slickdeals /click redirect endpoint (no u2= param) — the
+     resolver must FOLLOW it to reach the merchant.
+   * The featured deal's outclick anchors (below) MUST resolve.
+   * The related-deal cards (dealCardGrid__*, other threads), the sticky image
+     link, the in-post outclick link (data-cta="outclick" only, no see-deal
+     marker) and the comment/forum nav links MUST NOT be selected.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Pokémon TCG Mega Lucario ex League Battle Deck $27.95 - Slickdeals</title></head>
+<body>
+  <div class="dealDetailsStickyBar">
+    <!-- sticky image link: /click outbound but NO see-deal marker -> not selected -->
+    <a href="https://slickdeals.net/click?trd=Get%20Deal%20at%20Amazon&amp;sdtid=19650840&amp;tid=19650840&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;pv=b644791a777011f1aa1d028ee681c8eb&amp;au=4bce29d007d94fdcbb597dd5b2cda75e" target="_blank" class="dealDetailsStickyBar__imageContainer" data-v-b21feca5><img alt="deal"/></a>
+    <!-- PRIMARY CTA (featured deal, first in document order) -> must resolve -->
+    <a class="dealDetailsOutclickButton dealDetailsStickyBar__outclickButton" target="_blank" type="button" href="https://slickdeals.net/click?trd=Get%20Deal%20at%20Amazon&amp;sdtid=19650840&amp;tid=19650840&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;pv=b644791a777011f1aa1d028ee681c8eb&amp;au=4bce29d007d94fdcbb597dd5b2cda75e" rel="nofollow" data-product-forum="Hot Deals" data-product-products="19650840" data-product-exitwebsite="amazon.com" data-storename="Amazon" data-cta="outclick" data-outclick-typeofoutclick="FORUMTHREAD Body Get Deal at Amazon" data-expiredmodal="0" data-show-loyalty-outclick-flow="false" data-qa-ddp-seedeal-button data-store-id="1" data-store-slug="amazon" data-aps-asin="B0GRCDKMSW" data-aps-asc-tag="slickdeals09-20" data-aps-asc-subtag="%ascsubtag%" data-v-b21feca5 data-v-4ad72b92>Get Deal at Amazon</a>
+  </div>
+
+  <div class="dealDetailsMainBlock">
+    <!-- deal image outclick (data-qa-ddp-seedeal-button) -> featured deal, same merchant -->
+    <a href="https://slickdeals.net/click?trd=Deal+Image&amp;sdtid=19650840&amp;tid=19650840&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;pv=b644791a777011f1aa1d028ee681c8eb&amp;au=4bce29d007d94fdcbb597dd5b2cda75e" target="_blank" rel="nofollow" data-product-forum="Hot Deals" data-product-products="19650840" data-product-exitwebsite="amazon.com" data-storename="Amazon" data-cta="outclick" data-outclick-typeofoutclick="FORUMTHREAD Body Get Deal at Amazon" data-expiredmodal="0" data-show-loyalty-outclick-flow="false" data-qa-ddp-seedeal-button data-store-id="1" data-store-slug="amazon" data-aps-asin="B0GRCDKMSW" data-aps-asc-tag="slickdeals09-20" data-aps-asc-subtag="%ascsubtag%" data-v-2679cccc><figure class="dealImage"></figure></a>
+    <!-- second featured CTA button (same merchant) -->
+    <a class="dealDetailsOutclickButton dealDetailsMainBlock__outclickButton" target="_blank" type="button" href="https://slickdeals.net/click?trd=Get%20Deal%20at%20Amazon&amp;sdtid=19650840&amp;tid=19650840&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;pv=b644791a777011f1aa1d028ee681c8eb&amp;au=4bce29d007d94fdcbb597dd5b2cda75e" rel="nofollow" data-product-forum="Hot Deals" data-product-products="19650840" data-product-exitwebsite="amazon.com" data-storename="Amazon" data-cta="outclick" data-outclick-typeofoutclick="FORUMTHREAD Body Get Deal at Amazon" data-expiredmodal="0" data-show-loyalty-outclick-flow="false" data-qa-ddp-seedeal-button data-store-id="1" data-store-slug="amazon" data-aps-asin="B0GRCDKMSW" data-aps-asc-tag="slickdeals09-20" data-aps-asc-subtag="%ascsubtag%" data-v-1762ddd7 data-v-4ad72b92>Get Deal at Amazon</a>
+    <!-- comment jump link -> not selected -->
+    <a href="#commentsBox" class="dealDetailsMainBlock__comment" data-v-1762ddd7>Comments</a>
+  </div>
+
+  <div class="threadPost">
+    <!-- in-post outclick link: data-cta="outclick" but NO see-deal marker -> not selected -->
+    <a href="https://slickdeals.net/click?sdtid=19650840&amp;sdfid=9&amp;sdfib=1&amp;lno=1&amp;trd=https%20www%20amazon%20com%20dp%20B0GRCDKM&amp;pv=&amp;au=&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;u3=MtCkbFXd4d9K-4XojlhyBWGuRfZWsDSVBMSa9q0zNxUCM-f_C2VFBm6xEaPV6bLdQD9hCFrzR6iBeApf6q2AHkI" target="_blank" data-product-forum="Hot Deals" data-product-products="19650840" data-cta="outclick" data-outclick-typeofoutclick="Post Content Link" data-product-exitWebsite="amazon.com" data-store-id="1" data-store-slug="amazon" data-aps-asin="B0GRCDKMSW" data-aps-asc-tag="slickdeals09-20" data-aps-asc-subtag="%ascsubtag%" rel="nofollow">https://www.amazon.com/dp/B0GRCDKMSW</a>
+  </div>
+
+  <div class="communityVotingBar">
+    <!-- third featured CTA button (same merchant) -->
+    <a class="dealDetailsOutclickButton communityVotingBar__seeMerchant" target="_blank" type="button" href="https://slickdeals.net/click?trd=Get%20Deal%20at%20Amazon&amp;sdtid=19650840&amp;tid=19650840&amp;prop=diavail-true%7Cdincp-2%7Cdinpd-1%7Cdipgavail-true&amp;pv=b644791a777011f1aa1d028ee681c8eb&amp;au=4bce29d007d94fdcbb597dd5b2cda75e" rel="nofollow" data-product-forum="Hot Deals" data-product-products="19650840" data-product-exitwebsite="amazon.com" data-storename="Amazon" data-cta="outclick" data-outclick-typeofoutclick="FORUMTHREAD Body Get Deal at Amazon" data-expiredmodal="0" data-show-loyalty-outclick-flow="false" data-qa-ddp-seedeal-button data-store-id="1" data-store-slug="amazon" data-aps-asin="B0GRCDKMSW" data-aps-asc-tag="slickdeals09-20" data-aps-asc-subtag="%ascsubtag%" data-v-84caf262 data-v-4ad72b92>Get Deal at Amazon</a>
+  </div>
+
+  <aside class="recommendedDeals">
+    <!-- RELATED-DEAL cards: other threads, must NOT be selected -->
+    <a class="dealCardGrid__title" href="/f/19719783-dji-mini-4k-fly-more-combo-drone-with-4k-uhd-camera-3-axis-gimbal-stabilization-10km-video-transmission-auto-return-3-batteries-293-55?src=rcm_popular_deals" target="_self" data-v-8e5b34b8>DJI Mini 4K Fly More Combo</a>
+    <a class="dealCardGrid__title" href="/f/19714542-8-17-amazon-essentials-men-s-skinny-fit-broken-in-chino-pant-various-colors-sizes-15-63?src=rcm_popular_deals" target="_self" data-v-8e5b34b8>Amazon Essentials Chino Pant</a>
+    <a class="dealCardGrid__title" href="/f/19719687-mophie-45w-powerstation-fast-20-000mah-power-bank-34-99-free-s-h-w-prime-or-35?src=rcm_popular_deals" target="_self" data-v-8e5b34b8>Mophie 45W Powerstation</a>
+  </aside>
+
+  <footer class="threadFooter">
+    <a href="/forums/register.php?action_source=Sign+Up+To+Remove+Ad" class="commentsAd__signUpLink" data-v-02067845>Sign up</a>
+  </footer>
+</body>
+</html>
