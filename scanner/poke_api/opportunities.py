@@ -81,6 +81,7 @@ class Opportunity:
     decision_hint: str = "WATCH"
     score: float = 0.0
     score_breakdown: dict[str, float] = field(default_factory=dict)
+    input_snapshot: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- ids & helpers
@@ -295,6 +296,21 @@ def score_opportunity(*, discount_pct, expected_net, expected_roi_pct,
 
 # ---------------------------------------------------------------- assemble
 
+# Candidate provenance carried onto the opportunity (and thus the paper decision's
+# input_snapshot) — the audit trail from verified evidence to the recorded call.
+_CANDIDATE_PROVENANCE = (
+    "candidate_id", "source", "retailer", "listing_id", "url", "stock_status",
+    "stock_evidence", "stock_checked_at", "evidence_method", "observed_at", "confidence")
+
+
+def _input_snapshot(candidate) -> dict:
+    """Curated candidate provenance for the decision's input_snapshot. Empty when
+    there is no candidate (catalog-only opportunity)."""
+    if not candidate:
+        return {}
+    return {k: candidate.get(k) for k in _CANDIDATE_PROVENANCE if candidate.get(k) is not None}
+
+
 def build_opportunity(product_key, product, comp, momentum, candidate, cfg, *, as_of):
     """Assemble one deterministic Opportunity from the owned comp/momentum shapes
     and an optional verified deal candidate."""
@@ -377,4 +393,5 @@ def build_opportunity(product_key, product, comp, momentum, candidate, cfg, *, a
         decision_hint=decision,
         score=score,
         score_breakdown=breakdown,
+        input_snapshot=_input_snapshot(candidate),
     )

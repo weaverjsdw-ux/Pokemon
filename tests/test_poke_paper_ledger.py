@@ -104,6 +104,18 @@ def test_signals_report_hit_rate_and_realized_net(tmp_path):
     assert watch["hit_rate"] is None and watch["mean_realized_net"] is None
 
 
+def test_decision_row_preserves_input_snapshot(tmp_path):
+    """A candidate-backed decision carries the candidate's source + evidence
+    (input_snapshot) into the immutable decision row."""
+    path = tmp_path / "paper_decisions.jsonl"
+    snap = {"source": "manual_verified", "candidate_id": "abc123",
+            "stock_evidence": "operator verified page price + stock"}
+    pl.record_decision(path, _opp(input_snapshot=snap), recorded_at="t1")
+    row = pl.read_rows(path)[0]
+    assert row["input_snapshot"]["source"] == "manual_verified"
+    assert row["input_snapshot"]["candidate_id"] == "abc123"
+
+
 def test_rows_are_valid_json_lines(tmp_path):
     path = tmp_path / "paper_decisions.jsonl"
     pl.record_decision(path, _opp(), recorded_at="t1")

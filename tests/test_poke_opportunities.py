@@ -287,3 +287,31 @@ def test_build_opportunity_stale_comp(cfg):
     assert o.stale is True
     assert o.trade_type == "sealed_stale_comp"
     assert o.decision_hint == "WATCH"
+
+
+def test_build_opportunity_preserves_candidate_input_snapshot(cfg_policy):
+    """Candidate source + evidence are preserved on the opportunity so the paper
+    decision can carry them (audit trail from evidence to decision)."""
+    cand_dict = {"verified_price": 40.0, "retailer": "Example", "source": "manual_verified",
+                 "candidate_id": "abc123", "listing_id": "L1",
+                 "stock_status": "verified_buyable",
+                 "stock_evidence": "operator verified page price + stock",
+                 "stock_checked_at": "2026-07-05", "observed_at": "2026-07-05",
+                 "evidence_method": "operator", "confidence": "high"}
+    o = opp.build_opportunity(
+        "jt_bb", PRODUCT,
+        comp_resp(estimate=90.0, confidence="high",
+                  sources=[{"source": "tcgplayer"}, {"source": "pricecharting"}]),
+        mom(status="ok", delta_pct=2.5, last_seen="2026-07-03"),
+        cand_dict, cfg_policy, as_of="2026-07-05")
+    assert o.input_snapshot["source"] == "manual_verified"
+    assert o.input_snapshot["candidate_id"] == "abc123"
+    assert "verified" in o.input_snapshot["stock_evidence"]
+
+
+def test_build_opportunity_no_candidate_has_empty_input_snapshot(cfg):
+    o = opp.build_opportunity(
+        "jt_bb", PRODUCT, comp_resp(estimate=90.0, confidence="high"),
+        mom(status="ok", delta_pct=3.0, last_seen="2026-07-03"),
+        None, cfg, as_of="2026-07-05")
+    assert o.input_snapshot == {}

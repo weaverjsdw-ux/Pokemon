@@ -22,11 +22,13 @@ from pathlib import Path
 
 OUTCOME_STATUSES = {"SOLD", "HELD", "PRICE_UP", "PRICE_DOWN", "EXPIRED", "VOID"}
 
-# Fields lifted from an opportunity (asdict) onto a decision row.
+# Fields lifted from an opportunity (asdict) onto a decision row. ``input_snapshot``
+# preserves the candidate provenance (source + stock evidence) that backed the call.
 _DECISION_SNAPSHOT = (
     "product_key", "name", "trade_type", "hypothesis", "entry_price", "market_comp",
     "msrp", "discount_pct", "expected_net", "expected_roi_pct", "verdict_tier",
     "latest_confidence", "momentum_delta_pct", "momentum_status", "stale", "score",
+    "input_snapshot",
 )
 
 
