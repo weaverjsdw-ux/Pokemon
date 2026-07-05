@@ -144,12 +144,87 @@ Which hypotheses are working over time.
      "hit_rate": 0.5, "mean_realized_net": 7.5}}}}
 ```
 
-> The read API produces opportunities from **catalog + comp + momentum only**;
-> `entry_price` requires a *verified deal candidate*, which is a future discovery
-> wire (`candidate_for` defaults to none). Until that lands, every opportunity is
-> a `WATCH`/`catalog_gap`/`momentum_watch` — honestly, because there is no verified
-> buy price to act on. The `LIVE_PACKET_ELIGIBLE` / `PAPER_BUY` paths are exercised
-> whenever a verified candidate is supplied.
+> The read API produces opportunities from **catalog + comp + momentum**, plus any
+> **verified candidate** in the intake ledger (see *Activation* below). With an
+> empty candidate ledger, `entry_price` is `None` and every opportunity is a
+> `WATCH`/`catalog_gap`/`momentum_watch` — honestly, because there is no verified
+> buy price to act on. Supply a verified candidate (manual intake or manifest
+> replay) and the `PAPER_BUY` / `LIVE_PACKET_ELIGIBLE` paths light up for that
+> product.
+
+## Activation — the verified candidate wire
+
+Phase C ships dormant-but-correct: structurally right, but producing no buy-shaped
+decisions until a **verified entry price** flows in. That wire is
+`scanner/poke_api/candidates.py` + an append-only ledger at
+`data/poke/verified_candidates.jsonl`.
+
+**The entry gate (STOP-class).** A candidate carries an `entry_price` **only** when
+it clears an evidence gate that mirrors `discovery/verify.alert_allowed`:
+positive-buyable `stock_status` (`verified_buyable` / `in_stock` / `limited`) **and**
+an observed price > 0 **and** a `buy_url` **and** stock evidence text **and** a
+`stock_checked_at`. Miss any of those and the candidate is still recorded — as an
+**evidence row** with `entry_price = None` — but it can only WATCH/REJECT, never
+PAPER_BUY or LIVE_PACKET_ELIGIBLE. A `parser_suspect` / `unverifiable` candidate is
+evidence, never a buy. Idempotent by a sha256 `candidate_id`; old rows are never
+rewritten.
+
+**Two evidence-backed intake sources** (both structurally PPT-free / network-free):
+
+1. **Manual, operator-verified** — `lab candidate-add` appends one candidate the
+   operator has verified on the retail page. This is not a fake source; it is an
+   evidence-backed manual observation.
+2. **Discovery manifest replay** — `lab candidates-from-manifest` reads an existing
+   discovery board / manifest and imports **only** verified-buyable rows (positive
+   stock + `buy_url` + verified price) as candidates. Rows that are
+   `parser_suspect` / `unverifiable` / `out_of_stock` / `price_mismatch` are
+   summarized as **blocked evidence**, never converted to buys; a buyable row that
+   maps to no catalog product is reported as **unmatched**, never silently dropped.
+   Replay gates on **stock evidence**, never on `deal_price` — a sealed board
+   carries MSRP-as-`deal_price` with a *comp*-level `price_confidence: verified`,
+   which is **not** a purchasable entry. Pointed at a bare sealed *manifest* (no
+   `deals` array), replay resolves the sibling `<sweep_id>.json` board, or reports
+   `manifest_no_deals` — it never reads a wrong file as "0 buyable".
+
+eBay Browse is prepared but **not required**: `candidates-from-ebay` returns a
+clean `not_configured` (`NEEDS_API_KEY`) when no keyset is present; with a keyset,
+the model maps injected Browse items to **evidence-only** candidates (an advertised
+BIN price is not a verified entry until the keyed live check — a later slice).
+
+**`build_deps` wires it automatically.** The live API defaults `candidate_for` to a
+provider folded from `verified_candidates.jsonl`, so a manually-added or replayed
+verified candidate flows into `/api/poke/opportunities` and `/signals` with no code
+change. Empty ledger ⇒ honestly dormant.
+
+**Provenance is preserved.** A candidate-backed opportunity carries the candidate's
+source + stock evidence in `input_snapshot`, which the paper decision row records
+immutably — the audit trail runs verified evidence → decision.
+
+`price_history.jsonl` stays **read-only** throughout; activation only appends to
+`verified_candidates.jsonl` (candidates) and `paper_decisions.jsonl` (decisions).
+
+## Dormancy & activation report
+
+`lab candidates-report` (and `GET /api/poke/candidates/report`, and the `activation`
+block on `/api/poke/signals`) answers *why there are no live packets today*:
+
+```json
+{"products_seen": 22, "candidates_seen": 0, "verified_candidates": 0,
+ "paper_buy_count": 0, "live_packet_eligible_count": 0, "watch_count": 22,
+ "reject_count": 0, "no_entry_price_count": 22, "no_comp_count": 9,
+ "stale_comp_count": 0, "parser_suspect_count": 0,
+ "top_blockers": [{"blocker": "opportunities_without_verified_entry_price", "count": 22}, ...],
+ "closest_products": [{"product_key": "...", "score": 12.0, "decision_hint": "WATCH",
+                       "blocker": "no verified entry price"}, ...],
+ "dormant": true,
+ "why_no_live_packets": "no verified buy candidates yet — every opportunity lacks a
+   verified entry price; add one via `candidate-add` or replay a discovery manifest"}
+```
+
+Add one valid verified candidate and the same report goes **active**: the product's
+opportunity gains `entry_price` / net / ROI, records `PAPER_BUY` (or
+`LIVE_PACKET_ELIGIBLE` if it clears the stricter live floor), and `dormant` flips
+to `false`.
 
 ## CLI
 
@@ -159,10 +234,22 @@ python -m scanner.poke_api.lab record --product KEY [--decision D] [--reason R] 
 python -m scanner.poke_api.lab record-all [--as-of DATE]   # record every decision hint
 python -m scanner.poke_api.lab outcome --opportunity ID --status S \
         [--price P] [--net N] [--note ...] [--observed-at DATE]
-python -m scanner.poke_api.lab report [--json]        # signals + replay
+python -m scanner.poke_api.lab report [--json] [--include-candidates]   # signals + replay (+ activation)
+
+# --- activation: verified candidate intake + replay + reporting ---
+python -m scanner.poke_api.lab candidate-add --product-key KEY --entry-price P \
+        --buy-url URL --stock-status verified_buyable --evidence "..." \
+        [--source manual_verified] [--retailer R] [--confidence C] [--observed-at DATE]
+python -m scanner.poke_api.lab candidates-from-manifest --manifest PATH [--json]
+python -m scanner.poke_api.lab candidates-report [--json]   # dormancy / blockers / closest
+python -m scanner.poke_api.lab record-candidates            # record candidate-backed decisions
+python -m scanner.poke_api.lab candidates-from-ebay [--json]  # not_configured without a keyset
 ```
 
-Outcome `status` ∈ `SOLD | HELD | PRICE_UP | PRICE_DOWN | EXPIRED | VOID`.
+Outcome `status` ∈ `SOLD | HELD | PRICE_UP | PRICE_DOWN | EXPIRED | VOID`. A
+`candidate-add` whose `--product-key` is not in the catalog is rejected (reported,
+not written); one missing stock evidence is kept as an **evidence row** (no
+`entry_price`), never a buy.
 
 ## Ledger & immutability
 
@@ -178,12 +265,25 @@ history is auditable and replay-safe. `opportunity_id = sha256(product_key |
 trade_type | as_of)` — stable within an evidence date, so the same product on a
 later day is a fresh hypothesis instance.
 
+## Endpoints (activation)
+
+### `GET /api/poke/candidates`
+Current verified (entry-bearing) candidates + ledger counts (`candidates_seen`,
+`verified_candidates`). Evidence-only rows are counted, not returned as buys.
+
+### `GET /api/poke/candidates/report`
+The dormancy / activation report (same shape as `candidates-report`).
+
+`GET /api/poke/signals` also carries the `activation` block alongside `signals`.
+
 ## Limitations
 
 - **Sealed-only.** Singles/graded are Phase D; `asset_class` is present for
   forward-compatibility.
-- **No verified-entry wire yet.** See the endpoint note above — arbitrage /
-  live-packet paths need a verified deal candidate source (future discovery wire).
+- **Verified-entry wire is live, evidence-gated.** Arbitrage / live-packet paths
+  activate from the `verified_candidates.jsonl` ledger (manual intake or manifest
+  replay). eBay Browse is prepared but keyset-gated (`not_configured` until
+  provisioned); catalog-retailer same-listing verification is a later slice.
 - **History depth = ledger depth.** Momentum is only as deep as
   `price_history.jsonl` has grown.
 - **Paper mode only.** `LIVE_PACKET_ELIGIBLE` is a tag for human review, not an

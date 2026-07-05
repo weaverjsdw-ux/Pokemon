@@ -44,3 +44,8 @@ test_baseline.txt
 
 # /poke rendered dashboards are build output (regenerate via `python -m scanner.discovery.render`)
 dashboards/
+
+# Money Hypothesis Lab runtime ledgers — append-only, disposable, regenerated at
+# runtime (never committed; like price_history.jsonl they are local evidence files).
+data/poke/paper_decisions.jsonl
+data/poke/verified_candidates.jsonl
