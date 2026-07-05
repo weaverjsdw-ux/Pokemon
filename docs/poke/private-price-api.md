@@ -11,7 +11,10 @@ north-star ladder:
 - **A — Private Sealed API v1** (this doc): stable sealed comp + catalog endpoints.
 - **B — History + Momentum Engine** (this doc): `price_history.jsonl` becomes a
   queryable time-series (latest, source history, freshness, momentum).
-- C — Opportunity + Paper-Trade Lab *(next session; not built here)*.
+- **C — Opportunity + Paper-Trade Lab** — BUILT; see
+  [`money-hypothesis-lab.md`](money-hypothesis-lab.md). Adds opportunity scoring
+  + an append-only paper-trade ledger with outcome replay + signals, and the
+  `/api/poke/opportunities`, `/paper-decisions`, `/signals` endpoints.
 - D — Singles + Graded clone layer *(future; sealed-only today)*.
 - E — Better-than-PPT personal edge layer *(future)*.
 
