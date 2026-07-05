@@ -23,15 +23,22 @@ from .. import verdict as verdict_mod
 
 TBD = "TBD_OPERATOR_POLICY"
 
-# Trade taxonomy (sealed-only in Phase C). key -> the money hypothesis it tests.
+# Trade taxonomy. key -> the money hypothesis it tests. Sealed types are Phase C;
+# the raw_* / graded_* types are Track D (conservative, WATCH-only evidence rows —
+# NONE are live-eligible in D; a verified-entry buy wire for singles is Session E).
 TRADE_TYPES: dict[str, str] = {
     "sealed_catalog_gap": "product lacks enough comp/history data; improve before acting",
     "sealed_stale_comp": "comp exists but is stale; not safe for action, refresh first",
     "sealed_retail_arbitrage": "verified retail price is materially below current market comp",
     "sealed_momentum_watch": "appreciating/strengthening, but no buyable entry confirmed yet",
     "sealed_no_edge": "no current actionable edge",
+    "raw_catalog_gap": "raw single lacks enough comp/history data; improve before acting",
+    "raw_market_watch": "raw single has a comp/appreciation signal, but no buyable entry (watch only)",
+    "graded_catalog_gap": "graded slab lacks enough comp/history data; improve before acting",
+    "graded_market_watch": "graded slab has a comp/appreciation signal, but no buyable entry (watch only)",
 }
 # Only these trade types may EVER reach LIVE_PACKET_ELIGIBLE (evidence-spine anchor).
+# Raw/graded types are deliberately absent — assets are never live-eligible in D.
 LIVE_ELIGIBLE: set[str] = {"sealed_retail_arbitrage"}
 
 # Scoring weights (module-level so they are easy to audit/tune; no ML).
@@ -82,6 +89,11 @@ class Opportunity:
     score: float = 0.0
     score_breakdown: dict[str, float] = field(default_factory=dict)
     input_snapshot: dict = field(default_factory=dict)
+    # Track D asset identity (None for sealed products, so sealed rows are unchanged).
+    condition: str | None = None
+    grader: str | None = None
+    grade: str | None = None
+    card_number: str | None = None
 
 
 # ---------------------------------------------------------------- ids & helpers
@@ -394,4 +406,93 @@ def build_opportunity(product_key, product, comp, momentum, candidate, cfg, *, a
         score=score,
         score_breakdown=breakdown,
         input_snapshot=_input_snapshot(candidate),
+    )
+
+
+# ---------------------------------------------------------------- Track D (assets)
+
+def classify_asset_trade(*, asset_class: str, market_comp, momentum_status: str) -> str:
+    """Conservative, first-match-wins asset classification. Only ever
+    ``{raw,graded}_catalog_gap`` (no comp / no history) or ``{raw,graded}_market_watch``
+    (a comp exists — watch only). Never an arbitrage type: there is no verified-entry
+    buy wire for singles in D, so an asset can never be a buy."""
+    prefix = "graded" if asset_class == "graded" else "raw"
+    if market_comp is None or momentum_status == "no_history":
+        return f"{prefix}_catalog_gap"
+    return f"{prefix}_market_watch"
+
+
+def build_asset_opportunity(asset_key, asset, comp, momentum, cfg, *, as_of):
+    """Assemble one WATCH-grade Opportunity for a raw/graded asset from its owned
+    comp + momentum. STOP-class + D policy: no entry price (no singles buy wire),
+    no money math, and the decision is ALWAYS ``WATCH`` — an asset is never
+    live-eligible in D, regardless of the numbers."""
+    asset_class = str(asset.get("asset_class") or "raw")
+    market_comp = comp.get("estimate")
+    confidence = str(comp.get("confidence") or "none")
+    sources = comp.get("sources") or []
+    source_count = len(sources)
+
+    momentum_status = str(momentum.get("status") or "no_history")
+    momentum_delta_pct = momentum.get("delta_pct")
+    stale = bool(comp.get("stale")) or bool(momentum.get("stale"))
+    latest_confidence = confidence if confidence != "none" else None
+    source_agreement = _source_agreement(source_count, confidence)
+
+    trade_type = classify_asset_trade(
+        asset_class=asset_class, market_comp=market_comp, momentum_status=momentum_status)
+
+    risks = _risks(
+        stale=stale, momentum_status=momentum_status, confidence=confidence,
+        source_count=source_count, market_comp=market_comp, msrp=None,
+        momentum_delta_pct=momentum_delta_pct, entry_price=None)
+    evidence = _evidence(
+        comp=comp, momentum=momentum, candidate=None, entry_price=None,
+        discount_pct=None, expected_net=None, expected_roi_pct=None)
+    # Decision is fixed WATCH for assets in D (not routed through decide(): there is
+    # no live path to reach, and this makes the "never live" guarantee explicit).
+    reason = TRADE_TYPES[trade_type]
+    evidence = evidence + [f"decision: WATCH — {reason} (raw/graded not live-eligible in D)"]
+
+    score, breakdown = score_opportunity(
+        discount_pct=None, expected_net=None, expected_roi_pct=None,
+        momentum_status=momentum_status, momentum_delta_pct=momentum_delta_pct,
+        confidence=confidence, source_agreement=source_agreement, stale=stale,
+        risks=risks, cfg=cfg)
+
+    return Opportunity(
+        opportunity_id=opportunity_id(asset_key, trade_type, as_of),
+        product_key=asset_key,
+        name=asset.get("name") or asset_key,
+        asset_class=asset_class,
+        as_of=as_of,
+        hypothesis=TRADE_TYPES[trade_type],
+        trade_type=trade_type,
+        live_eligible=trade_type in LIVE_ELIGIBLE,   # always False for assets in D
+        entry_price=None,
+        market_comp=market_comp,
+        unopenedPrice=market_comp,
+        msrp=None,
+        discount_pct=None,
+        expected_net=None,
+        expected_roi_pct=None,
+        verdict_tier="n/a",
+        momentum_delta_pct=momentum_delta_pct,
+        momentum_status=momentum_status,
+        latest_confidence=latest_confidence,
+        source_count=source_count,
+        source_agreement=source_agreement,
+        stale=stale,
+        hold_days=cfg.opportunity.max_hold_days.get(trade_type, TBD),
+        exit_venue=cfg.opportunity.exit_venue.get(trade_type, TBD),
+        evidence=evidence,
+        risks=risks,
+        decision_hint="WATCH",
+        score=score,
+        score_breakdown=breakdown,
+        input_snapshot={},
+        condition=asset.get("condition"),
+        grader=asset.get("grader"),
+        grade=asset.get("grade"),
+        card_number=asset.get("card_number"),
     )

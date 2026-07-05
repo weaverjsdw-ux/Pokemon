@@ -1,0 +1,56 @@
+# Raw + graded single-card asset catalog (Track D).
+#
+# SEPARATE from data/products.yaml (sealed) so the sealed catalog is never
+# polluted. Each entry maps a friendly asset_key -> a raw single or graded slab.
+# Loaded by scanner/poke_api/catalog.py and served under /api/poke/assets.
+#
+# Required fields:
+#   raw    -> asset_class: raw,    name, set, condition (card_number when known)
+#   graded -> asset_class: graded, name, set, grader, grade (grade_key derived if omitted)
+#
+# Optional exact-source ids/urls (NEVER required — absent means an honest `none`
+# comp, never a guessed number). A comp only resolves when its exact source is
+# both mapped AND configured (e.g. PPT market.preferred + key); otherwise every
+# asset honestly reports estimate: null / confidence: none.
+#   tcgplayer_id       -> exact TCGplayer product id (raw market + graded /cards)
+#   pricecharting_slug -> exact PriceCharting page (raw + graded fallback)
+#   ebay_query         -> exact eBay query (active-ask CONTEXT only, never a comp)
+#
+# These are example rows: they are unmapped/unconfigured by default, so they
+# surface as WATCH catalog-gap opportunities with estimate: null until an exact
+# source is mapped and configured. Edit/extend as you build the singles catalog.
+
+umbreon_ex_161_raw_nm:
+  asset_class: raw
+  name: "Umbreon ex 161"
+  set: "Prismatic Evolutions"
+  card_number: "161"
+  condition: "NM"
+  # tcgplayer_id: ""        # map the exact TCGplayer product id to enable a comp
+  # pricecharting_slug: ""
+  # ebay_query: "Umbreon ex 161 Prismatic Evolutions raw NM"
+
+umbreon_ex_161_raw_lp:
+  asset_class: raw
+  name: "Umbreon ex 161"
+  set: "Prismatic Evolutions"
+  card_number: "161"
+  condition: "LP"
+
+umbreon_ex_161_psa10:
+  asset_class: graded
+  name: "Umbreon ex 161"
+  set: "Prismatic Evolutions"
+  card_number: "161"
+  grader: "PSA"
+  grade: "10"
+  # grade_key derived as psa10; map tcgplayer_id + configure PPT to resolve a comp
+  # tcgplayer_id: ""
+
+umbreon_ex_161_psa9:
+  asset_class: graded
+  name: "Umbreon ex 161"
+  set: "Prismatic Evolutions"
+  card_number: "161"
+  grader: "PSA"
+  grade: "9"

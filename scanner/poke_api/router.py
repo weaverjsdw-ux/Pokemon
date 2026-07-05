@@ -15,15 +15,18 @@ so tests are hermetic; ``build_deps`` wires the real, still-PPT-free defaults.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from . import asset_model as asset_model_mod
 from . import candidates as candidates_mod
+from . import catalog as catalog_mod
 from . import history as history_mod
 from . import lab as lab_mod
 from . import model as model_mod
 from . import paper_ledger as ledger_mod
+from . import sources as sources_mod
 
 _PREFIX = "/api/poke/"
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -49,6 +52,14 @@ class PokeApiDeps:
     decisions_path: Any = None
     read_candidates: Callable[[], list[dict]] = lambda: []
     candidates_path: Any = None
+    # Track D: raw/graded assets (default empty so every sealed-only test is
+    # unchanged) and the dormant PPT /cards client (None unless configured).
+    # ``assets_error`` is set (assets left empty) when the asset catalog fails to
+    # load — the failure is contained to the asset routes so a malformed
+    # assets.yaml never takes the sealed catalog offline (surfaced, never silent).
+    assets: dict[str, dict[str, Any]] = field(default_factory=dict)
+    card_client: Any = None
+    assets_error: str = ""
 
 
 # ---------------------------------------------------------------- payload helpers
@@ -165,12 +176,161 @@ def _sealed_products(deps: PokeApiDeps, query: dict) -> dict:
     )
 
 
+# ---------------------------------------------------------------- Track D (assets)
+
+def _asset_not_found(asset_key: str) -> dict:
+    return _error(404, f"unknown asset_key: {asset_key!r}", asset_key=asset_key)
+
+
+def _asset_catalog_error(deps: PokeApiDeps) -> dict | None:
+    """Honest error payload when the asset catalog failed to load (contained here so
+    sealed routes stay up). ``None`` when the catalog is fine."""
+    if deps.assets_error:
+        return _error(500, f"asset catalog invalid: {deps.assets_error}",
+                      assetsError=deps.assets_error)
+    return None
+
+
+def _today_ts(today: str | None) -> int:
+    """Deterministic timestamp from the injected ISO ``today`` (no wall clock) for
+    the source resolvers' capture labels; falls back to 0 if today is unset/bad."""
+    from datetime import date, datetime
+    try:
+        return int(datetime(*[int(p) for p in str(today).split("-")]).timestamp())
+    except (TypeError, ValueError):
+        return int(datetime.combine(date(1970, 1, 1), datetime.min.time()).timestamp())
+
+
+def _resolve_asset_source(deps: PokeApiDeps, asset: dict, checked_at: int) -> dict:
+    """Run the raw/graded source resolver (refresh path). With no configured card
+    client this returns an honest ``none`` row and touches no network."""
+    comps = getattr(deps.cfg, "comps", None)
+    tol = float(getattr(comps, "agreement_tolerance_pct", 20.0))
+    floor = float(getattr(comps, "ebay_floor_sanity_pct", 50.0))
+    if str(asset.get("asset_class")) == catalog_mod.RAW:
+        return sources_mod.resolve_raw_comp(
+            asset, checked_at=checked_at, ppt_client=deps.card_client,
+            tolerance_pct=tol, floor_sanity_pct=floor)
+    return sources_mod.resolve_graded_comp(
+        asset, checked_at=checked_at, ppt_client=deps.card_client)
+
+
+def _assets(deps: PokeApiDeps) -> dict:
+    items = [catalog_mod.asset_summary(k, a) for k, a in deps.assets.items()]
+    return _ok({"assets": items, "count": len(items)})
+
+
+def _asset_comp(deps: PokeApiDeps, asset_key: str, query: dict) -> dict:
+    asset = deps.assets.get(asset_key)
+    if asset is None:
+        return _asset_not_found(asset_key)
+
+    if _truthy(query.get("refresh")):
+        row = _resolve_asset_source(deps, asset, _today_ts(deps.today))
+        return _ok(asset_model_mod.asset_comp_response(asset_key, asset, row))
+
+    # read-first: latest ledger comp for this identity (offline), else honest none.
+    row = lab_mod.resolve_asset_comp_row(deps.read_observations(), asset_key, asset)
+    if row:
+        return _ok(asset_model_mod.asset_comp_response(asset_key, asset, row))
+    return _ok(asset_model_mod.asset_no_comp_response(
+        asset_key, asset, status="no_history",
+        detail="no asset comp in the ledger and refresh not requested; an unmapped/"
+               "unconfigured source yields no number (STOP-class)"))
+
+
+def _asset_history(deps: PokeApiDeps, asset_key: str) -> dict:
+    asset = deps.assets.get(asset_key)
+    if asset is None:
+        return _asset_not_found(asset_key)
+    observations = deps.read_observations()
+    ikey = history_mod.item_key_for_asset(asset)
+    for_item = history_mod.filter_observations(observations, item_key=ikey)
+    by_kind: dict[str, int] = {}
+    for obs in for_item:
+        kind = str(obs.get("kind") or "unknown")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+    grouped = history_mod.history_grouped(observations, ikey)
+    by_source = {
+        src: [{"date": str(o.get("capture_date") or ""),
+               "price": history_mod._comp_value(o),
+               "confidence": str(o.get("comp_confidence") or "") or None}
+              for o in obs_list]
+        for src, obs_list in grouped.items()
+    }
+    return _ok({
+        "asset_key": asset_key,
+        "item_key": ikey,
+        "observations": len(for_item),
+        "byKind": by_kind,
+        "bySource": by_source,
+        "priceHistory": model_mod.price_points(observations, ikey),
+    })
+
+
+def _asset_momentum(deps: PokeApiDeps, asset_key: str) -> dict:
+    asset = deps.assets.get(asset_key)
+    if asset is None:
+        return _asset_not_found(asset_key)
+    ikey = history_mod.item_key_for_asset(asset)
+    summary = history_mod.momentum(deps.read_observations(), ikey, today=deps.today)
+    return _ok({
+        "asset_key": asset_key,
+        "name": asset.get("name") or asset_key,
+        "asset_class": str(asset.get("asset_class") or ""),
+        "tcgPlayerId": asset_model_mod._tcg_player_id(asset),
+        "momentum": summary,
+    })
+
+
+def _cards(deps: PokeApiDeps, query: dict) -> dict:
+    """PPT-``/cards``-compatible resolve by ``tcgPlayerId`` + an explicit ``condition``
+    (raw) or ``grade``/``grade_key`` (graded) discriminator. One id maps to several
+    assets, so an id with no discriminator that matches >1 asset returns an
+    ``ambiguous`` facade (never a guessed variant). Read-first, 0 credits."""
+    tcg_id = str(query.get("tcgPlayerId") or "").strip()
+    if not tcg_id:
+        return _error(400, "tcgPlayerId query param is required")
+
+    matches = [(k, a) for k, a in deps.assets.items()
+               if str(a.get("tcgplayer_id") or "").strip() == tcg_id]
+    if not matches:
+        return asset_model_mod.card_no_match(tcg_id)
+
+    condition = str(query.get("condition") or "").strip().lower()
+    grade = str(query.get("grade") or query.get("grade_key") or "").strip().lower()
+    if condition:
+        matches = [(k, a) for k, a in matches
+                   if str(a.get("condition") or "").strip().lower() == condition]
+    elif grade:
+        matches = [(k, a) for k, a in matches
+                   if grade in (str(a.get("grade_key") or "").strip().lower(),
+                                str(a.get("grade") or "").strip().lower())]
+
+    if len(matches) == 1:
+        key, asset = matches[0]
+        observations = deps.read_observations()
+        ikey = history_mod.item_key_for_asset(asset)
+        row = lab_mod.resolve_asset_comp_row(observations, key, asset)
+        summary = history_mod.momentum(observations, ikey, today=deps.today)
+        return asset_model_mod.card_facade(
+            key, asset, row,
+            price_history=model_mod.price_points(observations, ikey), momentum=summary)
+    if not matches:
+        return asset_model_mod.card_no_match(
+            tcg_id, detail="tcgPlayerId matched assets but none matched the condition/grade filter")
+    return asset_model_mod.card_ambiguous(tcg_id, matches)
+
+
 # ---------------------------------------------------------------- Phase C (Lab)
 
 def _opportunities(deps: PokeApiDeps) -> dict:
     """Scored opportunities across the catalog + a summary. Read-first, no
-    network, 0 credits (mirrors the rest of the owned API)."""
-    opps = lab_mod.build_opportunities(deps, as_of=deps.today)
+    network, 0 credits (mirrors the rest of the owned API). Sealed opportunities
+    first, then raw/graded asset WATCH rows (Track D) — the sealed dormancy /
+    activation wire (/signals) stays sealed-scoped."""
+    opps = (lab_mod.build_opportunities(deps, as_of=deps.today)
+            + lab_mod.build_asset_opportunities(deps, as_of=deps.today))
     return _ok({"count": len(opps), "summary": lab_mod.summary(opps), "opportunities": opps})
 
 
@@ -235,6 +395,10 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
         return _products(deps)
     if segments == ["sealed-products"]:
         return _sealed_products(deps, query)
+    if segments == ["assets"]:
+        return _asset_catalog_error(deps) or _assets(deps)
+    if segments == ["cards"]:
+        return _asset_catalog_error(deps) or _cards(deps, query)
     if segments == ["opportunities"]:
         return _opportunities(deps)
     if segments == ["paper-decisions"]:
@@ -255,6 +419,18 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
             return _history(deps, key)
         if leaf == "momentum":
             return _momentum(deps, key)
+    if len(segments) == 3 and segments[0] == "assets":
+        _, key, leaf = segments
+        if leaf in ("comp", "history", "momentum"):
+            guard = _asset_catalog_error(deps)
+            if guard is not None:
+                return guard
+        if leaf == "comp":
+            return _asset_comp(deps, key, query)
+        if leaf == "history":
+            return _asset_history(deps, key)
+        if leaf == "momentum":
+            return _asset_momentum(deps, key)
     return _error(404, f"unknown poke API route: {path}")
 
 
@@ -296,7 +472,8 @@ class ReadFirstCompProvider:
 def build_deps(cfg: Any, *, ledger_path: Path | None = None,
                decisions_path: Path | None = None, today: str | None = None,
                candidate_for: Callable[[str, dict], dict | None] | None = None,
-               candidates_path: Path | None = None) -> PokeApiDeps:
+               candidates_path: Path | None = None,
+               assets_path: Path | None = None) -> PokeApiDeps:
     """Wire the real, PPT-free defaults from config. ``today``/``ledger_path``/
     ``decisions_path``/``candidates_path`` are overridable so callers stay
     deterministic in tests.
@@ -311,6 +488,7 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
     path = ledger_path or (cfg_mod.ROOT / "data" / "poke" / "price_history.jsonl")
     dpath = decisions_path or (cfg_mod.ROOT / "data" / "poke" / "paper_decisions.jsonl")
     cpath = candidates_path or (cfg_mod.ROOT / "data" / "poke" / "verified_candidates.jsonl")
+    apath = assets_path or (cfg_mod.ROOT / "data" / "poke" / "assets.yaml")
 
     def read_observations() -> list[dict]:
         return history_mod.read_ledger(path).observations
@@ -328,6 +506,22 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         from datetime import date
         today = date.today().isoformat()
 
+    # Load assets defensively: a malformed asset catalog is contained to the asset
+    # routes (surfaced via assets_error) so it never takes the sealed catalog
+    # offline. This does NOT silently drop — /assets and the asset routes report it.
+    try:
+        assets = catalog_mod.load_assets(apath)
+        assets_error = ""
+    except catalog_mod.AssetCatalogError as exc:
+        assets = {}
+        assets_error = str(exc)
+    except Exception as exc:  # noqa: BLE001 - containment guarantee lives here: NO asset
+        # catalog load failure (bad encoding, unreadable file, an unforeseen parser
+        # error) may take the sealed routes offline. Surfaced honestly via
+        # assets_error -> 500 on the asset routes only; never silent, never sealed.
+        assets = {}
+        assets_error = f"asset catalog load failed: {exc}"
+
     return PokeApiDeps(
         products=dict(getattr(cfg, "products", {}) or {}),
         read_observations=read_observations,
@@ -339,4 +533,7 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         decisions_path=dpath,
         read_candidates=read_candidates,
         candidates_path=cpath,
+        assets=assets,
+        card_client=sources_mod.card_client_from_config(cfg),
+        assets_error=assets_error,
     )

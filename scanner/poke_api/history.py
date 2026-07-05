@@ -65,11 +65,29 @@ def read_ledger(path) -> LedgerRead:
 
 def item_key_for_product(product: dict, product_key: str = "") -> str:
     """Catalog product -> ledger item_key, identical to how comps/engine.py and
-    discovery/sweep.py stamp it (set|item|variant|grade|condition, lowercased)."""
+    discovery/sweep.py stamp it (set|item|variant|grade|condition, lowercased).
+
+    Sealed products carry none of variant/grade/condition, so this stays exactly
+    ``set|name|||`` — unchanged. Raw/graded assets use ``item_key_for_asset``,
+    which fills the variant/grade/condition slots so identities never collide."""
     return ledger_mod.item_key({
         "set": product.get("set", ""),
         "item": product.get("name") or product_key,
         "variant": "", "grade": "", "condition": "",
+    })
+
+
+def item_key_for_asset(asset: dict, asset_key: str = "") -> str:
+    """Raw/graded asset -> ledger item_key. The normalized ``grade_key`` ("psa10")
+    goes in the grade slot, ``card_number`` in the variant slot, and ``condition``
+    ("nm"/"lp") in the condition slot — so raw NM, raw LP, PSA 10, PSA 9, and the
+    all-empty sealed key are all distinct, and never collide with a sealed product."""
+    return ledger_mod.item_key({
+        "set": asset.get("set", ""),
+        "item": asset.get("name") or asset_key,
+        "variant": asset.get("card_number") or asset.get("variant") or "",
+        "grade": asset.get("grade_key") or "",
+        "condition": asset.get("condition") or "",
     })
 
 

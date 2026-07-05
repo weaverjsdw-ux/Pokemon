@@ -46,6 +46,7 @@ test_baseline.txt
 dashboards/
 
 # Money Hypothesis Lab runtime ledgers — append-only, disposable, regenerated at
-# runtime (never committed; like price_history.jsonl they are local evidence files).
+# runtime (never committed; local evidence files).
+data/poke/price_history.jsonl
 data/poke/paper_decisions.jsonl
 data/poke/verified_candidates.jsonl

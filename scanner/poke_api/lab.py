@@ -17,6 +17,7 @@ import json
 from dataclasses import asdict
 
 from .. import resale
+from . import asset_model as asset_model_mod
 from . import candidates as candidates_mod
 from . import history as history_mod
 from . import model as model_mod
@@ -56,6 +57,17 @@ def resolve_comp_row(comp_provider, observations, key, product):
     return _ledger_comp_row(latest, key, product) if latest is not None else None
 
 
+def resolve_asset_comp_row(observations, asset_key, asset):
+    """Read-first asset comp resolution: the latest ledger market_comp for the
+    asset's identity (offline), else None. There is no in-house comp cache/engine
+    for raw/graded (those are keyed to the sealed ppt_id), so this is ledger-only;
+    a live source is reached only via the ``sources`` resolvers on ``refresh=true``.
+    Never constructs a network source."""
+    ikey = history_mod.item_key_for_asset(asset)
+    latest = history_mod.latest(observations, ikey)
+    return _ledger_comp_row(latest, asset_key, asset) if latest is not None else None
+
+
 def build_opportunity_row(deps, key, product, observations, *, as_of) -> dict:
     """One opportunity (as a dict) for a single catalog product from deps."""
     row = resolve_comp_row(deps.comp_provider, observations, key, product)
@@ -81,6 +93,40 @@ def build_opportunities(deps, *, as_of=None) -> list[dict]:
     observations = deps.read_observations()   # single ledger read for the whole pass
     opps = [build_opportunity_row(deps, key, product, observations, as_of=as_of)
             for key, product in deps.products.items()]
+    opps.sort(key=lambda o: (-o["score"], o["product_key"]))
+    return opps
+
+
+def build_asset_opportunity_row(deps, asset_key, asset, observations, *, as_of) -> dict:
+    """One WATCH-grade opportunity (as a dict) for a single raw/graded asset. Uses
+    the read-first asset comp (ledger latest, offline) — never a network source."""
+    row = resolve_asset_comp_row(observations, asset_key, asset)
+    if row:
+        comp = asset_model_mod.asset_comp_response(asset_key, asset, row)
+    else:
+        comp = asset_model_mod.asset_no_comp_response(
+            asset_key, asset, status="no_history",
+            detail="no asset comp in the ledger for this identity")
+    ikey = history_mod.item_key_for_asset(asset)
+    momentum = history_mod.momentum(
+        observations, ikey, today=deps.today,
+        stale_days=deps.cfg.opportunity.stale_after_days)
+    return asdict(opp_mod.build_asset_opportunity(asset_key, asset, comp, momentum,
+                                                  deps.cfg, as_of=as_of))
+
+
+def build_asset_opportunities(deps, *, as_of=None) -> list[dict]:
+    """WATCH-grade opportunities for the raw/graded asset catalog (empty when no
+    assets are configured). Read-first, no network. Sorted by score desc (stable on
+    asset key). These are SEPARATE from sealed opportunities: the sealed dormancy /
+    activation wire (signals) stays sealed-scoped."""
+    assets = getattr(deps, "assets", None) or {}
+    if not assets:
+        return []
+    as_of = as_of or deps.today
+    observations = deps.read_observations()
+    opps = [build_asset_opportunity_row(deps, key, asset, observations, as_of=as_of)
+            for key, asset in assets.items()]
     opps.sort(key=lambda o: (-o["score"], o["product_key"]))
     return opps
 

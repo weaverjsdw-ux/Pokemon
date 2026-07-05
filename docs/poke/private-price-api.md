@@ -15,8 +15,12 @@ north-star ladder:
   [`money-hypothesis-lab.md`](money-hypothesis-lab.md). Adds opportunity scoring
   + an append-only paper-trade ledger with outcome replay + signals, and the
   `/api/poke/opportunities`, `/paper-decisions`, `/signals` endpoints.
-- D — Singles + Graded clone layer *(future; sealed-only today)*.
-- E — Better-than-PPT personal edge layer *(future)*.
+- **D — Raw + Graded source expansion** — BUILT; see *Track D* below. Adds a
+  separate raw/graded asset catalog, honest source adapters, per-identity
+  history/momentum, owned asset endpoints, and conservative (never-live)
+  raw/graded WATCH opportunities.
+- E — Better-than-PPT personal edge layer *(future; strategy/ranking/decision
+  packets — deliberately NOT built in D)*.
 
 Code: `scanner/poke_api/` — `history.py` (pure ledger reads/index/momentum),
 `model.py` (response shaping + PPT facade), `router.py` (dispatch + read-first
@@ -180,9 +184,78 @@ The ledger is **read, never rewritten** by this layer.
 
 ---
 
+## Track D — Raw + Graded source expansion
+
+First-class raw single + graded slab support through the **owned** `/api/poke`
+layer. Source/data expansion, not strategy: no rankings, decision packets,
+grading-EV, or buy logic (that is Session E).
+
+**Catalog.** Raw/graded assets live in a **separate** `data/poke/assets.yaml`
+(the sealed `data/products.yaml` is never touched). Loaded by
+`scanner/poke_api/catalog.py`:
+
+- `raw` needs `name`, `set`, `condition` (`card_number` when known); optional
+  `tcgplayer_id` / `pricecharting_slug` / `ebay_query`.
+- `graded` needs `name`, `set`, `grader`, `grade`; a normalized `grade_key`
+  (`psa10`, `cgc9.5`) is derived if omitted; same optional source ids.
+
+**Identity.** `history.item_key_for_asset` fills the ledger key's
+`variant`/`grade`/`condition` slots (`card_number` → variant, `grade_key` →
+grade, `condition` → condition), so raw NM, raw LP, PSA 10, PSA 9, and the
+all-empty sealed key never collide. Sealed `item_key_for_product` is unchanged.
+
+**Sources (`scanner/poke_api/sources.py`).** A small, strategy-free interface:
+
+- **Raw** routes through the in-house confidence ladder
+  (`comps.model.resolve` → `to_legacy_row`): sold-derived quotes (TCGplayer /
+  PriceCharting card, plus the PPT `/cards` market price when configured) + an
+  optional eBay active ask. Two agreeing sold sources → `high`; one → `medium`/
+  `low`; ask-only → `low`; none → `none`. An ask can never be more than `low`.
+- **Graded** uses PPT `/cards?...&includeEbay=true&limit=1` →
+  `smartMarketPrice.price` as the comp with `smartMarketPrice.confidence` passed
+  through 1:1; PriceCharting graded page is the fallback. The eBay ask is
+  validator/context — **structurally it can never become the graded comp**.
+- The PPT `/cards` client is **dormant by default**: built only when
+  `market.preferred` + a key are set, always requests `limit=1`, and degrades to
+  no-price on 401/429/transport error rather than crashing.
+
+**Endpoints (all GET, read-first, 0 credits):**
+
+- `GET /api/poke/assets` — the raw/graded catalog + which source ids are mapped.
+- `GET /api/poke/assets/{asset_key}/comp?refresh=false` — read-first (ledger
+  latest, offline) asset comp; `refresh=true` runs the source resolver (honest
+  `none` unless a source is mapped **and** configured). **Money-class caveat:**
+  `refresh=true` is the *only* asset surface that can spend PPT credits — when
+  `market.preferred` + a key are set it makes a live billed `/cards` call (1 raw,
+  2 graded). Dormant by default (`market.preferred: false`), so the read path is
+  0 credits; get operator go-ahead before enabling it.
+- `GET /api/poke/assets/{asset_key}/history` — per-identity ledger observations.
+- `GET /api/poke/assets/{asset_key}/momentum` — per-identity movement summary.
+- `GET /api/poke/cards?tcgPlayerId=<id>&condition=NM` (raw) or `&grade=psa10`
+  (graded) — PPT-`/cards`-compatible facade. One id maps to several assets, so an
+  id with no discriminator matching >1 asset returns `status: "ambiguous"` with
+  the candidate list — never a guessed variant.
+
+**Lab integration.** Raw/graded assets appear in `/api/poke/opportunities` as
+**WATCH-grade evidence rows** with the conservative trade types `raw_catalog_gap`
+/ `raw_market_watch` / `graded_catalog_gap` / `graded_market_watch`. **None are
+live-eligible** — an asset opportunity is always `WATCH`, never
+`LIVE_PACKET_ELIGIBLE`, regardless of the numbers (there is no verified-entry buy
+wire for singles in D). The sealed dormancy / activation report (`/signals`,
+`/candidates/report`) stays **sealed-scoped**.
+
+Honest by default: with unmapped/unconfigured assets every asset reports
+`estimate: null`, confidence `none` — no source, no number (STOP-class).
+
+---
+
 ## Current limitations
 
-- **Sealed-first.** Singles and graded comps are Phase D; not modeled here.
+- **Raw/graded are source-expansion only (Track D).** Assets resolve comps and
+  surface as WATCH rows, but have no verified-entry buy wire and are never
+  live-eligible; strategy/ranking/decision packets are Session E.
+- **Raw/graded comps resolve only when a source is mapped AND configured.** With
+  the dormant PPT `/cards` client (default), assets report honest `none`.
 - **No paper-trade / outcome loop.** Opportunity scoring and paper trades are
   Phase C (recommended next session).
 - **History depth = ledger depth.** Momentum is only as deep as
