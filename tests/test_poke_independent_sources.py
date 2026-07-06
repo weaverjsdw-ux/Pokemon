@@ -137,3 +137,33 @@ def test_independent_graded_uses_pricecharting_slug_not_ppt():
     slugs = [s.get("source") for s in row.get("sources", [])]
     assert "pricecharting" in slugs
     assert "ppt_cards" not in slugs
+
+
+from scanner import config as config_mod
+
+
+class _Cfg:
+    """Minimal Config stand-in carrying a real PokeCfg (scanner.config.Config has 10
+    required positional fields unrelated to this gate — not worth constructing here)."""
+    def __init__(self):
+        self.poke = config_mod.PokeCfg()
+
+
+def test_independent_sources_gate_defaults_off():
+    cfg = _Cfg()
+    assert indep.independent_sources_enabled(cfg) is False
+
+
+def test_independent_sources_gate_reads_poke_flag():
+    cfg = _Cfg()
+    cfg.poke.independent_sources = True
+    assert indep.independent_sources_enabled(cfg) is True
+
+
+def test_build_independent_sources_has_pc_and_dormant_tcg():
+    srcs = indep.build_independent_sources()
+    assert isinstance(srcs["pc_raw"], indep.PriceChartingRawSource)
+    assert isinstance(srcs["pc_graded"], indep.PriceChartingGradedSource)
+    # TCGplayer render dormant by default -> a blocked quote, never a crash
+    q = srcs["tcg"].fetch({"tcgplayer_id": "610516"}, 1_700_000_000)
+    assert q.status == "blocked"

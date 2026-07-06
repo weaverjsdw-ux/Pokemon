@@ -37,6 +37,7 @@ class PokeCfg:
     grading_cost_all_in: float = 97.50  # live PSA tier all-in (config, value tiers paused 2026-06)
     buy_basis: str = "msrp"       # sealed-board deal-price basis ("observed" is a future hook)
     daily_credit_cap: int = 90    # PPT credits/run guard; past this the sweep uses the resale fallback
+    independent_sources: bool = False  # Phase F: allow CLI live PriceCharting/TCGplayer fetch (0 PPT credits)
 
 
 @dataclass
@@ -248,6 +249,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
             grading_cost_all_in=_num(poke_raw, "grading_cost_all_in", 97.50, "poke.grading_cost_all_in"),
             buy_basis=buy_basis,
             daily_credit_cap=int(poke_raw.get("daily_credit_cap", 90)),
+            independent_sources=bool(poke_raw.get("independent_sources", False)),
         )
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days / poke.daily_credit_cap must be integers.")

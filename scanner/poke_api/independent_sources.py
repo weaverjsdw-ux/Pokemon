@@ -176,3 +176,20 @@ class TcgPlayerRenderedSource:
                                    detail="rendering not enabled (Playwright dormant / not installed)")
         return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
                                detail="render path wired in Task 9")
+
+
+def independent_sources_enabled(cfg: Any) -> bool:
+    """The ``poke.independent_sources`` master gate (default False). Purely a
+    'live network is allowed on the CLI refresh path' switch — no key required."""
+    return bool(getattr(getattr(cfg, "poke", None), "independent_sources", False))
+
+
+def build_independent_sources(*, render: Any = None, enable_render: bool = False) -> dict:
+    """The independent adapter set. PriceCharting is always real (plain requests);
+    the TCGplayer render callable is injected only when ``enable_render`` (post the
+    operator-approved render probe) — otherwise the TCGplayer adapter is a blocked shell."""
+    return {
+        "pc_raw": PriceChartingRawSource(),
+        "pc_graded": PriceChartingGradedSource(),
+        "tcg": TcgPlayerRenderedSource(render=render if enable_render else None),
+    }
