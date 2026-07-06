@@ -379,11 +379,24 @@ candidate never attaches to a sealed opportunity (and vice-versa) even on a shar
 **Grading EV** (`grading_ev.py`, raw→graded): requires raw entry + raw comp + graded
 comp for the target grade + grading fee + resale fees + a gem rate. **Missing any →
 blocked** (`DATA_NEEDED`/`WATCH` + named blocker) — never an invented gem rate/comp/fee.
-The gem rate is an operator assumption (asset `gem_rate` + `gem_rate_source`, or an
-`operator_assumption` label), so a grading-EV opportunity is capped at **PAPER_BUY**
-(never LIVE). Grading fee = `poke.grading_cost_all_in` (stamped: PSA Regular $79.99
-all-in, value tiers paused 2026-06). The raw→graded pairing is matched on
-`tcgplayer_id` + an explicit target `grade_key` — never guessed.
+The gem rate is capped at **PAPER_BUY** (never LIVE) because it is a **population proxy**
+for a specific card, not verified-data confidence. Grading fee = `poke.grading_cost_all_in`
+(stamped: PSA Regular $79.99 all-in, value tiers paused 2026-06). The raw→graded pairing is
+matched on `tcgplayer_id` + an explicit target `grade_key` — never guessed. Phase G adds a
+**break-even gem rate** (EV = $0) and a **sensitivity band** (20/30/40/50 % + actual) to the
+output.
+
+**Gem rate (Phase G) — sourced primary, operator-assumption fallback.** The gem rate is now
+sourceable at **0 PPT credits**: PriceCharting embeds PSA + CGC population as a `VGPC.pop_data`
+blob in the same detail-page HTML the price adapter fetches (`gem_rate = PSA10 / total PSA
+population`, grader-specific — PSA and CGC never combined). Captured via
+`edge_cli gem-rate record --source pricecharting --yes` into the append-only
+`data/poke/gem_rates.jsonl` ledger (gitignored; result doc is the durable proof), gated on
+`poke.independent_sources` + `--yes`, never constructing a PPT client. A total pop below the
+**sample floor (`>= 300`)**, an absent grader, or no blob → block or an explicit
+`operator_assumption` (`gem-rate record-assumption`) — **never a guess.** Read-only surface:
+`GET /api/poke/grading-ev/<raw_asset_key>` (ledger-only, 0 network, labels sourced vs
+assumption + sample-size status); `gem-rate list` / `show` read the ledger.
 
 **Source posture** (deterministic, from data provenance not live-call state): each
 packet exposes a list of `source_posture` tags — `local_only`,

@@ -75,11 +75,55 @@ Outcome `status` ∈ `SOLD | HELD | PRICE_UP | PRICE_DOWN | EXPIRED | VOID`.
 Raw packets carry a `grading_ev` block when a graded sibling comp (matched on
 `tcgplayer_id` + target `grade_key`) and a gem rate are available. **It blocks on any
 missing input** (raw entry, raw comp, graded comp, grading fee, resale fees, gem
-rate) — never an invented number. Supply the gem rate as an **operator assumption** on
-the asset (`gem_rate` + `gem_rate_source`, e.g. `"operator_assumption 2026-07-05"`).
-Grading fee comes from `poke.grading_cost_all_in` (PSA Regular $79.99 all-in; value
-tiers paused 2026-06). Grading EV is capped at **PAPER_BUY** (never LIVE) because the
-gem rate is an assumption, not verified-data confidence.
+rate) — never an invented number. Grading fee comes from `poke.grading_cost_all_in`
+(PSA Regular $79.99 all-in; value tiers paused 2026-06). Grading EV is capped at
+**PAPER_BUY** (never LIVE) because a gem rate is a **population proxy** for a specific
+card, not verified-data confidence.
+
+The `grading_ev` block now also carries a **break-even gem rate** (the gem rate at which
+fee-adjusted EV = $0) and a **sensitivity band** (EV at 20 / 30 / 40 / 50 % plus the
+actual rate), so a grading decision is read against a band, not a point.
+
+### Gem rate — sourced first, operator-assumption as fallback (Phase G)
+
+The gem rate is **no longer operator-assumption-only.** In honesty order:
+
+1. **Sourced PriceCharting population (PRIMARY).** The card detail page already fetched
+   for prices embeds `VGPC.pop_data` (PSA + CGC arrays) in the initial HTML at **0 PPT
+   credits**. Capture it into the append-only gem-rate ledger:
+
+   ```text
+   .venv/Scripts/python.exe -m scanner.poke_api.edge_cli gem-rate record \
+     --asset-key <raw_asset_key> --grader PSA --source pricecharting --yes
+   ```
+
+   Formula: `gem_rate = PSA10 / total PSA population`, **grader-specific** (PSA and CGC are
+   never combined; grade 10 is the last array element, pinned + tested). Gated on
+   `poke.independent_sources: true` + `--yes`; prints `credits_spent=0`; **never constructs
+   a PPT client.** A total pop **below the sample floor (`>= 300`)**, a grader absent from
+   the blob, or no blob → **honest block**, never a guessed rate.
+
+2. **Operator assumption (FALLBACK).** For assets with no pop coverage (or pop below the
+   floor), record an explicit labeled assumption (no network):
+
+   ```text
+   .venv/Scripts/python.exe -m scanner.poke_api.edge_cli gem-rate record-assumption \
+     --asset-key <raw_asset_key> --grader PSA --gem-rate 0.30 --basis "operator base rate ..."
+   ```
+
+Read the ledger (0 network, 0 credits): `gem-rate list` / `gem-rate show --asset-key <key>`.
+The ledger `data/poke/gem_rates.jsonl` is **gitignored** — a committed Phase G result doc is
+the durable proof (mirrors the price-history ledger).
+
+### Read-only grading-EV endpoint
+
+`GET /api/poke/grading-ev/<raw_asset_key>` returns the PAPER-capped grading-EV number with
+full provenance (break-even, sensitivity band, and a `gem_rate_provenance` block labeling
+`sourced` vs `operator_assumption` and the sample-size status), **or** blocks with named
+missing inputs. **Ledger-only:** the raw comp, graded comp, and gem rate all come from
+recorded rows — the read path never fetches PriceCharting live and never spends a credit.
+A gem rate + comps but **no verified entry** blocks on the missing entry (WATCH, never a
+dollar buy — a comp/gem-rate alone never promotes off WATCH).
 
 ## 4.5 Persist a raw/graded asset comp (record-asset-comp)
 

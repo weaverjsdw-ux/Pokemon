@@ -6,6 +6,29 @@ metadata G will consume and records the PSA-access research so G starts informed
 **Source:** [ppt-vs-ours-gap-matrix](ppt-vs-ours-gap-matrix-2026-07-06.md) row 10
 (population/gem-rate = the one capability that directly unblocks new decisions).
 
+> ## ⛔ SUPERSEDED WHERE IT SAYS "OPERATOR-ASSUMPTION FIRST" — READ THIS BOX FIRST
+>
+> **G is BUILT (2026-07-06).** The premise below that "population is login-gated + unstable
+> → operator-supplied gem rate is the *safe default*" is **WRONG and reversed** by the live
+> probe recorded in the [G–M roadmap §3.3](../superpowers/specs/2026-07-06-poke-api-ladder-g-through-m-roadmap.md#3-refreshed-public-source-assumptions-verified-live-2026-07-06)
+> and now implemented:
+>
+> - **PRIMARY gem-rate source = sourced PriceCharting `VGPC.pop_data`.** The card detail page
+>   the F.1 adapter already fetches (plain `requests`, **0 PPT credits**) embeds PSA + CGC
+>   population as a plain-HTML JSON blob in the *initial* HTML — no login, no Playwright, no
+>   paid API. Parsed by `independent_sources.pricecharting_pop_from_html`; formula
+>   `PSA10 / total PSA population` (grader-specific, PSA and CGC **never** combined) in
+>   `gem_rates.gem_rate_from_counts`; captured via `edge_cli gem-rate record` (operator-run,
+>   `--yes`-gated, prints `credits_spent=0`).
+> - **Operator-assumption is the FALLBACK only** — for assets with no pop blob, a grader
+>   absent from the blob, or a total pop below the sample floor (`>= 300`). Recorded via
+>   `gem-rate record-assumption`, labeled `operator_assumption`, capped PAPER_BUY.
+> - **Everything below about the PSA *cert* API (no public pop endpoint) is still correct** —
+>   only the "so operator-assumption is the safe default" conclusion is superseded. The
+>   reachable, dated, 0-credit source is the **PriceCharting pop blob**, not the PSA API.
+>
+> Result doc: [phase-g-population-gemrate-result-2026-07-06.md](phase-g-population-gemrate-result-2026-07-06.md).
+
 ## What Phase G is (scope, for when it starts)
 
 The raw→graded **grading-EV** path (`scanner/poke_api/grading_ev.py`) already exists and is
