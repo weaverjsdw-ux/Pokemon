@@ -1,6 +1,7 @@
 """Phase F — independent (non-PPT) PriceCharting/TCGplayer source adapters."""
 from pathlib import Path
 
+from scanner import config as config_mod
 from scanner.market import comp_from_row
 from scanner.poke_api import independent_sources as indep
 from scanner.poke_api import sources as sources_mod
@@ -137,9 +138,6 @@ def test_independent_graded_uses_pricecharting_slug_not_ppt():
     slugs = [s.get("source") for s in row.get("sources", [])]
     assert "pricecharting" in slugs
     assert "ppt_cards" not in slugs
-
-
-from scanner import config as config_mod
 
 
 class _Cfg:

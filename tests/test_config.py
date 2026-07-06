@@ -303,6 +303,19 @@ def test_poke_slice_overrides_parse():
     assert cfg.poke.daily_credit_cap == 40
 
 
+def test_poke_independent_sources_defaults_off():
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    assert cfg.poke.independent_sources is False
+
+
+def test_poke_independent_sources_overrides_parse():
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"independent_sources": True},
+    })
+    assert cfg.poke.independent_sources is True
+
+
 def test_poke_rejects_unknown_buy_basis():
     with pytest.raises(SystemExit):
         cfg_mod.from_mapping({
