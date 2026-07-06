@@ -129,3 +129,107 @@ def test_divergence_audit_external_refuses_without_yes(tmp_path, capsys):
     rc = edge_cli.main(["divergence-audit", "--products", "jt_bb"], deps=deps)
     assert rc == 2                                     # refused (money-class)
     assert "--yes" in capsys.readouterr().out
+
+
+# ------------------------------------------ record-asset-comp --refresh-independent
+#
+# 0-PPT-credit live fetch from the independent (PriceCharting/TCGplayer) sources,
+# gated on poke.independent_sources; persisted with the ACTUAL source slug (never
+# ppt_cards). ``_deps_indep`` mirrors ``_deps`` above but injects the raw/graded
+# asset catalog + a tmp ledger + the independent-sources gate, matching the style of
+# tests/test_poke_asset_comp_record.py's direct ``router.PokeApiDeps(...)`` builder.
+
+class _FailingCardClient:
+    """Any billed method is a test failure — proves _record_independent never touches
+    the PPT client (0-PPT-credit invariant), even when one happens to be configured."""
+
+    def raw_quote(self, asset, checked_at):
+        raise AssertionError("--refresh-independent must not call the PPT card client")
+
+    def graded_smart(self, asset, checked_at):
+        raise AssertionError("--refresh-independent must not call the PPT card client")
+
+
+def _deps_indep(*, assets, ledger_path, today="2026-07-06", independent_sources):
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"independent_sources": independent_sources},
+    })
+    return router.PokeApiDeps(
+        products={}, assets=assets, read_observations=lambda: [],
+        comp_provider=FakeProvider({}), today=today, cfg=cfg, ledger_path=ledger_path,
+        card_client=_FailingCardClient())
+
+
+_RAW_ASSET = {"asset_class": "raw", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+              "condition": "NM",
+              "pricecharting_slug": "pokemon-prismatic-evolutions/umbreon-ex-161"}
+
+
+def test_refresh_independent_persists_pricecharting_slug(tmp_path, monkeypatch):
+    from scanner.poke_api import sources as sources_mod
+
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_indep(assets={"umb": _RAW_ASSET}, ledger_path=ledger, independent_sources=True)
+
+    # Stub the resolver so the test never hits the network. Mirrors the RAW-path shape:
+    # sources[] lists the blocked tcgplayer quote FIRST, pricecharting (the actual
+    # comp source) second — proving _record_independent uses _row_ok_source, not the
+    # naive first-listed-source picker.
+    monkeypatch.setattr(
+        sources_mod, "resolve_independent_asset_row",
+        lambda a, **k: {
+            "estimate": "1425.00", "confidence": "low",
+            "sources": [{"source": "tcgplayer", "status": "blocked", "price": None},
+                       {"source": "pricecharting", "status": "ok", "price": 1425.00}],
+            "sourceUrl": "https://www.pricecharting.com/game/x",
+            "compBasis": "PriceCharting Ungraded"})
+
+    rc = edge_cli.main(
+        ["record-asset-comp", "--asset-key", "umb", "--refresh-independent"], deps=deps)
+    assert rc == 0
+    rows = [json.loads(l) for l in ledger.read_text().splitlines() if l.strip()]
+    assert rows and rows[0]["source"] == "pricecharting"      # never ppt_cards/tcgplayer
+    assert rows[0]["comp"] == 1425.00 and rows[0]["comp_confidence"] == "low"
+
+
+def test_refresh_independent_refuses_when_gate_off(tmp_path):
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_indep(assets={"umb": _RAW_ASSET}, ledger_path=ledger, independent_sources=False)
+    rc = edge_cli.main(
+        ["record-asset-comp", "--asset-key", "umb", "--refresh-independent"], deps=deps)
+    assert rc == 2                                            # refused: gate off
+    assert not ledger.exists()
+
+
+def test_refresh_independent_no_usable_comp_records_nothing(tmp_path, monkeypatch):
+    from scanner.poke_api import sources as sources_mod
+
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_indep(assets={"umb": _RAW_ASSET}, ledger_path=ledger, independent_sources=True)
+    monkeypatch.setattr(
+        sources_mod, "resolve_independent_asset_row",
+        lambda a, **k: {"estimate": "", "confidence": "none", "sources": []})
+
+    rc = edge_cli.main(
+        ["record-asset-comp", "--asset-key", "umb", "--refresh-independent"], deps=deps)
+    assert rc == 1
+    assert not ledger.exists()
+
+
+def test_refresh_independent_refuses_ebay_only_source(tmp_path, monkeypatch):
+    """An ask-only ebay slug is never a sold comp; the independent path has no
+    ppt_cards fallback to fall back to, so it must refuse rather than mislabel it."""
+    from scanner.poke_api import sources as sources_mod
+
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_indep(assets={"umb": _RAW_ASSET}, ledger_path=ledger, independent_sources=True)
+    monkeypatch.setattr(
+        sources_mod, "resolve_independent_asset_row",
+        lambda a, **k: {"estimate": "12.00", "confidence": "low",
+                        "sources": [{"source": "ebay", "status": "ok", "price": 12.00}]})
+
+    rc = edge_cli.main(
+        ["record-asset-comp", "--asset-key", "umb", "--refresh-independent"], deps=deps)
+    assert rc == 1
+    assert not ledger.exists()

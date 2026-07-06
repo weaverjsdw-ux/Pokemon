@@ -137,6 +137,9 @@ def _build_argparser():
     prc.add_argument("--refresh", action="store_true",
                      help="billed: fetch the comp from the configured external card source "
                           "and persist it (money-class; needs --yes + a key)")
+    prc.add_argument("--refresh-independent", action="store_true", dest="refresh_independent",
+                     help="0-PPT-credit live fetch from the independent PriceCharting/TCGplayer "
+                          "sources; persists with the real source slug (needs poke.independent_sources)")
     prc.add_argument("--yes", action="store_true",
                      help="operator go-ahead for the surfaced --refresh credit spend")
     return p
@@ -231,6 +234,17 @@ def _row_primary_source(row: dict) -> str:
     return ""
 
 
+def _row_ok_source(row: dict) -> str:
+    """The slug of the FIRST ok sold-derived source in a resolved row (the source that
+    actually produced the comp) — not merely the first listed source, which may be a
+    blocked/skipped quote. Falls back to the first listed source for single-source rows
+    whose entries omit status (e.g. the graded _legacy_row)."""
+    for s in row.get("sources") or []:
+        if isinstance(s, dict) and s.get("source") and s.get("status") == "ok" and s.get("price"):
+            return str(s["source"]).strip().lower()
+    return _row_primary_source(row)
+
+
 def _record_billed(args, deps, asset, ledger_path) -> int:
     """Operator-gated billed refresh: fetch the comp from the configured external card
     source and persist it. Refuses without a client or without --yes (surfacing the
@@ -272,6 +286,43 @@ def _record_billed(args, deps, asset, ledger_path) -> int:
     return 0
 
 
+def _record_independent(args, deps, asset, ledger_path) -> int:
+    """0-PPT-credit live fetch from the independent (PriceCharting/TCGplayer) sources,
+    persisted with the ACTUAL source slug (never ppt_cards). Gated on
+    poke.independent_sources; a no-source result records nothing (honest)."""
+    from . import independent_sources as indep
+    if not indep.independent_sources_enabled(deps.cfg):
+        print("refused: independent live fetch is off (set poke.independent_sources: true)")
+        return 2
+    srcs = indep.build_independent_sources()   # PriceCharting real; TCGplayer dormant shell
+    try:
+        row = sources_mod.resolve_independent_asset_row(
+            asset, sources=srcs, checked_at=_today_ts(deps.today))
+    except Exception as exc:  # noqa: BLE001 - never persist on a resolver bug
+        print(f"independent fetch failed ({str(exc)[:120]}); nothing recorded")
+        return 1
+    estimate = resale._amount(row.get("estimate"))
+    if estimate is None:
+        print("independent fetch found no usable sold comp (honest no-source); nothing recorded")
+        return 1
+    source = _row_ok_source(row)               # the OK sold source, NOT the first (blocked) one;
+    if not source or source == "ebay":         # and NO ppt_cards fallback on the independent path
+        print(f"refused: independent row has no sold source slug (got {source!r}); nothing recorded")
+        return 1
+    try:
+        wrote = sources_mod.record_asset_comp(
+            ledger_path, asset, comp=estimate, confidence=row.get("confidence"),
+            source=source, capture_date=deps.today,
+            source_url=row.get("sourceUrl") or row.get("url") or "",
+            basis=row.get("compBasis") or row.get("basis") or "", asset_key=args.asset_key)
+    except ValueError as exc:
+        print(f"refused to persist ({exc}); nothing recorded")
+        return 1
+    print(f"{'recorded' if wrote else 'already recorded'} asset comp {args.asset_key} "
+          f"= ${estimate:.2f} [{source}, {row.get('confidence')}] (0 PPT credits)")
+    return 0
+
+
 def _cmd_record_asset_comp(args, deps) -> int:
     asset = (getattr(deps, "assets", None) or {}).get(args.asset_key)
     if asset is None:
@@ -281,6 +332,9 @@ def _cmd_record_asset_comp(args, deps) -> int:
     if ledger_path is None:
         print("refused: no ledger_path configured on deps")
         return 1
+
+    if getattr(args, "refresh_independent", False):
+        return _record_independent(args, deps, asset, ledger_path)
 
     if args.refresh:
         return _record_billed(args, deps, asset, ledger_path)
