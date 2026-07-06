@@ -97,6 +97,10 @@ it with the provenance-honest writer:
 # billed refresh (money-class): fetch from the configured external card source + persist
 .venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
   --asset-key umbreon_ex_161_psa10 --refresh --yes
+
+# independent live fetch (Phase F, 0 PPT credits): PriceCharting exact-slug adapters only
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
+  --asset-key umbreon_ex_161_raw_nm --refresh-independent
 ```
 
 - Identity comes from the loaded asset (`history.asset_identity`), so the persisted
@@ -106,6 +110,14 @@ it with the provenance-honest writer:
 - `--refresh` is billed exactly like the audit's external mode (refuses without a key /
   without `--yes`, surfaces the spend); a no-price result persists **nothing**.
 - The from-value path is 0 credits (recording captured evidence, not a new call).
+- **`--refresh-independent` (Phase F) is also 0 credits** — it fetches live from the
+  independent PriceCharting/TCGplayer adapters (`scanner/poke_api/independent_sources.py`),
+  never the PPT card client, so there is no credit spend even in principle. Gated on
+  `poke.independent_sources: true` (default off — set it in `config.yaml` first). Persists
+  with the **actual** source slug (`pricecharting`), never `ppt_cards`. A no-sold-source
+  result (blocked page, no matching grade cell, `ebay`-only) records nothing. See
+  [Track F](private-price-api.md#track-f--independent-singlesslabs-sold-source-validation)
+  for the adapter design and the [detail-page probe evidence](pricecharting-detail-probe-2026-07-05.md).
 
 ## 5. Divergence audit (API vs external — investigate, don't clone)
 
@@ -131,6 +143,14 @@ it with the provenance-honest writer:
   price off active asks; the config fee model differs from the live collectibles FVF /
   ≥$1,000-card discount → `fee_assumption_difference`). Fix a `mapping_error`
   (wrong `tcgplayer_id`/variant); do **not** tune our comp to match PPT.
+- **Reading the cross-source flag (Phase F).** When our recorded comp's source is an
+  independent one (e.g. `pricecharting`, from `--refresh-independent`) and it **agrees**
+  with a recorded `ppt_cards` observation within tolerance, a `--local` row carries
+  `ours_source` (which source actually produced our number) and
+  `cross_source_validated: true` in JSON output (the CLI's text output prints
+  `via <source>` and a `[cross-source OK]` tag). That is a genuine two-independent-
+  provider agreement — stronger evidence than a single-source comp — and it costs the
+  same **0 credits / 0 network** as any other `--local` run.
 
 ## 6. What did NOT happen / follow-ons
 

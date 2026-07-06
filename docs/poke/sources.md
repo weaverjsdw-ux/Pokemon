@@ -40,3 +40,19 @@ chosen acquisition path (Browse API, by design, even though the HTML itself rend
 sharpens the June "everything resists WebFetch" read: WebFetch alone is thin, but
 **Playwright clears most of the fixed set**; only PC/Reddit/eBay-as-API remain
 credential/API-gated.
+
+## Track F addition — singles/slabs card sources (2026-07-05)
+
+The rows above probe **sealed-product** retail/deal pages. Track F (Phase F) needs a
+different subject: a **per-card raw/graded single price page**, at 0 PPT credits. New
+probe, own verdict:
+
+| Source | Method that worked | Status (verdict) | Notes (evidence, 2026-07-05) |
+|---|---|---|---|
+| PriceCharting card **detail** page (`pricecharting.com/game/{slug}`, e.g. `pokemon-prismatic-evolutions/umbreon-ex-161`) | plain `requests` GET, browser UA | **fetchable-plain** | HTTP 200, no challenge page, 0 PPT credits. A name-based `search-products` query auto-redirects to this canonical detail slug — no render step needed. Full evidence, cell→grade→value table, and cross-source sanity check: [`pricecharting-detail-probe-2026-07-05.md`](pricecharting-detail-probe-2026-07-05.md). |
+| TCGplayer product page (price data) | none plain; needs Playwright | fetchable-playwright only (SPA) | The price figure loads via client-side JS after the initial HTML response — a plain GET sees no price. Confirmed dormant in the Task 1–6 adapter (`TcgPlayerRenderedSource(render=None)`); rendered fetch is the Tasks 8–9 conditional follow-on, not required for the Phase F gate. |
+
+This is a **stronger** verdict than the earlier `fetchable-playwright` row for
+PriceCharting's **search** page (2026-07-02, above) — the search page needed Playwright,
+but the **detail** page it redirects to is plain-fetchable directly, which is what the
+independent-source adapters (`scanner/poke_api/independent_sources.py`) rely on.

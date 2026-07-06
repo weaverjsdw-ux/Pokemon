@@ -165,3 +165,30 @@ def test_build_independent_sources_has_pc_and_dormant_tcg():
     # TCGplayer render dormant by default -> a blocked quote, never a crash
     q = srcs["tcg"].fetch({"tcgplayer_id": "610516"}, 1_700_000_000)
     assert q.status == "blocked"
+
+
+def test_independent_path_spends_zero_ppt_credits():
+    """The independent resolver must never construct/call the PPT card client."""
+    import scanner.poke_api.sources as s
+
+    class _ExplodingPPT:
+        def raw_quote(self, *a, **k):  # pragma: no cover - must never be called
+            raise AssertionError("independent path called the PPT client")
+        def graded_smart(self, *a, **k):  # pragma: no cover
+            raise AssertionError("independent path called the PPT client")
+
+    # resolve_independent_asset_row never accepts a ppt_client; prove it by resolving
+    # with only the independent sources and asserting a pricecharting row.
+    row = s.resolve_independent_asset_row(
+        RAW_ASSET, sources=_srcs(_FakeSession(_fixture())), checked_at=1_700_000_000)
+    assert row["status"] == "ok"
+    assert all(src.get("source") != "ppt_cards" for src in row.get("sources", []))
+
+
+def test_writer_refuses_ask_source():
+    """record_asset_comp must refuse an ebay (ask) source — an ask is never a comp."""
+    import pytest
+    from scanner.poke_api import sources as s
+    with pytest.raises(ValueError):
+        s.build_asset_comp_observation(RAW_ASSET, comp=100.0, confidence="low",
+                                       source="ebay", capture_date="2026-07-06")

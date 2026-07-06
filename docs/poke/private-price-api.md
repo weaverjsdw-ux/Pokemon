@@ -418,3 +418,67 @@ theirs is more defensible. See the [edge-layer runbook](edge-layer-runbook.md).
 **Report surface.** `GET /api/poke/edge-summary` (JSON) and `edge_cli.py list` / `show`
 are the report surface this session. A dashboard "Edge" card is a scoped follow-on
 (the read API + CLI ship now; the SPA card is not required for the core).
+
+---
+
+## Track F — Independent singles/slabs sold-source validation
+
+Track F adds a **second, independent** (non-PPT) sold-price source for raw singles +
+graded slabs, so a comp never rests on a single provider — and gets there at **0 PPT
+credits**. Code: `scanner/poke_api/independent_sources.py` (adapters + parser),
+`sources.resolve_independent_asset_row` (resolver entry point, never accepts a
+`ppt_client`), `divergence.py` (now cross-source aware).
+
+**PriceCharting exact-slug adapters.** `PriceChartingRawSource` and
+`PriceChartingGradedSource` fetch the card's **detail** page directly
+(`pricecharting.com/game/{pricecharting_slug}`) with a plain `requests` GET — no
+Playwright, no billed API call. Evidence this page is plain-fetchable (redirect
+behavior + the `#price_data` cell layout, verified against a live probe):
+[`pricecharting-detail-probe-2026-07-05.md`](pricecharting-detail-probe-2026-07-05.md).
+Raw reads the `used_price` (Ungraded) cell. Graded matching is **exact-only, never
+"nearest"**: `manual_only_price` (PriceCharting's PSA 10 column) matches **only**
+`grade_key == psa10` — no other grader claims that cell. Grades 9.5 / 9 / 8 / 7 map to
+generic numeric-grade columns (`box_only_price` / `graded_price` / `new_price` /
+`complete_price` respectively) that are **grader-agnostic** — a PSA9, CGC9, or BGS9
+asset all match the same `graded_price` cell (labeled "Grade 9" on PriceCharting, not
+PSA-specific). Any grade with no matching column — including grade 10 from a
+non-PSA grader (`cgc10`, `bgs10`), since only `psa10` may use the PSA-exact cell — or
+an unparseable `grade_key` returns an honest `no_match`, never a guessed/nearest cell.
+A challenge/interstitial page or non-200 response degrades to a `blocked` quote —
+never a fabricated price.
+
+**Graded confidence is locked `low`.** Even on an exact PSA-cell match, an independent
+graded comp never rises above `low` confidence — there is exactly one sold-derived
+source behind it (PriceCharting), same one-source ceiling raw applies. `high` still
+requires two independently agreeing sold sources (raw's existing ladder).
+
+**TCGplayer stays conditional.** `TcgPlayerRenderedSource` ships **dormant**
+(`render=None` by default) — TCGplayer's price is client-rendered (SPA), so a plain GET
+never sees it; wiring an actual Playwright render is the Tasks 8–9 follow-on, and it is
+**non-blocking** for this gate. A dormant TCG source always reports `blocked`, never a
+crash, so the resolver degrades cleanly with or without it.
+
+**Persisting an independent comp (0 PPT credits).**
+
+```
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
+  --asset-key umbreon_ex_161_raw_nm --refresh-independent
+```
+
+Gated on `poke.independent_sources: true` (default off). Runs the resolver with only
+the independent sources (`ppt_client` is never constructed — the independent path
+cannot spend a PPT credit even in principle), then persists with the **real** source
+slug (`pricecharting`, never `ppt_cards`). A no-sold-source result records nothing
+(honest degrade). See the [edge-layer runbook](edge-layer-runbook.md#45-persist-a-rawgraded-asset-comp-record-asset-comp).
+
+**`divergence-audit --local` is now cross-source aware.** When our recorded comp's
+source is an independent one (not `ppt_cards`) and it **agrees** with a recorded
+`ppt_cards` observation within tolerance, the local audit row carries `ours_source` (the
+actual source that produced our number) and `cross_source_validated: true` — a genuine
+two-provider agreement, not just "we have a PPT-sourced number and compared it to
+itself." Still **0 credits, 0 network** — it only reads what's already in the ledger.
+
+**PPT stays audit-only.** Nothing about Track F changes PPT's role: it is still never a
+read-path source of truth, only an optional adapter (Track D) or the divergence audit's
+off-hot-path comparison oracle (Session E). Track F's contribution is a genuinely
+independent number to compare PPT *against* — not a replacement for it.
