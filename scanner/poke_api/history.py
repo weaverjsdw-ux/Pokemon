@@ -77,18 +77,28 @@ def item_key_for_product(product: dict, product_key: str = "") -> str:
     })
 
 
-def item_key_for_asset(asset: dict, asset_key: str = "") -> str:
-    """Raw/graded asset -> ledger item_key. The normalized ``grade_key`` ("psa10")
-    goes in the grade slot, ``card_number`` in the variant slot, and ``condition``
-    ("nm"/"lp") in the condition slot — so raw NM, raw LP, PSA 10, PSA 9, and the
-    all-empty sealed key are all distinct, and never collide with a sealed product."""
-    return ledger_mod.item_key({
+def asset_identity(asset: dict, asset_key: str = "") -> dict:
+    """The five ledger-identity slots (set/item/variant/grade/condition) for a
+    raw/graded asset — the SINGLE source of truth shared by ``item_key_for_asset``
+    (the read side) and the ``record_asset_comp`` writer (``sources``). Building a
+    persisted observation from this exact dict is what guarantees its ``item_key``
+    byte-matches what read-first looks up; hand-replicating the slots would let the
+    two drift apart silently (read-first would return null with no error)."""
+    return {
         "set": asset.get("set", ""),
         "item": asset.get("name") or asset_key,
         "variant": asset.get("card_number") or asset.get("variant") or "",
         "grade": asset.get("grade_key") or "",
         "condition": asset.get("condition") or "",
-    })
+    }
+
+
+def item_key_for_asset(asset: dict, asset_key: str = "") -> str:
+    """Raw/graded asset -> ledger item_key. The normalized ``grade_key`` ("psa10")
+    goes in the grade slot, ``card_number`` in the variant slot, and ``condition``
+    ("nm"/"lp") in the condition slot — so raw NM, raw LP, PSA 10, PSA 9, and the
+    all-empty sealed key are all distinct, and never collide with a sealed product."""
+    return ledger_mod.item_key(asset_identity(asset, asset_key))
 
 
 _SOURCE_BY_HOST = (

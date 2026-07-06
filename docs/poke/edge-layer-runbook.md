@@ -81,6 +81,32 @@ Grading fee comes from `poke.grading_cost_all_in` (PSA Regular $79.99 all-in; va
 tiers paused 2026-06). Grading EV is capped at **PAPER_BUY** (never LIVE) because the
 gem rate is an assumption, not verified-data confidence.
 
+## 4.5 Persist a raw/graded asset comp (record-asset-comp)
+
+Raw/graded read paths are **ledger-only** — there is no in-house comp cache/engine for
+singles (those key off the TCGplayer id). Until an asset `market_comp` is persisted,
+read-first honestly returns `null` and the divergence audit's `ours` is `null`. Populate
+it with the provenance-honest writer:
+
+```
+# from-value (0 credits): record an ALREADY-CAPTURED sold-derived value + full provenance
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
+  --asset-key umbreon_ex_161_raw_nm --comp 1528.09 --source ppt_cards \
+  --confidence low --capture-date 2026-07-05 --basis "D.5 smoke 2026-07-05"
+
+# billed refresh (money-class): fetch from the configured external card source + persist
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
+  --asset-key umbreon_ex_161_psa10 --refresh --yes
+```
+
+- Identity comes from the loaded asset (`history.asset_identity`), so the persisted
+  `item_key` byte-matches read-first — the same value then serves at **0 credits**.
+- STOP-class refusals: a missing/≤0 comp, no source, or an **ask source (`ebay`)** is
+  refused — an active ask is context, never a sold comp.
+- `--refresh` is billed exactly like the audit's external mode (refuses without a key /
+  without `--yes`, surfaces the spend); a no-price result persists **nothing**.
+- The from-value path is 0 credits (recording captured evidence, not a new call).
+
 ## 5. Divergence audit (API vs external — investigate, don't clone)
 
 ```

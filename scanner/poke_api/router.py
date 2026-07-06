@@ -54,6 +54,11 @@ class PokeApiDeps:
     decisions_path: Any = None
     read_candidates: Callable[[], list[dict]] = lambda: []
     candidates_path: Any = None
+    # The append-only market-observation ledger path (``price_history.jsonl``). Exposed
+    # so the ``record-asset-comp`` writer persists to the SAME file read-first reads —
+    # and so tests can point it at a tmp ledger. Read paths never need it (they go
+    # through ``read_observations``); only the asset-comp writer does.
+    ledger_path: Any = None
     # Session E: the raw/graded verified-entry wire (keyed on asset_key). Defaults to
     # none so an asset stays WATCH/DATA_NEEDED evidence until a verified asset candidate
     # exists — the ONLY way a single becomes buy-shaped (never live off a comp alone).
@@ -218,12 +223,9 @@ def _resolve_asset_source(deps: PokeApiDeps, asset: dict, checked_at: int) -> di
     tol = float(getattr(comps, "agreement_tolerance_pct", 20.0))
     floor = float(getattr(comps, "ebay_floor_sanity_pct", 50.0))
     try:
-        if str(asset.get("asset_class")) == catalog_mod.RAW:
-            return sources_mod.resolve_raw_comp(
-                asset, checked_at=checked_at, ppt_client=deps.card_client,
-                tolerance_pct=tol, floor_sanity_pct=floor)
-        return sources_mod.resolve_graded_comp(
-            asset, checked_at=checked_at, ppt_client=deps.card_client)
+        return sources_mod.resolve_asset_source_row(
+            asset, card_client=deps.card_client, checked_at=checked_at,
+            tolerance_pct=tol, floor_sanity_pct=floor)
     except Exception as exc:  # noqa: BLE001 - contained honest degrade, never crashes the route
         detail = f"asset source resolve failed: {str(exc)[:150]}"
         return {"status": "error", "estimate": "", "confidence": "none",
@@ -593,4 +595,5 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         card_client=sources_mod.card_client_from_config(cfg),
         assets_error=assets_error,
         asset_candidate_for=asset_candidate_for,
+        ledger_path=path,
     )

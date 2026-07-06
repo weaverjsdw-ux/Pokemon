@@ -38,6 +38,7 @@ from .. import market as market_mod
 from .. import resale
 from ..comps import model as comps_model
 from ..comps.model import SOLD_DERIVED, CompSourceQuote
+from ..discovery import ledger as disc_ledger
 from . import catalog as catalog_mod
 from . import history as history_mod
 
@@ -225,6 +226,75 @@ def expected_asset_credits(asset: dict, *, card_client: Any) -> CreditAccount:
     if asset_class == catalog_mod.GRADED and str(asset.get("grade_key") or "").strip():
         return CreditAccount(2, True, "external")
     return CreditAccount(0, False, "local")             # graded w/o grade_key -> no call
+
+
+# ---------------------------------------------------------------- ledger writer (persist)
+
+# Sources whose number is an active ASK, never a sold comp — refused by the writer.
+# Recording an ask as a market_comp would launder context into sold-comp truth (D.5).
+_ASK_SOURCES = frozenset({"ebay"})
+
+
+def build_asset_comp_observation(asset: dict, *, comp, confidence: str, source: str,
+                                 capture_date: str, source_url: str = "", basis: str = "",
+                                 asset_key: str = "") -> dict:
+    """Shape a sold-derived raw/graded comp into a ``market_comp`` ledger observation
+    whose identity slots come straight from ``history.asset_identity`` — so the persisted
+    ``item_key`` byte-matches what read-first looks up. STOP-class: a missing/<=0 comp or
+    an ask-only source is refused (``ValueError``); the writer never fabricates a sold
+    number and never launders an active ask into sold-comp truth."""
+    price = resale._amount(comp)
+    if price is None or price <= 0:
+        raise ValueError(f"refusing to record a non-positive/absent asset comp: {comp!r}")
+    slug = str(source or "").strip().lower()
+    if not slug:
+        raise ValueError("refusing to record an asset comp with no source "
+                         "(provenance is STOP-class)")
+    if slug in _ASK_SOURCES:
+        raise ValueError(f"refusing to record source {slug!r}: an active ask is context, "
+                         "never a sold comp")
+    obs = dict(history_mod.asset_identity(asset, asset_key))
+    obs.update({
+        "kind": history_mod.MARKET_COMP,
+        "comp": round(float(price), 2),
+        "comp_confidence": str(confidence or "none").strip().lower() or "none",
+        "source": slug,
+        "source_url": str(source_url or ""),
+        "capture_date": str(capture_date or ""),
+        # provenance for later audit (identity already lives in the item_key slots)
+        "asset_key": str(asset_key or ""),
+        "asset_class": str(asset.get("asset_class") or ""),
+        "basis": str(basis or ""),
+        "recorded_via": "record_asset_comp",
+    })
+    return obs
+
+
+def record_asset_comp(ledger_path, asset: dict, *, comp, confidence: str, source: str,
+                      capture_date: str, source_url: str = "", basis: str = "",
+                      asset_key: str = "") -> bool:
+    """Append a sold-derived raw/graded ``market_comp`` to the append-only price-history
+    ledger (idempotent by kind+identity+source_url+capture_date). True on a fresh write,
+    False if already recorded. Refuses to fabricate (see ``build_asset_comp_observation``).
+    No network, 0 credits — any billed provider fetch happens upstream and passes the
+    resolved number in here."""
+    obs = build_asset_comp_observation(
+        asset, comp=comp, confidence=confidence, source=source,
+        capture_date=capture_date, source_url=source_url, basis=basis, asset_key=asset_key)
+    return disc_ledger.append_observation(ledger_path, obs)
+
+
+def resolve_asset_source_row(asset: dict, *, card_client: Any, checked_at: int,
+                             tolerance_pct: float = 20.0, floor_sanity_pct: float = 50.0) -> dict:
+    """Dispatch a raw/graded asset to its source resolver (the billed refresh path,
+    shared by the router refresh route and the ``record-asset-comp --refresh`` CLI).
+    Returns the legacy comp row; with no configured client it is an honest ``none``
+    row touching no network. Callers wrap this so a resolver bug degrades to no-price,
+    never a persisted number."""
+    if str(asset.get("asset_class")) == catalog_mod.RAW:
+        return resolve_raw_comp(asset, checked_at=checked_at, ppt_client=card_client,
+                                tolerance_pct=tolerance_pct, floor_sanity_pct=floor_sanity_pct)
+    return resolve_graded_comp(asset, checked_at=checked_at, ppt_client=card_client)
 
 
 # ---------------------------------------------------------------- adapter plumbing

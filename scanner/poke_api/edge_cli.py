@@ -21,9 +21,11 @@ from __future__ import annotations
 import argparse
 import json
 
+from .. import resale
 from . import divergence as dv_mod
 from . import edge as edge_mod
 from . import paper_ledger as ledger_mod
+from . import sources as sources_mod
 
 
 def _packets(deps):
@@ -117,6 +119,26 @@ def _build_argparser():
     pd.add_argument("--yes", action="store_true",
                     help="operator go-ahead for the surfaced external credit spend")
     pd.add_argument("--json", action="store_true")
+
+    prc = sub.add_parser(
+        "record-asset-comp",
+        help="persist a sold-derived raw/graded asset comp into the price-history "
+             "ledger (0-credit from-value default; operator-gated billed --refresh)")
+    prc.add_argument("--asset-key", required=True)
+    prc.add_argument("--comp", type=float,
+                     help="already-captured sold-derived comp value (from-value mode)")
+    prc.add_argument("--source", default="",
+                     help="sold source slug (e.g. ppt_cards, pricecharting); an ask "
+                          "source (ebay) is refused — an ask is context, never a comp")
+    prc.add_argument("--confidence", default="none")
+    prc.add_argument("--capture-date", help="ISO capture date of the observation (default: today)")
+    prc.add_argument("--source-url", default="")
+    prc.add_argument("--basis", default="", help="comp basis / provenance note")
+    prc.add_argument("--refresh", action="store_true",
+                     help="billed: fetch the comp from the configured external card source "
+                          "and persist it (money-class; needs --yes + a key)")
+    prc.add_argument("--yes", action="store_true",
+                     help="operator go-ahead for the surfaced --refresh credit spend")
     return p
 
 
@@ -192,6 +214,97 @@ def _cmd_divergence(args, deps) -> int:
     return 1 if result.get("failed") else 0
 
 
+def _today_ts(today) -> int:
+    """Deterministic timestamp from the injected ISO ``today`` (no wall clock) for the
+    resolver's capture labels on the billed refresh path."""
+    from datetime import date, datetime
+    try:
+        return int(datetime(*[int(p) for p in str(today).split("-")]).timestamp())
+    except (TypeError, ValueError):
+        return int(datetime.combine(date(1970, 1, 1), datetime.min.time()).timestamp())
+
+
+def _row_primary_source(row: dict) -> str:
+    for s in row.get("sources") or []:
+        if isinstance(s, dict) and s.get("source"):
+            return str(s["source"]).strip().lower()
+    return ""
+
+
+def _record_billed(args, deps, asset, ledger_path) -> int:
+    """Operator-gated billed refresh: fetch the comp from the configured external card
+    source and persist it. Refuses without a client or without --yes (surfacing the
+    spend); a resolver failure / no-price degrades honestly and persists nothing."""
+    credits = sources_mod.expected_asset_credits(asset, card_client=deps.card_client)
+    if deps.card_client is None:
+        print("refused: no external card client configured "
+              "(needs market.preferred + market.api_key)")
+        return 2
+    if not args.yes:
+        print(f"refused: pass --yes only after operator go-ahead (estimated spend "
+              f"~{credits.total} credit(s), limit=1 pinned, money-class)")
+        return 2
+    try:
+        row = sources_mod.resolve_asset_source_row(
+            asset, card_client=deps.card_client, checked_at=_today_ts(deps.today))
+    except Exception as exc:  # noqa: BLE001 - never persist a number on a resolver bug
+        print(f"refresh billed {credits.total} credit(s); resolver failed "
+              f"({str(exc)[:120]}); nothing recorded")
+        return 1
+    estimate = resale._amount(row.get("estimate"))
+    if estimate is None:
+        print(f"refresh billed {credits.total} credit(s) but no usable sold comp "
+              f"(honest no-source); nothing recorded")
+        return 1
+    source = _row_primary_source(row) or "ppt_cards"
+    try:
+        wrote = sources_mod.record_asset_comp(
+            ledger_path, asset, comp=estimate, confidence=row.get("confidence"),
+            source=source, capture_date=deps.today,
+            source_url=row.get("sourceUrl") or row.get("url") or "",
+            basis=row.get("compBasis") or row.get("basis") or "", asset_key=args.asset_key)
+    except ValueError as exc:
+        print(f"refresh billed {credits.total} credit(s); refused to persist ({exc})")
+        return 1
+    print(f"{'recorded' if wrote else 'already recorded'} asset comp {args.asset_key} "
+          f"= ${estimate:.2f} [{source}, {row.get('confidence')}] "
+          f"(billed {credits.total} credit(s), limit=1 pinned)")
+    return 0
+
+
+def _cmd_record_asset_comp(args, deps) -> int:
+    asset = (getattr(deps, "assets", None) or {}).get(args.asset_key)
+    if asset is None:
+        print(f"unknown asset_key: {args.asset_key!r} (not in the asset catalog) — not written")
+        return 1
+    ledger_path = getattr(deps, "ledger_path", None)
+    if ledger_path is None:
+        print("refused: no ledger_path configured on deps")
+        return 1
+
+    if args.refresh:
+        return _record_billed(args, deps, asset, ledger_path)
+
+    # from-value (0 credits): persist an already-captured, provenance-bearing observation.
+    if args.comp is None or not args.source:
+        print("record-asset-comp needs --comp and --source (an already-captured "
+              "sold-derived value), or --refresh --yes for an operator-approved billed fetch")
+        return 1
+    capture_date = args.capture_date or deps.today
+    try:
+        wrote = sources_mod.record_asset_comp(
+            ledger_path, asset, comp=args.comp, confidence=args.confidence,
+            source=args.source, capture_date=capture_date,
+            source_url=args.source_url, basis=args.basis, asset_key=args.asset_key)
+    except ValueError as exc:
+        print(f"refused: {exc}")
+        return 1
+    print(f"{'recorded' if wrote else 'already recorded'} asset comp {args.asset_key} "
+          f"= ${float(args.comp):.2f} [{args.source}, {args.confidence}] "
+          f"capture {capture_date} (0 credits)")
+    return 0
+
+
 def main(argv=None, *, deps=None) -> int:
     args = _build_argparser().parse_args(argv)
     if deps is None:                       # lazy import avoids an import cycle with router
@@ -209,6 +322,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_outcome(args, deps)
     if args.cmd == "divergence-audit":
         return _cmd_divergence(args, deps)
+    if args.cmd == "record-asset-comp":
+        return _cmd_record_asset_comp(args, deps)
     return 0
 
 
