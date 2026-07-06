@@ -121,6 +121,21 @@ def test_audit_local_zero_credits_agree():
     assert result["credits_spent"] == 0
 
 
+def test_audit_local_surfaces_cross_source_when_independent_agrees():
+    obs = [
+        {"item_key": IK, "kind": "market_comp", "comp": 1425.00, "capture_date": "2026-07-06",
+         "source": "pricecharting", "comp_confidence": "low"},           # our local comp
+        {"item_key": IK, "kind": "market_comp", "comp": 1528.09, "capture_date": "2026-07-06",
+         "source": "ppt_cards", "comp_confidence": "low"},               # external reference
+    ]
+    result = dv.audit_local(_deps(obs), asset_keys=["umbreon_psa10"], tolerance_pct=20.0)
+    row = result["rows"][0]
+    assert row["ours_source"] == "pricecharting"
+    assert row["category"] == "agree"                 # ~7% delta < 20% tolerance
+    assert row["cross_source_validated"] is True
+    assert result["failed"] is False
+
+
 def test_audit_local_flags_unexplained_material():
     obs = [
         {"item_key": IK, "kind": "market_comp", "comp": 3000.0, "capture_date": "2026-07-05",

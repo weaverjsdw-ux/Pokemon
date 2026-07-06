@@ -70,9 +70,11 @@ def _print_audit(result) -> None:
         print(f"  estimated spend: ~{result['spend_estimate']['credits']} credit(s)")
     for r in result.get("rows", []):
         flag = "BLOCKING" if r.get("blocking") else ("material" if r.get("material") else "ok")
-        print(f"  [{flag:<8}] {r['subject_key']:<28} {r['category']}"
+        src = f" via {r.get('ours_source')}" if r.get("ours_source") else ""
+        xsv = "  [cross-source OK]" if r.get("cross_source_validated") else ""
+        print(f"  [{flag:<8}] {r['subject_key']:<28} {r['category']}{src}"
               f"  ours={_fmt_money(r.get('ours'))} theirs={_fmt_money(r.get('theirs'))}"
-              f"  ({r.get('delta_pct')}%)")
+              f"  ({r.get('delta_pct')}%){xsv}")
         print(f"             {r.get('note', '')}")
     if result.get("hard_stopped"):
         print("  HARD STOP: daily remaining below floor; stopped before the next subject")

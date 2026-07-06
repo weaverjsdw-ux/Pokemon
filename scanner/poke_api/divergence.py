@@ -116,7 +116,7 @@ def _local_ours(obs, item_key, ext_date: str | None) -> dict:
     ours_obs = _latest_market_comp(obs, item_key, external=False)
     if ours_obs is None:
         return {"estimate": None, "confidence": "none", "missing": True, "ask_only": False,
-                "stale": False}
+                "stale": False, "source": None}
     o_date = str(ours_obs.get("capture_date") or "")
     return {
         "estimate": history_mod._comp_value(ours_obs),
@@ -124,6 +124,7 @@ def _local_ours(obs, item_key, ext_date: str | None) -> dict:
         "missing": False,
         "ask_only": history_mod.source_of(ours_obs) == "ebay",
         "stale": bool(ext_date and o_date and o_date < ext_date),
+        "source": history_mod.source_of(ours_obs),
     }
 
 
@@ -164,8 +165,12 @@ def audit_local(deps, *, product_keys=None, asset_keys=None, tolerance_pct=None)
             o_date = str((ours_obs or {}).get("capture_date") or "")
             theirs["stale"] = bool(o_date and ext_date and ext_date < o_date)
         clazz = classify_divergence(ours, theirs, tolerance_pct=tol)
+        ours_source = ours.get("source")
+        cross = bool(ours_source and ours_source not in _EXTERNAL_SLUGS
+                     and theirs is not None and clazz["category"] == "agree")
         rows.append({"subject_key": key, "subject_kind": kind, "ours": ours.get("estimate"),
-                     "theirs": (theirs or {}).get("estimate"), **clazz})
+                     "ours_source": ours_source, "theirs": (theirs or {}).get("estimate"),
+                     "cross_source_validated": cross, **clazz})
     failed = any(r["blocking"] for r in rows)
     return {"mode": "local", "rows": rows, "failed": failed, "credits_spent": 0,
             "material_count": sum(1 for r in rows if r["material"])}

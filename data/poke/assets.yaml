@@ -27,7 +27,7 @@ umbreon_ex_161_raw_nm:
   card_number: "161"
   condition: "NM"
   tcgplayer_id: "610516"   # Umbreon ex - 161/131; verified 2026-07-05
-  # pricecharting_slug: ""
+  pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
   # ebay_query: "Umbreon ex 161 Prismatic Evolutions raw NM"
 
 umbreon_ex_161_raw_lp:
@@ -36,6 +36,7 @@ umbreon_ex_161_raw_lp:
   set: "Prismatic Evolutions"
   card_number: "161"
   condition: "LP"
+  pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
 
 umbreon_ex_161_psa10:
   asset_class: graded
@@ -46,6 +47,7 @@ umbreon_ex_161_psa10:
   grade: "10"
   # grade_key derived as psa10; map tcgplayer_id + configure PPT to resolve a comp
   tcgplayer_id: "610516"   # Umbreon ex - 161/131; verified 2026-07-05
+  pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
 
 umbreon_ex_161_psa9:
   asset_class: graded
@@ -54,3 +56,4 @@ umbreon_ex_161_psa9:
   card_number: "161"
   grader: "PSA"
   grade: "9"
+  pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
