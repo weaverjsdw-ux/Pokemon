@@ -218,6 +218,28 @@ def test_graded_pricecharting_fallback_uncorroborated_is_low():
     assert conf == "low"
 
 
+def test_graded_basis_carries_grade_cell_provenance():
+    """Phase G provenance fix: the persisted graded basis is the grade-cell note
+    (PSA-exact vs grader-agnostic proxy), NOT the generic 'pricecharting graded page' —
+    so a ledger row is standalone about which column produced the number."""
+    q = CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", 7013.08, "https://pc/x",
+                        "2026-07-06T00:00:00",
+                        detail="PriceCharting PSA 10 column (PSA-exact)",
+                        raw_excerpt="PriceCharting PSA 10 column (PSA-exact)")
+    row = sources.resolve_graded_comp(GRADED, checked_at=CHECKED, pc_source=_FixedSource(q))
+    assert row["compBasis"] == "PriceCharting PSA 10 column (PSA-exact)"
+    assert "graded page" not in row["compBasis"]
+
+
+def test_graded_basis_proxy_note_for_grader_agnostic_cell():
+    q = CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", 1554.05, "https://pc/x",
+                        "2026-07-06T00:00:00",
+                        detail="PriceCharting Grade 9 column (grader-agnostic proxy)",
+                        raw_excerpt="PriceCharting Grade 9 column (grader-agnostic proxy)")
+    row = sources.resolve_graded_comp(GRADED, checked_at=CHECKED, pc_source=_FixedSource(q))
+    assert "grader-agnostic proxy" in row["compBasis"]
+
+
 def test_graded_pricecharting_ask_no_longer_lifts_confidence():
     """Phase F: graded PriceCharting confidence is LOCKED at low — an eBay ask is context
     and can no longer lift it to medium (cross-source validation is the audit's job)."""

@@ -428,9 +428,13 @@ def resolve_graded_comp(asset: dict, *, checked_at: int, ppt_client: Any = None,
         # is context and can never lift it. Cross-source validation is supplied by the
         # divergence audit agreeing, not by this field. The PSA-exact vs grader-agnostic
         # distinction rides in the basis note (pc.raw_excerpt / pc.detail).
+        # Phase G provenance fix: persist the grade-cell note as the basis (e.g.
+        # "PriceCharting PSA 10 column (PSA-exact)" / "...Grade 9 column (grader-agnostic
+        # proxy)") so PSA-exact vs proxy is ledger-standalone, not merely recoverable from
+        # grade_key + the cell map. Falls back to a generic note if the quote carries none.
         note = pc.raw_excerpt or pc.detail or "single sold-derived graded source"
         return _legacy_row(asset_key, asset, status="ok", estimate=pc.price,
-                           confidence="low", basis="pricecharting graded page",
+                           confidence="low", basis=note,
                            source="pricecharting", url=pc.url, checked_at=checked_at,
                            detail=note)
 

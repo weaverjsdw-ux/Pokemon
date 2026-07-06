@@ -50,3 +50,6 @@ dashboards/
 data/poke/price_history.jsonl
 data/poke/paper_decisions.jsonl
 data/poke/verified_candidates.jsonl
+# Phase G gem-rate evidence ledger (append-only, provenance-stamped; a committed result
+# doc is the durable proof, mirroring the gitignored price-history ledger).
+data/poke/gem_rates.jsonl

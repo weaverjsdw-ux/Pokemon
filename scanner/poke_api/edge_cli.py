@@ -24,6 +24,7 @@ import json
 from .. import resale
 from . import divergence as dv_mod
 from . import edge as edge_mod
+from . import gem_rates as gem_rates_mod
 from . import paper_ledger as ledger_mod
 from . import sources as sources_mod
 
@@ -161,6 +162,46 @@ def _build_argparser():
     pbc.add_argument("--yes", action="store_true",
                      help="persist the resolved comps (absent/--dry-run => preview only)")
     pbc.add_argument("--json", action="store_true")
+
+    # Phase G: gem-rate evidence ledger. `record` captures a SOURCED gem rate from the
+    # PriceCharting population blob (0 PPT credits — the pop path never builds a PPT
+    # client); `record-assumption`/`list`/`show` are ledger-only, 0 network.
+    pgr = sub.add_parser("gem-rate",
+                         help="Phase G gem-rate evidence ledger (record/list/show)")
+    grsub = pgr.add_subparsers(dest="gem_action", required=True)
+
+    grr = grsub.add_parser(
+        "record", help="capture PriceCharting population -> a SOURCED gem rate (0 PPT "
+                       "credits; gated on poke.independent_sources + --yes)")
+    grr.add_argument("--asset-key", required=True)
+    grr.add_argument("--grader", default="PSA",
+                     help="single grader (default PSA); PSA and CGC are NEVER combined")
+    grr.add_argument("--source", default="pricecharting",
+                     help="only 'pricecharting' population is supported (0-credit pop blob)")
+    grr.add_argument("--sample-floor", type=int, dest="sample_floor",
+                     default=gem_rates_mod.SAMPLE_FLOOR_DEFAULT,
+                     help=(f"min total pop for a sourced rate (default "
+                           f"{gem_rates_mod.SAMPLE_FLOOR_DEFAULT}); below -> block, never guess"))
+    grr.add_argument("--basis", default="")
+    grr.add_argument("--yes", action="store_true",
+                     help="operator go-ahead for the live 0-credit PriceCharting pop fetch")
+
+    gra = grsub.add_parser(
+        "record-assumption",
+        help="record an explicit operator-assumption gem rate (no network, capped PAPER_BUY)")
+    gra.add_argument("--asset-key", required=True)
+    gra.add_argument("--grader", default="PSA")
+    gra.add_argument("--gem-rate", type=float, required=True, dest="gem_rate")
+    gra.add_argument("--basis", required=True, help="why this rate (required — an assumption "
+                                                    "is a labeled judgment, not a fabrication)")
+
+    grl = grsub.add_parser("list", help="list recorded gem-rate rows (ledger-only, 0 network)")
+    grl.add_argument("--json", action="store_true")
+
+    grs = grsub.add_parser("show",
+                           help="recorded gem-rate rows for one asset (ledger-only, 0 network)")
+    grs.add_argument("--asset-key", required=True)
+    grs.add_argument("--json", action="store_true")
     return p
 
 
@@ -493,6 +534,143 @@ def _cmd_record_asset_comp(args, deps) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- Phase G: gem-rate ledger
+
+def _gem_rate_path(deps):
+    return getattr(deps, "gem_rates_path", None)
+
+
+def _print_gem_rows(rows) -> None:
+    print(f"{len(rows)} gem-rate row(s) (ledger-only, 0 network)\n")
+    for r in rows:
+        gr_val = r.get("gem_rate")
+        gr_str = f"{gr_val:.4f}" if isinstance(gr_val, (int, float)) else "-"
+        ss = r.get("sample_size")
+        ss_str = f"n={ss}" if ss is not None else "n=-"
+        print(f"  [{str(r.get('label', '?')):<19}] {str(r.get('asset_key', '')):<28} "
+              f"{str(r.get('grader', '')):<4} gem {gr_str} {ss_str} "
+              f"[{r.get('source', '')}] {r.get('capture_date', '')}")
+        if r.get("basis"):
+            print(f"        {r['basis']}")
+
+
+def _gem_rate_record(args, deps) -> int:
+    """Capture PriceCharting population -> a SOURCED gem rate. 0 PPT credits by
+    construction (``PriceChartingPopSource`` takes a plain requests session; NO PPT client
+    is ever built). Gated on poke.independent_sources + --yes. Below the sample floor /
+    grader absent / no pop -> honest block, never a guessed rate. Always prints
+    ``credits_spent=0``."""
+    from . import independent_sources as indep
+
+    if str(args.source or "").strip().lower() not in ("pricecharting", "pricecharting_pop"):
+        print(f"gem-rate record supports only --source pricecharting (0-credit population); "
+              f"got {args.source!r}")
+        return 1
+    asset = (getattr(deps, "assets", None) or {}).get(args.asset_key)
+    if asset is None:
+        print(f"unknown asset_key: {args.asset_key!r} (not in the asset catalog) — not written")
+        return 1
+    path = _gem_rate_path(deps)
+    if path is None:
+        print("refused: no gem_rates_path configured on deps")
+        return 1
+    if not indep.independent_sources_enabled(deps.cfg):
+        print("refused: live pop fetch is off (set poke.independent_sources: true)")
+        return 2
+    if not args.yes:
+        print("refused: pass --yes only after operator go-ahead for the live PriceCharting "
+              "pop fetch (0 PPT credits)")
+        return 2
+
+    grader = str(args.grader or "PSA").strip().upper()
+    src = indep.PriceChartingPopSource()          # plain requests; NO PPT client constructed
+    res = src.fetch_pop(asset, _today_ts(deps.today))
+    if res.get("status") != "ok":
+        print(f"no sourced gem rate: pop {res.get('status')} ({res.get('detail', '')}); "
+              f"credits_spent=0")
+        return 1
+    counts = (res.get("pop") or {}).get(grader.lower())
+    if counts is None:
+        print(f"no sourced gem rate: grader {grader} absent from the pop blob "
+              f"(graders present: {res.get('graders')}); credits_spent=0")
+        return 1
+    basis = args.basis or f"PriceCharting {grader} population census (monthly), pop-blob sourced"
+    try:
+        wrote = gem_rates_mod.record_sourced(
+            path, asset_key=args.asset_key, grader=grader, counts=counts,
+            source_url=res.get("url", ""), capture_date=deps.today, basis=basis,
+            sample_floor=args.sample_floor)
+    except ValueError as exc:
+        print(f"blocked: {exc}; credits_spent=0")
+        return 1
+    calc = gem_rates_mod.gem_rate_from_counts(counts, grader=grader,
+                                              sample_floor=args.sample_floor)
+    print(f"{'recorded' if wrote else 'already recorded'} gem rate {args.asset_key} [{grader}] "
+          f"= {calc['gem_rate']:.4f} ({grader}10 {calc['psa10']}/{calc['sample_size']} pop) "
+          f"[sourced, pricecharting_pop] credits_spent=0")
+    return 0
+
+
+def _gem_rate_record_assumption(args, deps) -> int:
+    """Record an explicit operator-assumption gem rate (no network). The rate must be a
+    probability in (0, 1] with a stated basis — a labeled judgment, never a fabrication."""
+    asset = (getattr(deps, "assets", None) or {}).get(args.asset_key)
+    if asset is None:
+        print(f"unknown asset_key: {args.asset_key!r} (not in the asset catalog) — not written")
+        return 1
+    path = _gem_rate_path(deps)
+    if path is None:
+        print("refused: no gem_rates_path configured on deps")
+        return 1
+    grader = str(args.grader or "PSA").strip().upper()
+    try:
+        wrote = gem_rates_mod.record_assumption(
+            path, asset_key=args.asset_key, grader=grader, gem_rate=args.gem_rate,
+            basis=args.basis, capture_date=deps.today)
+    except ValueError as exc:
+        print(f"refused: {exc}")
+        return 1
+    print(f"{'recorded' if wrote else 'already recorded'} gem rate {args.asset_key} [{grader}] "
+          f"= {float(args.gem_rate):.4f} [operator_assumption] (0 network, capped PAPER_BUY)")
+    return 0
+
+
+def _gem_rate_list(args, deps) -> int:
+    path = _gem_rate_path(deps)
+    rows = gem_rates_mod.read_rows(path) if path is not None else []
+    if getattr(args, "json", False):
+        print(json.dumps({"count": len(rows), "gem_rates": rows}, indent=2))
+    else:
+        _print_gem_rows(rows)
+    return 0
+
+
+def _gem_rate_show(args, deps) -> int:
+    path = _gem_rate_path(deps)
+    all_rows = gem_rates_mod.read_rows(path) if path is not None else []
+    rows = gem_rates_mod.rows_for_asset(all_rows, args.asset_key)
+    if getattr(args, "json", False):
+        print(json.dumps({"asset_key": args.asset_key, "count": len(rows),
+                          "gem_rates": rows}, indent=2))
+    else:
+        print(f"gem-rate rows for {args.asset_key}:")
+        _print_gem_rows(rows)
+    return 0
+
+
+def _cmd_gem_rate(args, deps) -> int:
+    action = getattr(args, "gem_action", None)
+    if action == "record":
+        return _gem_rate_record(args, deps)
+    if action == "record-assumption":
+        return _gem_rate_record_assumption(args, deps)
+    if action == "list":
+        return _gem_rate_list(args, deps)
+    if action == "show":
+        return _gem_rate_show(args, deps)
+    return 1
+
+
 def main(argv=None, *, deps=None) -> int:
     args = _build_argparser().parse_args(argv)
     if deps is None:                       # lazy import avoids an import cycle with router
@@ -514,6 +692,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_record_asset_comp(args, deps)
     if args.cmd == "record-asset-comps":
         return _cmd_record_asset_comps(args, deps)
+    if args.cmd == "gem-rate":
+        return _cmd_gem_rate(args, deps)
     return 0
 
 

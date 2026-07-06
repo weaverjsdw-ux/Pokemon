@@ -8,7 +8,7 @@ import json
 
 from scanner import config as cfg_mod
 from scanner.poke_api import candidates as cand
-from scanner.poke_api import edge_cli, paper_ledger, router
+from scanner.poke_api import edge_cli, gem_rates, paper_ledger, router
 
 
 PRODUCTS = {"jt_bb": {"name": "Journey Together Booster Bundle", "set": "Journey Together",
@@ -233,3 +233,141 @@ def test_refresh_independent_refuses_ebay_only_source(tmp_path, monkeypatch):
         ["record-asset-comp", "--asset-key", "umb", "--refresh-independent"], deps=deps)
     assert rc == 1
     assert not ledger.exists()
+
+
+# ------------------------------------------ gem-rate ledger CLI (Phase G)
+#
+# `gem-rate record` captures a SOURCED gem rate from PriceCharting population (0 PPT
+# credits — the pop path never constructs a PPT client), gated on
+# poke.independent_sources + --yes. `record-assumption`/`list`/`show` are network-free.
+
+_UMBREON_PSA = [1, 2, 4, 15, 43, 161, 428, 2654, 9195, 5487]
+_POP_OK = {"status": "ok",
+           "pop": {"psa": _UMBREON_PSA, "cgc": [0, 0, 0, 1, 0, 2, 16, 122, 259, 366]},
+           "graders": ["psa", "cgc"],
+           "url": "https://www.pricecharting.com/game/x/umbreon-ex-161",
+           "number": "161", "detail": "", "fetched_at": "2026-07-06T00:00:00"}
+
+_GEM_ASSET = {"asset_class": "raw", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+              "condition": "NM", "card_number": "161",
+              "pricecharting_slug": "pokemon-prismatic-evolutions/umbreon-ex-161"}
+
+
+def _deps_gem(*, assets, gem_rates_path, independent_sources, today="2026-07-06"):
+    cfg = cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"independent_sources": independent_sources}})
+    return router.PokeApiDeps(
+        products={}, assets=assets, read_observations=lambda: [],
+        comp_provider=FakeProvider({}), today=today, cfg=cfg,
+        gem_rates_path=gem_rates_path, card_client=_FailingCardClient())
+
+
+def _stub_pop(monkeypatch, result):
+    from scanner.poke_api import independent_sources as indep
+    monkeypatch.setattr(indep.PriceChartingPopSource, "fetch_pop",
+                        lambda self, a, ts: dict(result))
+
+
+def test_gem_rate_record_gate_off_refuses(tmp_path):
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=False)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                        "--source", "pricecharting", "--yes"], deps=deps)
+    assert rc == 2
+    assert not path.exists()
+
+
+def test_gem_rate_record_without_yes_refuses(tmp_path):
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                        "--source", "pricecharting"], deps=deps)
+    assert rc == 2
+    assert not path.exists()
+
+
+def test_gem_rate_record_sourced_writes_row_zero_credits(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    _stub_pop(monkeypatch, _POP_OK)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                        "--source", "pricecharting", "--yes"], deps=deps)
+    assert rc == 0
+    assert "credits_spent=0" in capsys.readouterr().out
+    rows = gem_rates.read_rows(path)
+    assert len(rows) == 1
+    assert rows[0]["label"] == "sourced" and rows[0]["grader"] == "PSA"
+    assert rows[0]["source"] == "pricecharting_pop"
+    assert rows[0]["sample_size"] == 17990
+
+
+def test_gem_rate_record_never_constructs_ppt_client(tmp_path, monkeypatch):
+    # _FailingCardClient raises on any billed call; a green run proves the pop path
+    # never touched the PPT client (0-PPT-credit invariant).
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    _stub_pop(monkeypatch, _POP_OK)
+    assert edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                          "--source", "pricecharting", "--yes"], deps=deps) == 0
+
+
+def test_gem_rate_record_below_floor_blocks_no_write(tmp_path, monkeypatch, capsys):
+    small = {**_POP_OK, "pop": {"psa": [0, 0, 0, 0, 0, 0, 1, 2, 40, 30]}}  # total 73 < 300
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    _stub_pop(monkeypatch, small)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                        "--source", "pricecharting", "--yes"], deps=deps)
+    assert rc == 1
+    assert "credits_spent=0" in capsys.readouterr().out
+    assert gem_rates.read_rows(path) == []                    # never a guessed sourced row
+
+
+def test_gem_rate_record_grader_absent_blocks(tmp_path, monkeypatch, capsys):
+    only_psa = {**_POP_OK, "pop": {"psa": _UMBREON_PSA}, "graders": ["psa"]}
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    _stub_pop(monkeypatch, only_psa)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb", "--grader", "CGC",
+                        "--source", "pricecharting", "--yes"], deps=deps)
+    assert rc == 1
+    assert "credits_spent=0" in capsys.readouterr().out
+    assert gem_rates.read_rows(path) == []
+
+
+def test_gem_rate_record_rejects_non_pricecharting_source(tmp_path):
+    path = tmp_path / "gem_rates.jsonl"
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    rc = edge_cli.main(["gem-rate", "record", "--asset-key", "umb",
+                        "--source", "ppt", "--yes"], deps=deps)
+    assert rc == 1
+    assert not path.exists()
+
+
+def test_gem_rate_record_assumption_no_network(tmp_path):
+    path = tmp_path / "gem_rates.jsonl"
+    # gate OFF: an operator assumption never fetches, so it records regardless of the gate.
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=False)
+    rc = edge_cli.main(["gem-rate", "record-assumption", "--asset-key", "umb", "--grader", "PSA",
+                        "--gem-rate", "0.30", "--basis", "operator base rate for modern SIR"],
+                       deps=deps)
+    assert rc == 0
+    rows = gem_rates.read_rows(path)
+    assert rows and rows[0]["label"] == "operator_assumption" and rows[0]["gem_rate"] == 0.30
+
+
+def test_gem_rate_list_and_show_are_ledger_only(tmp_path, capsys):
+    path = tmp_path / "gem_rates.jsonl"
+    gem_rates.record_assumption(path, asset_key="umb", grader="PSA", gem_rate=0.30,
+                                basis="x", capture_date="2026-07-06")
+    gem_rates.record_assumption(path, asset_key="other", grader="PSA", gem_rate=0.25,
+                                basis="y", capture_date="2026-07-06")
+    # _FailingCardClient in deps: a green run proves list/show never reach a billed source.
+    deps = _deps_gem(assets={"umb": _GEM_ASSET}, gem_rates_path=path, independent_sources=True)
+    assert edge_cli.main(["gem-rate", "list"], deps=deps) == 0
+    out = capsys.readouterr().out
+    assert "umb" in out and "other" in out
+    assert edge_cli.main(["gem-rate", "show", "--asset-key", "umb"], deps=deps) == 0
+    out2 = capsys.readouterr().out
+    assert "umb" in out2 and "other" not in out2

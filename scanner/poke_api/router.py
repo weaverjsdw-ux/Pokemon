@@ -24,6 +24,7 @@ from . import asset_model as asset_model_mod
 from . import candidates as candidates_mod
 from . import catalog as catalog_mod
 from . import edge as edge_mod
+from . import gem_rates as gem_rates_mod
 from . import history as history_mod
 from . import lab as lab_mod
 from . import model as model_mod
@@ -59,6 +60,11 @@ class PokeApiDeps:
     # and so tests can point it at a tmp ledger. Read paths never need it (they go
     # through ``read_observations``); only the asset-comp writer does.
     ledger_path: Any = None
+    # Phase G: the append-only gem-rate evidence ledger (``gem_rates.jsonl``). Read paths
+    # serve ONLY recorded rows (never a live pop fetch); the record CLI writes here.
+    # ``read_gem_rates`` folds the recorded rows for the read endpoint.
+    gem_rates_path: Any = None
+    read_gem_rates: Callable[[], list[dict]] = lambda: []
     # Session E: the raw/graded verified-entry wire (keyed on asset_key). Defaults to
     # none so an asset stays WATCH/DATA_NEEDED evidence until a verified asset candidate
     # exists — the ONLY way a single becomes buy-shaped (never live off a comp alone).
@@ -526,7 +532,8 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
                decisions_path: Path | None = None, today: str | None = None,
                candidate_for: Callable[[str, dict], dict | None] | None = None,
                candidates_path: Path | None = None,
-               assets_path: Path | None = None) -> PokeApiDeps:
+               assets_path: Path | None = None,
+               gem_rates_path: Path | None = None) -> PokeApiDeps:
     """Wire the real defaults from config (0 external credits by default). ``today``/``ledger_path``/
     ``decisions_path``/``candidates_path`` are overridable so callers stay
     deterministic in tests.
@@ -542,9 +549,13 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
     dpath = decisions_path or (cfg_mod.ROOT / "data" / "poke" / "paper_decisions.jsonl")
     cpath = candidates_path or (cfg_mod.ROOT / "data" / "poke" / "verified_candidates.jsonl")
     apath = assets_path or (cfg_mod.ROOT / "data" / "poke" / "assets.yaml")
+    grpath = gem_rates_path or (cfg_mod.ROOT / "data" / "poke" / "gem_rates.jsonl")
 
     def read_observations() -> list[dict]:
         return history_mod.read_ledger(path).observations
+
+    def read_gem_rates() -> list[dict]:
+        return gem_rates_mod.read_rows(grpath)
 
     def read_decisions() -> list[dict]:
         return ledger_mod.read_rows(dpath)
@@ -596,4 +607,6 @@ def build_deps(cfg: Any, *, ledger_path: Path | None = None,
         assets_error=assets_error,
         asset_candidate_for=asset_candidate_for,
         ledger_path=path,
+        gem_rates_path=grpath,
+        read_gem_rates=read_gem_rates,
     )

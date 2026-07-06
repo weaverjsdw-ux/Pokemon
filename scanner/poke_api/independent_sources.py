@@ -12,6 +12,7 @@ fetch is 0 PPT credits.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -90,6 +91,46 @@ def pricecharting_card_prices_from_html(body: str) -> dict:
             "blocked": False}
 
 
+# The population blob PriceCharting embeds in the initial detail-page HTML (Feb 2026
+# feature). Flat object of per-grader grade-ladder arrays; PSA 10 is the LAST element.
+# The grade-index map + gem-rate formula live in ``gem_rates`` — this parser only lifts
+# the raw arrays from the already-fetched HTML (0 credits; no Playwright, no login).
+_POP_MARKER = "VGPC.pop_data"
+_POP_RE = re.compile(r"VGPC\.pop_data\s*=\s*(\{[^{}]*\})\s*;", re.S)
+
+
+def pricecharting_pop_from_html(body: str) -> dict:
+    """Parse ``VGPC.pop_data = {"psa":[...],"cgc":[...]};`` from a PriceCharting detail
+    page. Returns ``{"present": bool, "pop": {grader: [counts]}, "graders": [str],
+    "blocked": bool}``. STOP-class robust: a challenge page -> ``blocked``; a missing
+    blob -> ``present: False``; a malformed / non-object / nonnumeric blob -> honest
+    empty ``pop`` (never a crash, never a guessed count). Only graders whose value is a
+    non-empty numeric array land in ``pop``; ``graders`` lists every key the blob names."""
+    body = body or ""
+    if any(marker in body for marker in _CHALLENGE_MARKERS):
+        return {"present": False, "pop": {}, "graders": [], "blocked": True}
+    if _POP_MARKER not in body:
+        return {"present": False, "pop": {}, "graders": [], "blocked": False}
+    m = _POP_RE.search(body)
+    if not m:
+        return {"present": True, "pop": {}, "graders": [], "blocked": False}
+    try:
+        blob = json.loads(m.group(1))
+    except (json.JSONDecodeError, ValueError):
+        return {"present": True, "pop": {}, "graders": [], "blocked": False}
+    if not isinstance(blob, dict):
+        return {"present": True, "pop": {}, "graders": [], "blocked": False}
+    pop: dict[str, list] = {}
+    graders: list[str] = []
+    for grader, arr in blob.items():
+        g = str(grader).strip().lower()
+        graders.append(g)
+        if isinstance(arr, list) and arr and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in arr):
+            pop[g] = list(arr)
+    return {"present": True, "pop": pop, "graders": graders, "blocked": False}
+
+
 # NM-ish raw conditions the single loose "Ungraded" price may stand in for. A non-NM
 # raw (LP/MP/HP/DMG…) is NOT auto-recorded off Ungraded — that would over-value it.
 _NM_PROXY_CONDITIONS = frozenset({"", "nm", "near mint", "nm-mt", "nmmt", "mint", "m",
@@ -131,21 +172,29 @@ class _PriceChartingBase:
     def __init__(self, session: Any = None) -> None:
         self.session = session or requests.Session()
 
-    def _fetch_cells(self, slug: Any, checked_at: int):
-        """(cells, number, url, status, detail). status: skipped|blocked|error|ok.
-        ``number`` is the page's card number (F.1 wrong-slug guard) or None."""
+    def _fetch_body(self, slug: Any):
+        """(body, url, status, detail). status: skipped|blocked|error|ok. The raw detail-
+        page HTML for price-cell OR population parsing (both read the same 0-credit page)."""
         slug = str(slug or "").strip().strip("/")
         if not slug:
-            return {}, None, "", "skipped", "no pricecharting_slug mapped"
+            return "", "", "skipped", "no pricecharting_slug mapped"
         url = PC_GAME_URL.format(slug=slug)
         try:
             resp = self.session.get(
                 url, headers={"User-Agent": UA, "Accept": "text/html"}, timeout=20)
         except requests.RequestException as exc:
-            return {}, None, url, "error", str(exc)[:200]
+            return "", url, "error", str(exc)[:200]
         if getattr(resp, "status_code", 200) in (403, 429):
-            return {}, None, url, "blocked", f"HTTP {resp.status_code}"
-        parsed = pricecharting_card_prices_from_html(resp.text)
+            return "", url, "blocked", f"HTTP {resp.status_code}"
+        return resp.text, url, "ok", ""
+
+    def _fetch_cells(self, slug: Any, checked_at: int):
+        """(cells, number, url, status, detail). status: skipped|blocked|error|ok.
+        ``number`` is the page's card number (F.1 wrong-slug guard) or None."""
+        body, url, status, detail = self._fetch_body(slug)
+        if status != "ok":
+            return {}, None, url, status, detail
+        parsed = pricecharting_card_prices_from_html(body)
         if parsed["blocked"]:
             return {}, None, url, "blocked", "challenge/interstitial page (recorded blocked, not evaded)"
         return parsed["cells"], parsed.get("number"), url, "ok", ""
@@ -212,6 +261,34 @@ class PriceChartingGradedSource(_PriceChartingBase):
                                    detail=f"no {cell_id} cell on the PriceCharting page")
         return CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", price, url, fetched,
                                detail=note, raw_excerpt=note)
+
+
+class PriceChartingPopSource(_PriceChartingBase):
+    """PriceCharting PSA/CGC **population** blob (``VGPC.pop_data``) from the SAME
+    0-PPT-credit detail page as the price cells. Population only — never a price, never a
+    PPT call (the base takes a plain requests session, no client). Returns a structured
+    result; a wrong-slug page (card-number mismatch) is caught, never a wrong-card pop."""
+
+    def fetch_pop(self, asset: dict, checked_at: int) -> dict:
+        fetched = _iso(checked_at)
+        body, url, status, detail = self._fetch_body(asset.get("pricecharting_slug"))
+        base = {"status": status, "pop": {}, "graders": [], "url": url,
+                "number": None, "detail": detail, "fetched_at": fetched}
+        if status != "ok":
+            return base
+        parsed = pricecharting_pop_from_html(body)
+        if parsed["blocked"]:
+            return {**base, "status": "blocked",
+                    "detail": "challenge/interstitial page (recorded blocked, not evaded)"}
+        number = pricecharting_page_number_from_html(body)
+        mismatch, reason = _slug_number_mismatch(asset, number)
+        if mismatch:
+            return {**base, "status": "no_match", "number": number, "detail": reason}
+        if not parsed["present"] or not parsed["pop"]:
+            return {**base, "status": "no_pop", "number": number,
+                    "detail": "no VGPC.pop_data population blob on the PriceCharting page"}
+        return {"status": "ok", "pop": parsed["pop"], "graders": parsed["graders"],
+                "url": url, "number": number, "detail": "", "fetched_at": fetched}
 
 
 def _tcg_market_price(html: str) -> float | None:
