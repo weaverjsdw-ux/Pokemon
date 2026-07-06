@@ -74,20 +74,38 @@ fetches (`pricecharting.com/game/{slug}`, plain browser-UA `requests` GET, 0 cre
 **initial HTML**, a clean structured blob:
 
 ```js
-VGPC.pop_data = {"cgc":[0,0,0,1,0,2,16,122,259,366],"psa":[1,2,4,15,43,161,428,2654,9195,5487]};
+VGPC.pop_data = {"cgc":[0,0,0,1,0,2,16,122,259,366],"psa":[1,2,4,15,43,161,428,2654,9195,5487]};  // Umbreon ex #161
 ```
 
 Ten-element per-grader arrays along the grade ladder (PSA 10 is the last element), with a
-"population census updated monthly" stamp on the page. For Umbreon ex #161 that is total PSA pop
-**17,990**, PSA-10 = **5,487** → a **sourced PSA-10 gem rate ≈ 30.5 %**, carrying a source URL and a
-capture date. The chart (`<div id="pop-chart">`) is only the visualization; the numbers are in the
-raw HTML — **no Playwright, no login, no paid API, same page and same fetch path as the price cells.**
+"population census updated monthly" stamp on the page. The chart (`<div id="pop-chart">`) is only the
+visualization; the numbers are in the raw HTML — **no Playwright, no login, no paid API, same page and
+same fetch path as the price cells.**
 
-This makes G's "sourced gem rate" branch **real**, not hypothetical — subject to the honesty caveats
-in §5 (a population base-rate is a *proxy* for a specific raw card's odds, never a guarantee → still
-capped PAPER_BUY; small pops are noisy → sample-size caps). It stays a **record-path** capture
-(operator-run, stamped, mapped-assets-only), never a read-path fetch — so it honors G's own "no live
-pop scraping on read paths / no broad pop import" boundaries.
+**Verified across the whole F.1 validation set, not just Umbreon** (the same anti-overfit bar F.1
+itself had to clear). All **four** F.1 cards across three sets carry `VGPC.pop_data` at the same line,
+same shape, in initial HTML:
+
+| Card | Set | PSA total | PSA-10 | Sourced PSA-10 gem rate |
+|---|---|---:|---:|---:|
+| Umbreon ex #161 | Prismatic Evolutions | 17,990 | 5,487 | ≈ 30.5 % |
+| Charizard ex #199 | Scarlet & Violet 151 | 97,426 | 27,631 | ≈ 28.4 % |
+| Pikachu ex #238 | Surging Sparks | 27,298 | 9,263 | ≈ 33.9 % |
+| Sylveon ex #156 | Prismatic Evolutions | 11,401 | 3,320 | ≈ 29.1 % |
+
+A tight 28–34 % band, each carrying a source URL + capture date. This makes G's "sourced gem rate"
+branch **real**, not hypothetical — subject to the honesty caveats below and in G (a population
+base-rate is a *proxy* for a specific raw card's odds, never a guarantee → still capped PAPER_BUY;
+small pops are noisy → sample-size caps). It stays a **record-path** capture (operator-run, stamped,
+mapped-assets-only), never a read-path fetch — so it honors G's own "no live pop scraping on read
+paths / no broad pop import" boundaries.
+
+**Coverage is broad but not universal** — do not overclaim. The PriceCharting pop feature (Feb 2026)
+added pop to "roughly 4× the number of cards," i.e. *more* cards, not *all*. The F.1 set is 4/4, but
+G must treat pop as **present-or-absent per asset**: sourced pop is the primary gem-rate path **where
+the blob is present and above the sample floor**, and operator-assumption is the honest fallback where
+it is absent, sparse, or a grader has no series. Characterizing coverage beyond the F.1 set is a G-spec
+task (§15).
 
 **3.4 Reconciliation the doc carries (so pop is stated once, consistently).** G's gem-rate source
 options, in honesty order:
@@ -530,11 +548,20 @@ every phase boundary before the next begins.
    offset) before trusting the last element as PSA 10 — a one-page verification task for the G spec.
 3. **Sample-size floor (G).** What minimum total pop makes a sourced rate trustworthy vs.
    operator-assumption fallback? (A number to fix in the G spec; e.g. a few-hundred-graded floor.)
-4. **H entry-evidence retention.** Are screenshots/links stored locally, or referenced by URL only?
+4. **Pop coverage beyond the F.1 set (G).** The F.1 four are 4/4, but coverage is "4× more cards," not
+   all (§3.3). The G spec should verify `pop_data` presence + shape across the catalog (and any new
+   L assets), and characterize the present/absent split so the sourced-vs-assumption fallback is
+   driven by real coverage, not the assumption that pop is always there.
+5. **Base-rate-as-proxy is stated, not implied (G).** A population gem rate is the rate over *all*
+   graded submissions of that card, **not** a hand-picked NM copy in hand; the bias direction is
+   unknown (the population includes gambled-on damaged cards, but condition-sensitive cards can also
+   grade worse). The G spec should state this assumption in one explicit sentence — it is exactly why
+   the PAPER_BUY cap on grading EV is correct and non-negotiable.
+6. **H entry-evidence retention.** Are screenshots/links stored locally, or referenced by URL only?
    (Provenance vs. footprint; recommend URL + optional local link, no binary storage.)
-5. **I refusal UX.** Should the sealed-refresh money-class refusal mirror the divergence audit's
+7. **I refusal UX.** Should the sealed-refresh money-class refusal mirror the divergence audit's
    `--yes` gate exactly, or is a config-level daily cap sufficient? (Recommend mirror `--yes`.)
-6. **M surface host.** Reuse the existing `scanner/web.py` SPA "Edge" card (E's named follow-on), or a
+8. **M surface host.** Reuse the existing `scanner/web.py` SPA "Edge" card (E's named follow-on), or a
    standalone read-only page? (Recommend the existing SPA card; no new server.)
 
 ---
