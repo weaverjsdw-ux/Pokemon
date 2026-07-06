@@ -34,6 +34,10 @@ from . import model as model_mod
 HARD_STOP_REMAINING = ppt_validator.HARD_STOP_REMAINING  # 15 — reuse the money-class floor
 MAPPING_ERROR_PCT = 100.0                                # >=100% gap => likely a wrong id/variant
 _EXTERNAL_SLUGS = frozenset({"ppt_cards"})
+# Sources genuinely INDEPENDENT of the PPT market number for cross-source validation.
+# TCGplayer is excluded: the Phase F probe found its market price == PPT to the cent
+# (PPT resells the TCGplayer number), so a tcgplayer-vs-ppt agreement is NOT independent.
+_INDEPENDENT_OF_PPT = frozenset({"pricecharting"})
 
 # The full divergence vocabulary (exposed for docs/CLI). ``fee_assumption_difference``
 # is reserved for a net/EV comparison mode (our labeled config fee model vs the
@@ -166,13 +170,155 @@ def audit_local(deps, *, product_keys=None, asset_keys=None, tolerance_pct=None)
             theirs["stale"] = bool(o_date and ext_date and ext_date < o_date)
         clazz = classify_divergence(ours, theirs, tolerance_pct=tol)
         ours_source = ours.get("source")
-        cross = bool(ours_source and ours_source not in _EXTERNAL_SLUGS
+        # Only a GENUINELY independent-of-PPT source counts as cross-source validation
+        # (tcgplayer mirrors the PPT market number — Phase F finding — so it does not).
+        cross = bool(ours_source in _INDEPENDENT_OF_PPT
                      and theirs is not None and clazz["category"] == "agree")
         rows.append({"subject_key": key, "subject_kind": kind, "ours": ours.get("estimate"),
                      "ours_source": ours_source, "theirs": (theirs or {}).get("estimate"),
                      "cross_source_validated": cross, **clazz})
     failed = any(r["blocking"] for r in rows)
     return {"mode": "local", "rows": rows, "failed": failed, "credits_spent": 0,
+            "material_count": sum(1 for r in rows if r["material"])}
+
+
+# ---------------------------------------------------------------- F.1 multi-asset gap matrix
+
+# The full matrix classification vocabulary (superset of the auto-produced set; exposed for
+# docs/CLI). ``source_policy_difference`` is inherited from the base classifier (a served
+# comp of None under read-first policy vs an external number) and is not produced by the
+# pure-ledger matrix, which classifies a missing independent comp as
+# ``no_independent_reference``.
+MATRIX_CATEGORIES = (
+    "agree", "no_external_reference", "no_independent_reference",
+    "source_policy_difference", "mapping_error", "grade_mapping_difference",
+    "raw_condition_difference", "stale_local", "stale_external",
+    "confidence_method_difference", "unexplained_material_divergence",
+)
+
+
+def _latest_independent_comp(observations, item_key):
+    """Latest recorded market_comp whose source is independent of PPT (not ppt_cards,
+    not an ebay ask) — the ``ours`` side of the gap matrix."""
+    best = None
+    for o in history_mod.filter_observations(observations, item_key=item_key,
+                                             kind=history_mod.MARKET_COMP):
+        src = history_mod.source_of(o)
+        if src in _EXTERNAL_SLUGS or src == "ebay":
+            continue
+        if best is None or str(o.get("capture_date") or "") >= str(best.get("capture_date") or ""):
+            best = o
+    return best
+
+
+def _grade_is_grader_agnostic(asset) -> bool:
+    from . import independent_sources as indep
+    cell, note = indep._grade_cell_for(asset.get("grade_key"))
+    return cell is not None and "grader-agnostic" in note
+
+
+def _raw_non_nm(asset) -> bool:
+    from . import independent_sources as indep
+    if str(asset.get("asset_class") or "").strip().lower() != "raw":
+        return False
+    ok, _ = indep.raw_condition_recordable(asset)
+    return not ok
+
+
+def _matrix_classify(asset, ours, theirs, tol):
+    """(classification, cross_source_validated, blocking, defensibility, notes, delta_pct).
+    A material UNEXPLAINED divergence is the only blocking outcome. The grade-mapping and
+    raw-condition categories are explained (non-blocking); they are demonstrated via
+    constructed observations (they do not fire on the live F.1 ledger)."""
+    o = ours["estimate"] if ours else None
+    t = theirs["estimate"] if theirs else None
+    if theirs is None or t is None:
+        return ("no_external_reference", False, False, "ours",
+                "no recorded ppt_cards observation to compare against", None)
+    if o is None:
+        return ("no_independent_reference", False, False, "n/a — need an independent source",
+                "a PPT-sourced local reference exists but no independent (PriceCharting) "
+                "comp to cross-validate it", None)
+    lo = min(o, t)
+    delta = round(abs(o - t) / lo * 100.0, 2) if lo > 0 else float("inf")
+    if delta <= tol:
+        cross = str((ours or {}).get("source") or "") in _INDEPENDENT_OF_PPT
+        return "agree", cross, False, "both", "within agreement tolerance", delta
+    # material — try to explain (an explained category is never blocking)
+    ours_date, theirs_date = str(ours.get("capture_date") or ""), str(theirs.get("capture_date") or "")
+    if ours_date and theirs_date and ours_date < theirs_date:
+        return ("stale_local", False, False, "theirs (more current)",
+                "our comp is older than the PPT observation; refresh ours", delta)
+    if ours_date and theirs_date and theirs_date < ours_date:
+        return ("stale_external", False, False, "ours (more current)",
+                "the PPT observation is older than ours", delta)
+    if _raw_non_nm(asset):
+        return ("raw_condition_difference", False, False, "ours (condition-honest)",
+                "gap attributable to a non-NM raw condition vs the condition-agnostic "
+                "Ungraded/external number (demonstrated via constructed observations)", delta)
+    if str(asset.get("asset_class") or "").strip().lower() == "graded" and _grade_is_grader_agnostic(asset):
+        return ("grade_mapping_difference", False, False, "context-dependent",
+                "grader-agnostic PriceCharting Grade-N proxy vs a grader-specific external "
+                "number (demonstrated via constructed observations)", delta)
+    if delta >= MAPPING_ERROR_PCT:
+        return ("mapping_error", False, False, "unknown - investigate the id/variant/slug",
+                f"delta {delta}% >= {MAPPING_ERROR_PCT}% - likely a wrong mapping "
+                "(comparing different cards); fix the mapping before trusting either", delta)
+    if str(ours.get("confidence") or "") != str(theirs.get("confidence") or ""):
+        return ("confidence_method_difference", False, False, "context-dependent",
+                "confidence methods differ; the magnitude sits in a method-difference band", delta)
+    return ("unexplained_material_divergence", False, True, "unknown - BLOCKING",
+            "material gap with no explanatory category - investigate; do not tune blindly to PPT", delta)
+
+
+def _matrix_row(key, asset, ours_obs, theirs_obs, tol) -> dict:
+    asset_class = str(asset.get("asset_class") or "")
+    cond_or_grade = (asset.get("grade_key") if asset_class == "graded"
+                     else asset.get("condition")) or ""
+    ours = None
+    if ours_obs is not None:
+        ours = {"estimate": history_mod._comp_value(ours_obs),
+                "source": history_mod.source_of(ours_obs),
+                "confidence": str(ours_obs.get("comp_confidence") or "none"),
+                "capture_date": str(ours_obs.get("capture_date") or "")}
+    theirs = None
+    if theirs_obs is not None:
+        theirs = {"estimate": history_mod._comp_value(theirs_obs),
+                  "confidence": str(theirs_obs.get("comp_confidence") or "none"),
+                  "capture_date": str(theirs_obs.get("capture_date") or "")}
+    classification, cross, blocking, defensibility, notes, delta = _matrix_classify(asset, ours, theirs, tol)
+    return {
+        "asset_key": key, "asset_class": asset_class, "condition_or_grade_key": cond_or_grade,
+        "ours": (ours or {}).get("estimate"), "ours_source": (ours or {}).get("source"),
+        "ours_capture_date": (ours or {}).get("capture_date"),
+        "ppt_reference": (theirs or {}).get("estimate"),
+        "ppt_capture_date": (theirs or {}).get("capture_date"),
+        "delta_pct": delta, "classification": classification,
+        "cross_source_validated": bool(cross), "defensibility": defensibility, "notes": notes,
+        "material": classification not in ("agree", "no_external_reference", "no_independent_reference"),
+        "blocking": bool(blocking),
+    }
+
+
+def audit_matrix(deps, *, asset_keys=None, tolerance_pct=None) -> dict:
+    """Multi-asset PPT-vs-ours gap matrix (F.1) — 0 network / 0 credits. For each asset it
+    compares our latest INDEPENDENT (PriceCharting) recorded comp against the latest
+    recorded ppt_cards observation and classifies the gap with the F.1 vocabulary. A
+    material UNEXPLAINED divergence fails the matrix (never tune blindly to PPT)."""
+    tol = float(tolerance_pct if tolerance_pct is not None else deps.cfg.comps.agreement_tolerance_pct)
+    obs = deps.read_observations()
+    assets = getattr(deps, "assets", None) or {}
+    rows = []
+    for key in asset_keys or []:
+        asset = assets.get(key)
+        if asset is None:
+            continue
+        item_key = history_mod.item_key_for_asset(asset)
+        ours_obs = _latest_independent_comp(obs, item_key)
+        theirs_obs = _latest_market_comp(obs, item_key, external=True)
+        rows.append(_matrix_row(key, asset, ours_obs, theirs_obs, tol))
+    return {"mode": "local-matrix", "rows": rows,
+            "failed": any(r["blocking"] for r in rows), "credits_spent": 0,
             "material_count": sum(1 for r in rows if r["material"])}
 
 

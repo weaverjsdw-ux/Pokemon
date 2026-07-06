@@ -55,21 +55,74 @@ def _price_cell(body: str, cell_id: str) -> float | None:
         return None
 
 
+def pricecharting_page_number_from_html(body: str) -> str | None:
+    """The card number (``#NNN``) from the detail page's product-name ``<h1>`` (or the
+    ``<title>`` as a fallback), as a digits-only string, or ``None`` when the page
+    exposes no confident number (never guesses). Used at the record boundary (F.1) to
+    catch a slug that points at the wrong card — a table-only page with no h1/title
+    returns ``None`` so the guard is simply skipped, never a false mismatch."""
+    body = body or ""
+    for pat in (r"<h1[^>]*>(.*?)</h1>", r"<title[^>]*>(.*?)</title>"):
+        m = re.search(pat, body, flags=re.I | re.S)
+        if m:
+            num = re.search(r"#\s*(\d+)", m.group(1))
+            if num:
+                return num.group(1)
+    return None
+
+
 def pricecharting_card_prices_from_html(body: str) -> dict:
     """Parse a PriceCharting card DETAIL page price table.
 
-    Returns ``{"cells": {cell_id: price}, "blocked": bool}``. A challenge/interstitial
-    page -> ``blocked: True`` with no cells. Malformed/empty HTML -> empty cells,
-    ``blocked: False`` (honest no-source, never a crash)."""
+    Returns ``{"cells": {cell_id: price}, "number": str|None, "blocked": bool}``. A
+    challenge/interstitial page -> ``blocked: True`` with no cells. Malformed/empty HTML
+    -> empty cells, ``blocked: False`` (honest no-source, never a crash). ``number`` is
+    the page's card number (F.1 wrong-slug guard input) or ``None``."""
     body = body or ""
     if any(marker in body for marker in _CHALLENGE_MARKERS):
-        return {"cells": {}, "blocked": True}
+        return {"cells": {}, "number": None, "blocked": True}
     cells: dict[str, float] = {}
     for cid in (PC_RAW_CELL, PC_PSA10_CELL, *PC_GRADE_CELLS.values()):
         price = _price_cell(body, cid)
         if price is not None and price > 0:
             cells[cid] = price
-    return {"cells": cells, "blocked": False}
+    return {"cells": cells, "number": pricecharting_page_number_from_html(body),
+            "blocked": False}
+
+
+# NM-ish raw conditions the single loose "Ungraded" price may stand in for. A non-NM
+# raw (LP/MP/HP/DMG…) is NOT auto-recorded off Ungraded — that would over-value it.
+_NM_PROXY_CONDITIONS = frozenset({"", "nm", "near mint", "nm-mt", "nmmt", "mint", "m",
+                                  "near-mint"})
+
+
+def raw_condition_recordable(asset: dict) -> tuple[bool, str]:
+    """(recordable?, reason) for auto-recording a raw asset's Ungraded comp. PriceCharting
+    "Ungraded" is a *single* loose price that does not distinguish raw condition, so only
+    an NM-ish proxy may be auto-recorded off it; a non-NM raw returns ``(False, reason)``
+    (F.1 makes the Phase-F hand-decision a programmatic guard). Graded assets are
+    unaffected — the rule is raw-only."""
+    if str(asset.get("asset_class") or "").strip().lower() != "raw":
+        return True, ""
+    cond = str(asset.get("condition") or "").strip().lower()
+    if cond in _NM_PROXY_CONDITIONS:
+        return True, ""
+    return False, (f"PriceCharting Ungraded is not condition-exact for condition="
+                   f"{asset.get('condition')!r}; not auto-recorded (map a condition-"
+                   f"specific source or use the audited from-value path)")
+
+
+def _slug_number_mismatch(asset: dict, page_number: Any) -> tuple[bool, str]:
+    """(mismatch?, reason) for the F.1 wrong-slug guard. Only a CONFIDENT mismatch
+    counts: the asset carries a ``card_number`` AND the page exposes a number AND they
+    differ (digits-only). Any uncertainty (no card_number, or no page number) => no
+    mismatch, so a good fetch is never falsely suppressed."""
+    want = re.sub(r"\D", "", str(asset.get("card_number") or ""))
+    got = re.sub(r"\D", "", str(page_number or ""))
+    if want and got and want != got:
+        return True, (f"page card #{got} != asset card_number {want} "
+                      f"(wrong pricecharting_slug?) — recorded nothing")
+    return False, ""
 
 
 class _PriceChartingBase:
@@ -79,22 +132,23 @@ class _PriceChartingBase:
         self.session = session or requests.Session()
 
     def _fetch_cells(self, slug: Any, checked_at: int):
-        """(cells, url, status, detail). status: skipped|blocked|error|ok."""
+        """(cells, number, url, status, detail). status: skipped|blocked|error|ok.
+        ``number`` is the page's card number (F.1 wrong-slug guard) or None."""
         slug = str(slug or "").strip().strip("/")
         if not slug:
-            return {}, "", "skipped", "no pricecharting_slug mapped"
+            return {}, None, "", "skipped", "no pricecharting_slug mapped"
         url = PC_GAME_URL.format(slug=slug)
         try:
             resp = self.session.get(
                 url, headers={"User-Agent": UA, "Accept": "text/html"}, timeout=20)
         except requests.RequestException as exc:
-            return {}, url, "error", str(exc)[:200]
+            return {}, None, url, "error", str(exc)[:200]
         if getattr(resp, "status_code", 200) in (403, 429):
-            return {}, url, "blocked", f"HTTP {resp.status_code}"
+            return {}, None, url, "blocked", f"HTTP {resp.status_code}"
         parsed = pricecharting_card_prices_from_html(resp.text)
         if parsed["blocked"]:
-            return {}, url, "blocked", "challenge/interstitial page (recorded blocked, not evaded)"
-        return parsed["cells"], url, "ok", ""
+            return {}, None, url, "blocked", "challenge/interstitial page (recorded blocked, not evaded)"
+        return parsed["cells"], parsed.get("number"), url, "ok", ""
 
 
 class PriceChartingRawSource(_PriceChartingBase):
@@ -103,9 +157,12 @@ class PriceChartingRawSource(_PriceChartingBase):
 
     def fetch(self, asset: dict, checked_at: int) -> CompSourceQuote:
         fetched = _iso(checked_at)
-        cells, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
+        cells, number, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
         if status != "ok":
             return CompSourceQuote("pricecharting", SOLD_DERIVED, status, None, url, fetched, detail=detail)
+        mismatch, reason = _slug_number_mismatch(asset, number)
+        if mismatch:
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched, detail=reason)
         price = cells.get(PC_RAW_CELL)
         if price is None:
             return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched,
@@ -143,9 +200,12 @@ class PriceChartingGradedSource(_PriceChartingBase):
         cell_id, note = _grade_cell_for(asset.get("grade_key"))
         if cell_id is None:
             return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, "", fetched, detail=note)
-        cells, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
+        cells, number, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
         if status != "ok":
             return CompSourceQuote("pricecharting", SOLD_DERIVED, status, None, url, fetched, detail=detail)
+        mismatch, reason = _slug_number_mismatch(asset, number)
+        if mismatch:
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched, detail=reason)
         price = cells.get(cell_id)
         if price is None:
             return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched,

@@ -101,6 +101,13 @@ it with the provenance-honest writer:
 # independent live fetch (Phase F, 0 PPT credits): PriceCharting exact-slug adapters only
 .venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comp \
   --asset-key umbreon_ex_161_raw_nm --refresh-independent
+
+# F.1 BATCH independent recording (0 PPT credits): several assets at once.
+#   --dry-run previews (writes nothing); --yes persists; neither => safe preview.
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comps \
+  --refresh-independent --assets charizard_ex_199_151_raw_nm,pikachu_ex_238_ss_raw_nm --dry-run
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comps \
+  --refresh-independent --assets charizard_ex_199_151_raw_nm,pikachu_ex_238_ss_raw_nm --yes
 ```
 
 - Identity comes from the loaded asset (`history.asset_identity`), so the persisted
@@ -118,6 +125,11 @@ it with the provenance-honest writer:
   result (blocked page, no matching grade cell, `ebay`-only) records nothing. See
   [Track F](private-price-api.md#track-f--independent-singlesslabs-sold-source-validation)
   for the adapter design and the [detail-page probe evidence](pricecharting-detail-probe-2026-07-05.md).
+- **`record-asset-comps` (F.1 batch)** does the same 0-PPT-credit independent recording for
+  **several assets at once**: `--dry-run` previews (writes nothing), `--yes` persists (write =
+  `--yes and not --dry-run`; neither => safe preview). A non-NM raw (LP…) is **not auto-recorded**
+  off the condition-agnostic Ungraded cell, and an unsupported grade (CGC10/BGS10) / wrong slug
+  records nothing (honest). See [Track F.1](private-price-api.md#track-f1--independent-source-generalization--ppt-gap-matrix).
 
 ## 5. Divergence audit (API vs external — investigate, don't clone)
 
@@ -127,6 +139,9 @@ it with the provenance-honest writer:
 
 # EXTERNAL (money-class): requires market.api_key AND explicit operator go-ahead
 .venv/Scripts/python.exe -m scanner.poke_api.edge_cli divergence-audit --products a,b --assets umbreon_ex_161_psa10 --yes
+
+# F.1 GAP MATRIX (local, 0 credits): per-asset ours-vs-PPT classification across many assets
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli divergence-audit --local --matrix --assets a,b,c [--json]
 ```
 
 - Without `--yes`, an audit that lists subjects **refuses** and prints the estimated

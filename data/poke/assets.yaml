@@ -57,3 +57,74 @@ umbreon_ex_161_psa9:
   grader: "PSA"
   grade: "9"
   pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
+
+# ---------------------------------------------------------------------------------
+# Phase F.1 — independent-source generalization validation set (2026-07-06).
+# Proves the PriceCharting adapters are NOT overfit to Umbreon: four cards across
+# three sets, every honest code path exercised (raw NM, PSA-exact, grader-agnostic
+# proxy, unsupported grade, non-NM raw). EXACT pricecharting_slug only — every slug
+# below was verified live this session (path resolves 200, six-cell #price_data
+# layout). tcgplayer_id intentionally UNMAPPED (unverified; the independent
+# PriceCharting path never needs it — honest none for any tcg/ppt path). See
+# docs/superpowers/specs/2026-07-06-phase-f1-independent-source-generalization-design.md
+
+# Charizard ex #199 (Scarlet & Violet 151) — different set; note the literal `&` slug.
+charizard_ex_199_151_raw_nm:
+  asset_class: raw
+  name: "Charizard ex 199"
+  set: "Scarlet & Violet 151"
+  card_number: "199"
+  condition: "NM"
+  pricecharting_slug: "pokemon-scarlet-&-violet-151/charizard-ex-199"  # F.1; verified 2026-07-06
+
+charizard_ex_199_151_psa10:
+  asset_class: graded
+  name: "Charizard ex 199"
+  set: "Scarlet & Violet 151"
+  card_number: "199"
+  grader: "PSA"
+  grade: "10"
+  # grade_key psa10 -> manual_only_price (PSA-exact column)
+  pricecharting_slug: "pokemon-scarlet-&-violet-151/charizard-ex-199"  # F.1; verified 2026-07-06
+
+# Intentionally UNSUPPORTED grade — CGC 10 has no exact PriceCharting cell (only PSA 10
+# has a graded-10 column) -> must degrade to honest no_match, never a nearest-cell guess.
+charizard_ex_199_151_cgc10:
+  asset_class: graded
+  name: "Charizard ex 199"
+  set: "Scarlet & Violet 151"
+  card_number: "199"
+  grader: "CGC"
+  grade: "10"
+  # grade_key cgc10 -> NO exact cell -> no_match (proves honest unsupported-grade degrade)
+  pricecharting_slug: "pokemon-scarlet-&-violet-151/charizard-ex-199"  # F.1; verified 2026-07-06
+
+# Pikachu ex #238 (Surging Sparks) — a third set.
+pikachu_ex_238_ss_raw_nm:
+  asset_class: raw
+  name: "Pikachu ex 238"
+  set: "Surging Sparks"
+  card_number: "238"
+  condition: "NM"
+  pricecharting_slug: "pokemon-surging-sparks/pikachu-ex-238"  # F.1; verified 2026-07-06
+
+pikachu_ex_238_ss_psa9:
+  asset_class: graded
+  name: "Pikachu ex 238"
+  set: "Surging Sparks"
+  card_number: "238"
+  grader: "PSA"
+  grade: "9"
+  # grade_key psa9 -> graded_price (PriceCharting "Grade 9" — GRADER-AGNOSTIC proxy, not PSA-specific)
+  pricecharting_slug: "pokemon-surging-sparks/pikachu-ex-238"  # F.1; verified 2026-07-06
+
+# Sylveon ex #156 (Prismatic Evolutions) — a NON-NM raw. Slug is mapped so it CAN
+# resolve, but the batch independent-record path must NOT auto-record an LP comp off
+# the condition-agnostic Ungraded cell (would over-value LP) — explicit caveat skip.
+sylveon_ex_156_raw_lp:
+  asset_class: raw
+  name: "Sylveon ex 156"
+  set: "Prismatic Evolutions"
+  card_number: "156"
+  condition: "LP"
+  pricecharting_slug: "pokemon-prismatic-evolutions/sylveon-ex-156"  # F.1; verified 2026-07-06

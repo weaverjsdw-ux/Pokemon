@@ -56,3 +56,28 @@ This is a **stronger** verdict than the earlier `fetchable-playwright` row for
 PriceCharting's **search** page (2026-07-02, above) — the search page needed Playwright,
 but the **detail** page it redirects to is plain-fetchable directly, which is what the
 independent-source adapters (`scanner/poke_api/independent_sources.py`) rely on.
+
+## Track F.1 — additional verified card slugs (2026-07-06)
+
+Phase F.1 generalized the PriceCharting detail-page finding beyond Umbreon: three more cards
+across two more sets were verified live (plain `requests` GET, browser UA, **0 PPT credits**) —
+each canonical `/game/{slug}` path resolves HTTP 200, no challenge, with the **same six-cell
+`#price_data` layout** (used_price / complete_price / new_price / graded_price / box_only_price /
+manual_only_price). The uniform layout across sets is the evidence the adapters are **not overfit**.
+
+| Card | Set | Verified slug (`/game/{slug}`) | verdict |
+|---|---|---|---|
+| Charizard ex #199 | Scarlet & Violet 151 | `pokemon-scarlet-&-violet-151/charizard-ex-199` (literal `&`) | **fetchable-plain** |
+| Pikachu ex #238 | Surging Sparks | `pokemon-surging-sparks/pikachu-ex-238` | **fetchable-plain** |
+| Sylveon ex #156 | Prismatic Evolutions | `pokemon-prismatic-evolutions/sylveon-ex-156` | **fetchable-plain** |
+
+Each page carries a completed/recent-sales section (`id="completed"`, a `chart_data` price-history
+blob) but **no clean numeric sample-size** in the initial HTML → sample size is a **Phase G
+placeholder**, not a parsed field. Evidence + the PPT-vs-ours gap matrix:
+[phase-f1-independent-source-result-2026-07-06.md](phase-f1-independent-source-result-2026-07-06.md).
+
+**PriceCharting API (not used).** The subscription `/api/product` endpoint is paid (40-char token,
+1 call/sec, current-values only) — it would add a paid dependency for numbers already free on the
+public detail page. F.1 stays on the plain-page scrape (0 PPT credits). **TCGplayer** stays the
+dormant `blocked` shell: its rendered market price equals the PPT number to the cent, so it is not
+independent of PPT for validation (encoded as `divergence._INDEPENDENT_OF_PPT`).

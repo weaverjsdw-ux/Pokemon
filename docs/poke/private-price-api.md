@@ -482,3 +482,53 @@ itself." Still **0 credits, 0 network** — it only reads what's already in the 
 read-path source of truth, only an optional adapter (Track D) or the divergence audit's
 off-hot-path comparison oracle (Session E). Track F's contribution is a genuinely
 independent number to compare PPT *against* — not a replacement for it.
+
+## Track F.1 — Independent-source generalization + PPT gap matrix
+
+Track F.1 proves the Track F independent layer is **not overfit to Umbreon** and publishes a
+durable **PPT-vs-ours capability map**. Same 0-PPT-credit posture; PPT external mode still
+audit-only; assets still WATCH. See
+[phase-f1-independent-source-generalization-design](../superpowers/specs/2026-07-06-phase-f1-independent-source-generalization-design.md),
+the [result doc](phase-f1-independent-source-result-2026-07-06.md), the
+[gap matrix](ppt-vs-ours-gap-matrix-2026-07-06.md), and the
+[G handoff notes](phase-g-handoff-notes-2026-07-06.md).
+
+**Multi-card/multi-set validation set.** `data/poke/assets.yaml` now maps four cards across three
+sets with **exact, live-verified** `pricecharting_slug`s: Umbreon ex 161 (Prismatic Evolutions,
+control), Charizard ex 199 (Scarlet & Violet 151 — note the literal `&` slug), Pikachu ex 238
+(Surging Sparks), Sylveon ex 156 (Prismatic). The six-cell `#price_data` layout parses uniformly
+across all of them — the adapter generalizes.
+
+**Honest degrade paths added to the catalog:** an **unsupported grade** (`charizard…cgc10`) →
+`no_match` (only PSA 10 has a graded-10 cell); a **non-NM raw** (`sylveon…raw_lp`) → **not
+auto-recorded** off the condition-agnostic Ungraded cell (a programmatic guard, `raw_condition_recordable`).
+
+**Batch independent recording (0 PPT credits):**
+
+```
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comps \
+  --refresh-independent --assets a,b,c --dry-run   # preview, writes nothing
+.venv/Scripts/python.exe -m scanner.poke_api.edge_cli record-asset-comps \
+  --refresh-independent --assets a,b,c --yes        # persist (write = --yes and not --dry-run)
+```
+
+Gated on `poke.independent_sources: true`; **never constructs a PPT client** (0 PPT credits by
+construction); no-source / no-match / blocked / wrong-slug / non-NM-raw / ask-only records
+nothing. Each persisted row carries `item_key`, `source`, `source_url`, `basis`, `comp`,
+`comp_confidence`, `capture_date`, and asset identity.
+
+**Wrong-slug guard (record boundary).** A new parser helper
+(`pricecharting_page_number_from_html`) extracts the page's card number; on the recording path,
+an asset whose `card_number` differs from the page number → `no_match` ("wrong slug?") — records
+nothing, never a wrong-card comp. It never touches a read/serve path (asset reads are
+ledger-only), so it cannot silently suppress a served number.
+
+**Multi-asset gap matrix.** `divergence-audit --local --matrix --assets a,b,c` emits a per-asset
+matrix (`asset_key`, `asset_class`, `condition_or_grade_key`, `ours`, `ours_source`,
+`ours_capture_date`, `ppt_reference`, `ppt_capture_date`, `delta_pct`, `classification`,
+`cross_source_validated`, `defensibility`, `notes`) with the F.1 vocabulary
+(`no_independent_reference`, `grade_mapping_difference`, `raw_condition_difference`, … — see
+`divergence.MATRIX_CATEGORIES`). **A material *unexplained* divergence fails the matrix.**
+`cross_source_validated` is set **only** for `pricecharting` (independent of PPT) — a tcgplayer
+comp equal to PPT is **never** counted as independent validation (the Phase F finding, encoded as
+`_INDEPENDENT_OF_PPT`).

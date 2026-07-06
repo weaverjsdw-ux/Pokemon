@@ -120,6 +120,8 @@ def _build_argparser():
                     help="force dry/local mode (0 credits); the default when --yes is absent")
     pd.add_argument("--yes", action="store_true",
                     help="operator go-ahead for the surfaced external credit spend")
+    pd.add_argument("--matrix", action="store_true",
+                    help="F.1: print the multi-asset PPT-vs-ours gap matrix (local, 0 credits)")
     pd.add_argument("--json", action="store_true")
 
     prc = sub.add_parser(
@@ -144,6 +146,21 @@ def _build_argparser():
                           "sources; persists with the real source slug (needs poke.independent_sources)")
     prc.add_argument("--yes", action="store_true",
                      help="operator go-ahead for the surfaced --refresh credit spend")
+
+    # F.1 batch: 0-PPT-credit independent recording across several assets at once.
+    pbc = sub.add_parser(
+        "record-asset-comps",
+        help="F.1 batch: record independent (PriceCharting) asset comps for several "
+             "assets at 0 PPT credits (--dry-run previews; --yes persists)")
+    pbc.add_argument("--assets", default="", help="comma-separated asset keys")
+    pbc.add_argument("--refresh-independent", action="store_true", dest="refresh_independent",
+                     help="required: the only mode the batch supports (independent sources, "
+                          "0 PPT credits; never constructs the PPT client)")
+    pbc.add_argument("--dry-run", action="store_true", dest="dry_run",
+                     help="preview only — resolve + show what WOULD be recorded, write nothing")
+    pbc.add_argument("--yes", action="store_true",
+                     help="persist the resolved comps (absent/--dry-run => preview only)")
+    pbc.add_argument("--json", action="store_true")
     return p
 
 
@@ -200,9 +217,33 @@ def _cmd_outcome(args, deps) -> int:
     return 0
 
 
+def _print_matrix(result) -> None:
+    print(f"PPT-vs-ours gap matrix [{result['mode']}] - {len(result['rows'])} asset(s), "
+          f"0 credits\n")
+    for r in result.get("rows", []):
+        flag = "BLOCKING" if r.get("blocking") else ("material" if r.get("material") else "ok")
+        xsv = "  [cross-source OK]" if r.get("cross_source_validated") else ""
+        print(f"  [{flag:<8}] {r['asset_key']:<30} {r['classification']}{xsv}")
+        print(f"        {r['asset_class']}/{r.get('condition_or_grade_key') or '-'}  "
+              f"ours={_fmt_money(r.get('ours'))} ({r.get('ours_source') or '-'} "
+              f"{r.get('ours_capture_date') or '-'})  ppt={_fmt_money(r.get('ppt_reference'))} "
+              f"({r.get('ppt_capture_date') or '-'})  delta={r.get('delta_pct')}%")
+        print(f"        defensibility: {r.get('defensibility')}  |  {r.get('notes')}")
+    print(f"\n  result: {'FAILED (material unexplained divergence)' if result['failed'] else 'ok'}"
+          f"  material={result.get('material_count', 0)}  credits_spent=0")
+
+
 def _cmd_divergence(args, deps) -> int:
     products = [k.strip() for k in args.products.split(",") if k.strip()]
     assets = [k.strip() for k in args.assets.split(",") if k.strip()]
+    # F.1 gap matrix: local-only, 0 credits, richer per-asset classification.
+    if getattr(args, "matrix", False):
+        result = dv_mod.audit_matrix(deps, asset_keys=assets)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            _print_matrix(result)
+        return 1 if result.get("failed") else 0
     # External intent = subjects listed or --yes passed, unless --local forces the free
     # path. A bare `divergence-audit` defaults to the safe local mode. This makes
     # `divergence-audit --products X` (no --yes) REFUSE and surface the spend, rather
@@ -288,6 +329,64 @@ def _record_billed(args, deps, asset, ledger_path) -> int:
     return 0
 
 
+def _independent_result(deps, asset, asset_key, ledger_path, *, write: bool) -> dict:
+    """Resolve one asset's INDEPENDENT (PriceCharting) comp and, when ``write``, persist
+    it with the ACTUAL source slug (never ppt_cards). Returns a structured per-asset
+    result (shared by the single ``--refresh-independent`` command and the F.1 batch).
+    Never constructs a PPT client — 0 PPT credits by construction. A raw non-NM
+    condition, no-source/no-match/blocked/wrong-slug, or an ask/ppt slug records nothing
+    (honest). ``status`` ∈ recorded|already_recorded|previewed|skipped_condition|
+    skipped_no_source|skipped_bad_source|error."""
+    from . import independent_sources as indep
+
+    def _res(status, message, **extra):
+        base = {"asset_key": asset_key, "status": status, "wrote": False,
+                "source": None, "comp": None, "confidence": None, "basis": "",
+                "source_url": "", "message": message}
+        base.update(extra)
+        return base
+
+    # Raw-condition guard (0 network): a non-NM raw is not auto-recorded off Ungraded.
+    ok_cond, cond_reason = indep.raw_condition_recordable(asset)
+    if not ok_cond:
+        return _res("skipped_condition", cond_reason)
+
+    srcs = indep.build_independent_sources()   # PriceCharting real; TCGplayer dormant shell
+    try:
+        row = sources_mod.resolve_independent_asset_row(
+            asset, sources=srcs, checked_at=_today_ts(deps.today))
+    except Exception as exc:  # noqa: BLE001 - never persist on a resolver bug
+        return _res("error", f"independent fetch failed ({str(exc)[:120]})")
+    estimate = resale._amount(row.get("estimate"))
+    if estimate is None:
+        detail = row.get("confidenceReason") or row.get("detail") or "honest no-source"
+        return _res("skipped_no_source", f"no usable sold comp ({detail})")
+    source = _row_ok_source(row)               # the OK sold source, NOT the first (blocked) one;
+    if not source or source in ("ebay", "ppt_cards"):   # NO ppt_cards fallback on this path
+        return _res("skipped_bad_source",
+                    f"no independent sold source slug (got {source!r}); nothing recorded")
+
+    resolved = {"asset_key": asset_key, "source": source, "comp": estimate,
+                "confidence": row.get("confidence"),
+                "basis": row.get("compBasis") or row.get("basis") or "",
+                "source_url": row.get("sourceUrl") or row.get("url") or ""}
+    if not write:
+        return {**resolved, "status": "previewed", "wrote": False,
+                "message": f"would record ${estimate:.2f} [{source}, {row.get('confidence')}]"}
+    try:
+        wrote = sources_mod.record_asset_comp(
+            ledger_path, asset, comp=estimate, confidence=row.get("confidence"),
+            source=source, capture_date=deps.today, source_url=resolved["source_url"],
+            basis=resolved["basis"], asset_key=asset_key)
+    except ValueError as exc:
+        return {**resolved, "status": "error", "wrote": False,
+                "message": f"refused to persist ({exc}); nothing recorded"}
+    return {**resolved, "status": "recorded" if wrote else "already_recorded",
+            "wrote": bool(wrote),
+            "message": f"{'recorded' if wrote else 'already recorded'} ${estimate:.2f} "
+                       f"[{source}, {row.get('confidence')}] (0 PPT credits)"}
+
+
 def _record_independent(args, deps, asset, ledger_path) -> int:
     """0-PPT-credit live fetch from the independent (PriceCharting/TCGplayer) sources,
     persisted with the ACTUAL source slug (never ppt_cards). Gated on
@@ -296,33 +395,66 @@ def _record_independent(args, deps, asset, ledger_path) -> int:
     if not indep.independent_sources_enabled(deps.cfg):
         print("refused: independent live fetch is off (set poke.independent_sources: true)")
         return 2
-    srcs = indep.build_independent_sources()   # PriceCharting real; TCGplayer dormant shell
-    try:
-        row = sources_mod.resolve_independent_asset_row(
-            asset, sources=srcs, checked_at=_today_ts(deps.today))
-    except Exception as exc:  # noqa: BLE001 - never persist on a resolver bug
-        print(f"independent fetch failed ({str(exc)[:120]}); nothing recorded")
+    result = _independent_result(deps, asset, args.asset_key, ledger_path, write=True)
+    print(f"{result['message']} ({args.asset_key})" if result["status"] in
+          ("recorded", "already_recorded") else result["message"])
+    return 0 if result["wrote"] or result["status"] == "already_recorded" else 1
+
+
+def _print_batch(results, write: bool) -> None:
+    mode = "WRITE" if write else "PREVIEW (no writes)"
+    print(f"record-asset-comps [{mode}] - {len(results)} asset(s), 0 PPT credits\n")
+    for r in results:
+        comp = f"${r['comp']:.2f}" if isinstance(r.get("comp"), (int, float)) else "-"
+        src = r.get("source") or "-"
+        print(f"  [{r['status']:<17}] {r['asset_key']:<30} {comp:>11} [{src}]")
+        print(f"        {r.get('message', '')}")
+    wrote = sum(1 for r in results if r["wrote"])
+    prev = sum(1 for r in results if r["status"] == "previewed")
+    skipped = sum(1 for r in results if r["status"].startswith("skipped")
+                  or r["status"] in ("error", "unknown_asset", "already_recorded"))
+    print(f"\n  summary: {wrote} recorded, {prev} previewed, {skipped} skipped/other; "
+          f"credits_spent=0")
+
+
+def _cmd_record_asset_comps(args, deps) -> int:
+    """F.1 batch independent recording (0 PPT credits). --dry-run previews; --yes
+    persists; neither => safe preview. Gated on poke.independent_sources."""
+    from . import independent_sources as indep
+    if not getattr(args, "refresh_independent", False):
+        print("record-asset-comps requires --refresh-independent (the batch supports only "
+              "the 0-PPT-credit independent path)")
         return 1
-    estimate = resale._amount(row.get("estimate"))
-    if estimate is None:
-        print("independent fetch found no usable sold comp (honest no-source); nothing recorded")
+    if not indep.independent_sources_enabled(deps.cfg):
+        print("refused: independent live fetch is off (set poke.independent_sources: true)")
+        return 2
+    ledger_path = getattr(deps, "ledger_path", None)
+    if ledger_path is None:
+        print("refused: no ledger_path configured on deps")
         return 1
-    source = _row_ok_source(row)               # the OK sold source, NOT the first (blocked) one;
-    if not source or source == "ebay":         # and NO ppt_cards fallback on the independent path
-        print(f"refused: independent row has no sold source slug (got {source!r}); nothing recorded")
+    keys = [k.strip() for k in (args.assets or "").split(",") if k.strip()]
+    if not keys:
+        print("record-asset-comps needs --assets a,b,c")
         return 1
-    try:
-        wrote = sources_mod.record_asset_comp(
-            ledger_path, asset, comp=estimate, confidence=row.get("confidence"),
-            source=source, capture_date=deps.today,
-            source_url=row.get("sourceUrl") or row.get("url") or "",
-            basis=row.get("compBasis") or row.get("basis") or "", asset_key=args.asset_key)
-    except ValueError as exc:
-        print(f"refused to persist ({exc}); nothing recorded")
-        return 1
-    print(f"{'recorded' if wrote else 'already recorded'} asset comp {args.asset_key} "
-          f"= ${estimate:.2f} [{source}, {row.get('confidence')}] (0 PPT credits)")
-    return 0
+
+    write = bool(args.yes) and not bool(args.dry_run)   # --dry-run always wins
+    catalog = getattr(deps, "assets", None) or {}
+    results = []
+    for key in keys:
+        asset = catalog.get(key)
+        if asset is None:
+            results.append({"asset_key": key, "status": "unknown_asset", "wrote": False,
+                            "source": None, "comp": None, "confidence": None, "basis": "",
+                            "source_url": "", "message": "not in the asset catalog"})
+            continue
+        results.append(_independent_result(deps, asset, key, ledger_path, write=write))
+
+    if args.json:
+        print(json.dumps({"mode": "write" if write else "preview", "credits_spent": 0,
+                          "results": results}, indent=2))
+    else:
+        _print_batch(results, write)
+    return 1 if any(r["status"] == "unknown_asset" for r in results) else 0
 
 
 def _cmd_record_asset_comp(args, deps) -> int:
@@ -380,6 +512,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_divergence(args, deps)
     if args.cmd == "record-asset-comp":
         return _cmd_record_asset_comp(args, deps)
+    if args.cmd == "record-asset-comps":
+        return _cmd_record_asset_comps(args, deps)
     return 0
 
 
