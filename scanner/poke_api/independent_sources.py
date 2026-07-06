@@ -70,3 +70,85 @@ def pricecharting_card_prices_from_html(body: str) -> dict:
         if price is not None and price > 0:
             cells[cid] = price
     return {"cells": cells, "blocked": False}
+
+
+class _PriceChartingBase:
+    """Shared plain-requests fetch of a PriceCharting detail page (0 PPT credits)."""
+
+    def __init__(self, session: Any = None) -> None:
+        self.session = session or requests.Session()
+
+    def _fetch_cells(self, slug: Any, checked_at: int):
+        """(cells, url, status, detail). status: skipped|blocked|error|ok."""
+        slug = str(slug or "").strip().strip("/")
+        if not slug:
+            return {}, "", "skipped", "no pricecharting_slug mapped"
+        url = PC_GAME_URL.format(slug=slug)
+        try:
+            resp = self.session.get(
+                url, headers={"User-Agent": UA, "Accept": "text/html"}, timeout=20)
+        except requests.RequestException as exc:
+            return {}, url, "error", str(exc)[:200]
+        if getattr(resp, "status_code", 200) in (403, 429):
+            return {}, url, "blocked", f"HTTP {resp.status_code}"
+        parsed = pricecharting_card_prices_from_html(resp.text)
+        if parsed["blocked"]:
+            return {}, url, "blocked", "challenge/interstitial page (recorded blocked, not evaded)"
+        return parsed["cells"], url, "ok", ""
+
+
+class PriceChartingRawSource(_PriceChartingBase):
+    """Raw single Ungraded (``used_price``) comp, exact-slug only. Sold-derived,
+    slug ``pricecharting``. Ungraded is a loose/NM proxy — condition not distinguished."""
+
+    def fetch(self, asset: dict, checked_at: int) -> CompSourceQuote:
+        fetched = _iso(checked_at)
+        cells, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
+        if status != "ok":
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, status, None, url, fetched, detail=detail)
+        price = cells.get(PC_RAW_CELL)
+        if price is None:
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched,
+                                   detail="no Ungraded (used_price) cell on the PriceCharting page")
+        return CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", price, url, fetched,
+                               detail="PriceCharting Ungraded market summary (condition not distinguished)")
+
+
+def _grade_cell_for(grade_key: Any) -> tuple[str | None, str]:
+    """(cell_id, basis note) for a normalized grade_key, or (None, reason). Exact-only:
+    ``psa10`` -> the PSA-exact column; grades 7/8/9/9.5 -> the grader-agnostic column;
+    anything else (``cgc10``, ``bgs10``, ``*6``…) -> (None, reason) => honest no_match."""
+    gk = str(grade_key or "").strip().lower()
+    m = re.match(r"^([a-z]+)([\d.]+)$", gk)
+    if not m:
+        return None, f"unparseable grade_key {grade_key!r}"
+    grader, num = m.group(1), m.group(2)
+    if num == "10":
+        if grader == "psa":
+            return PC_PSA10_CELL, "PriceCharting PSA 10 column (PSA-exact)"
+        return None, f"no exact PriceCharting cell for {gk} (only PSA 10 has a graded column)"
+    cell = PC_GRADE_CELLS.get(num)
+    if cell is None:
+        return None, f"no PriceCharting cell for grade {num!r}"
+    return cell, f"PriceCharting Grade {num} column (grader-agnostic proxy)"
+
+
+class PriceChartingGradedSource(_PriceChartingBase):
+    """Graded comp from the exact grade cell, slug ``pricecharting``. The PSA-exact vs
+    grader-agnostic distinction rides in the quote ``detail`` (basis note); confidence is
+    locked to ``low`` downstream in ``sources.resolve_graded_comp``."""
+
+    def fetch(self, asset: dict, checked_at: int) -> CompSourceQuote:
+        fetched = _iso(checked_at)
+        cell_id, note = _grade_cell_for(asset.get("grade_key"))
+        if cell_id is None:
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, "", fetched, detail=note)
+        cells, url, status, detail = self._fetch_cells(asset.get("pricecharting_slug"), checked_at)
+        if status != "ok":
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, status, None, url, fetched, detail=detail)
+        price = cells.get(cell_id)
+        if price is None:
+            return CompSourceQuote("pricecharting", SOLD_DERIVED, "no_match", None, url, fetched,
+                                   detail=f"no {cell_id} cell on the PriceCharting page")
+        return CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", price, url, fetched,
+                               detail=note, raw_excerpt=note)

@@ -32,3 +32,70 @@ def test_parser_malformed_html_is_empty_not_crash():
     parsed = indep.pricecharting_card_prices_from_html("<table><td>no ids here</td></table>")
     assert parsed["blocked"] is False
     assert parsed["cells"] == {}
+
+
+RAW_ASSET = {"asset_key": "umbreon_raw_nm", "asset_class": "raw", "name": "Umbreon ex 161",
+             "set": "Prismatic Evolutions", "condition": "NM",
+             "pricecharting_slug": "pokemon-prismatic-evolutions/umbreon-ex-161"}
+PSA10 = {"asset_key": "umbreon_psa10", "asset_class": "graded", "name": "Umbreon ex 161",
+         "set": "Prismatic Evolutions", "grade_key": "psa10",
+         "pricecharting_slug": "pokemon-prismatic-evolutions/umbreon-ex-161"}
+PSA9 = {**PSA10, "asset_key": "umbreon_psa9", "grade_key": "psa9"}
+
+
+class _FakeSession:
+    """Returns a canned response for .get(); no network."""
+    def __init__(self, text, status=200, exc=None):
+        self._text, self._status, self._exc = text, status, exc
+
+    def get(self, url, **kw):
+        if self._exc is not None:
+            raise self._exc
+        return _FakeResp(self._text, self._status)
+
+
+class _FakeResp:
+    def __init__(self, text, status):
+        self.text, self.status_code = text, status
+
+
+def test_raw_adapter_uses_ungraded_cell():
+    src = indep.PriceChartingRawSource(session=_FakeSession(_fixture()))
+    q = src.fetch(RAW_ASSET, 1_700_000_000)
+    assert q.source == "pricecharting" and q.status == "ok"
+    assert q.price == 1425.00
+    assert "pokemon-prismatic-evolutions/umbreon-ex-161" in q.url
+
+
+def test_raw_adapter_no_slug_is_skipped():
+    q = indep.PriceChartingRawSource(session=_FakeSession(_fixture())).fetch(
+        {"asset_class": "raw", "name": "x", "set": "y"}, 1_700_000_000)
+    assert q.status == "skipped" and q.price is None
+
+
+def test_graded_psa10_uses_manual_only_price_exact():
+    q = indep.PriceChartingGradedSource(session=_FakeSession(_fixture())).fetch(PSA10, 1_700_000_000)
+    assert q.status == "ok" and q.price == 7013.08
+    assert "PSA-exact" in q.detail
+
+
+def test_graded_psa9_uses_grade9_column_grader_agnostic():
+    q = indep.PriceChartingGradedSource(session=_FakeSession(_fixture())).fetch(PSA9, 1_700_000_000)
+    assert q.status == "ok" and q.price == 1554.05
+    assert "grader-agnostic" in q.detail
+
+
+def test_graded_cgc10_has_no_exact_cell_no_match():
+    q = indep.PriceChartingGradedSource(session=_FakeSession(_fixture())).fetch(
+        {**PSA10, "grade_key": "cgc10"}, 1_700_000_000)
+    assert q.status == "no_match" and q.price is None
+
+
+def test_adapter_challenge_page_is_blocked():
+    src = indep.PriceChartingRawSource(session=_FakeSession("Just a moment..."))
+    assert src.fetch(RAW_ASSET, 1_700_000_000).status == "blocked"
+
+
+def test_adapter_http_403_is_blocked():
+    src = indep.PriceChartingRawSource(session=_FakeSession("", status=403))
+    assert src.fetch(RAW_ASSET, 1_700_000_000).status == "blocked"
