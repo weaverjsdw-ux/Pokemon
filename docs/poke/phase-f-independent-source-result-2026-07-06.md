@@ -81,6 +81,37 @@ Command:
   buy. No verified entry exists, so nothing is live/paper-eligible (the E verified-entry route is
   untouched). PPT external mode stays audit-only. No broad catalog import happened.
 
+## TCGplayer render probe (Task 9) — CONDITIONAL, resolved to "keep the shell"
+
+Operator-approved one-off headless render probe of the TCGplayer product page for the same
+card (`https://www.tcgplayer.com/product/610516`, id 610516 — the mapped `tcgplayer_id`). Run
+via the session's browser tool (no scanner dependency installed).
+
+**Fetchability: CLEAN.** The page renders a parseable price with **no bot-wall / challenge** —
+title hydrated to "Umbreon ex - 161/131 - SV: Prismatic Evolutions", `challengePresent: false`.
+So TCGplayer is renderable (Playwright would work).
+
+**But two findings make it the wrong source to wire — so Playwright was NOT installed:**
+
+1. **TCGplayer is not independent of PPT.** The tracked printing's TCGplayer market price is
+   **Holofoil = $1,528.09**, *identical to the cent* to the recorded PPT (`ppt_cards`) comp
+   $1,528.09. PPT resells the TCGplayer market number, so wiring TCGplayer as an "independent
+   cross-check" is circular — it is the same source. The genuinely independent source is
+   **PriceCharting** ($1,425.00, ~7% off), whose distinct methodology is what makes the
+   cross-source audit meaningful.
+2. **The naive parser grabs the wrong printing.** The page carries ~10 "Market Price" strings
+   (the tracked printing plus a "related products" rail: $129.40, $0.85, …). A first-match
+   regex (`_tcg_market_price` as built in Task 8) returns **$750.00** — an adjacent/wrong-context
+   value, not the tracked Holofoil $1,528.09. A trustworthy TCGplayer adapter would have to
+   target the specific printing's market node; the first-"Market Price" heuristic is unreliable.
+
+**Decision (operator, 2026-07-06): keep the built `blocked` shell; do not install Playwright.**
+`TcgPlayerRenderedSource` remains built + unit-tested but dormant (returns `blocked` with no
+`render` callable). No `playwright` dependency, no chromium download. The `_tcg_market_price`
+first-match heuristic is a **latent bug** that is harmless while the shell is dormant — it must
+be replaced with printing-specific targeting before TCGplayer is ever enabled live. Phase F's
+required PriceCharting gate is unaffected and complete.
+
 ## Config note
 
 `poke.independent_sources: true` was set in the gitignored `config.yaml` to permit the CLI live
