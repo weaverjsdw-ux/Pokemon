@@ -154,6 +154,19 @@ class PriceChartingGradedSource(_PriceChartingBase):
                                detail=note, raw_excerpt=note)
 
 
+def _tcg_market_price(html: str) -> float | None:
+    """Extract 'Market Price: $X' from a rendered TCGplayer product page. The exact
+    selector is confirmed by the operator-approved render probe (Task 9); this text
+    pattern is the resilient fallback. Returns None if absent (never raises)."""
+    m = re.search(r"Market\s*Price:?\s*\$([\d,]+\.?\d*)", html or "", flags=re.I)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 class TcgPlayerRenderedSource:
     """Rendered TCGplayer market price (Playwright). CONDITIONAL + NON-BLOCKING: with no
     injected ``render`` callable (the default) every fetch is a ``blocked`` shell — never
@@ -174,8 +187,20 @@ class TcgPlayerRenderedSource:
         if self._render is None:
             return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
                                    detail="rendering not enabled (Playwright dormant / not installed)")
-        return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
-                               detail="render path wired in Task 9")
+        try:
+            html = self._render(url)
+        except Exception as exc:  # noqa: BLE001 - a render failure degrades, never crashes
+            return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
+                                   detail=f"render failed: {str(exc)[:150]}")
+        if any(marker in (html or "") for marker in _CHALLENGE_MARKERS):
+            return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
+                                   detail="challenge/interstitial page (recorded blocked, not evaded)")
+        price = _tcg_market_price(html or "")
+        if price is None or price <= 0:
+            return CompSourceQuote("tcgplayer", SOLD_DERIVED, "no_match", None, url, fetched,
+                                   detail="no market price node in the rendered page")
+        return CompSourceQuote("tcgplayer", SOLD_DERIVED, "ok", price, url, fetched,
+                               detail="TCGplayer rendered market price")
 
 
 def independent_sources_enabled(cfg: Any) -> bool:

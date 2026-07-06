@@ -192,3 +192,29 @@ def test_writer_refuses_ask_source():
     with pytest.raises(ValueError):
         s.build_asset_comp_observation(RAW_ASSET, comp=100.0, confidence="low",
                                        source="ebay", capture_date="2026-07-06")
+
+
+def test_tcg_rendered_ok_with_mock_render():
+    html = '<div class="price-guide">Market Price: $1,499.99</div>'
+    src = indep.TcgPlayerRenderedSource(render=lambda url: html)
+    q = src.fetch({"tcgplayer_id": "610516"}, 1_700_000_000)
+    assert q.source == "tcgplayer" and q.status == "ok" and q.price == 1499.99
+
+
+def test_tcg_render_exception_is_blocked_not_crash():
+    def boom(url):
+        raise RuntimeError("chromium missing")
+    q = indep.TcgPlayerRenderedSource(render=boom).fetch({"tcgplayer_id": "610516"}, 1_700_000_000)
+    assert q.status == "blocked"
+
+
+def test_tcg_challenge_page_is_blocked():
+    q = indep.TcgPlayerRenderedSource(render=lambda url: "Just a moment...").fetch(
+        {"tcgplayer_id": "610516"}, 1_700_000_000)
+    assert q.status == "blocked"
+
+
+def test_tcg_no_price_node_is_no_match():
+    q = indep.TcgPlayerRenderedSource(render=lambda url: "<div>no price here</div>").fetch(
+        {"tcgplayer_id": "610516"}, 1_700_000_000)
+    assert q.status == "no_match"
