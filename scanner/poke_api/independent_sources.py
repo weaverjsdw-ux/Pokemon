@@ -152,3 +152,27 @@ class PriceChartingGradedSource(_PriceChartingBase):
                                    detail=f"no {cell_id} cell on the PriceCharting page")
         return CompSourceQuote("pricecharting", SOLD_DERIVED, "ok", price, url, fetched,
                                detail=note, raw_excerpt=note)
+
+
+class TcgPlayerRenderedSource:
+    """Rendered TCGplayer market price (Playwright). CONDITIONAL + NON-BLOCKING: with no
+    injected ``render`` callable (the default) every fetch is a ``blocked`` shell — never
+    raises, never on the Phase F completion path. Full render wired in Task 9."""
+
+    PRODUCT_URL = "https://www.tcgplayer.com/product/{tcg_id}"
+
+    def __init__(self, render: Any = None) -> None:
+        self._render = render
+
+    def fetch(self, asset: dict, checked_at: int) -> CompSourceQuote:
+        fetched = _iso(checked_at)
+        tcg_id = str(asset.get("tcgplayer_id") or "").strip()
+        if not tcg_id:
+            return CompSourceQuote("tcgplayer", SOLD_DERIVED, "skipped", None, "", fetched,
+                                   detail="no tcgplayer_id mapped")
+        url = self.PRODUCT_URL.format(tcg_id=tcg_id)
+        if self._render is None:
+            return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
+                                   detail="rendering not enabled (Playwright dormant / not installed)")
+        return CompSourceQuote("tcgplayer", SOLD_DERIVED, "blocked", None, url, fetched,
+                               detail="render path wired in Task 9")

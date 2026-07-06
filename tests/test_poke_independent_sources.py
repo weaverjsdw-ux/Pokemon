@@ -1,7 +1,9 @@
 """Phase F — independent (non-PPT) PriceCharting/TCGplayer source adapters."""
 from pathlib import Path
 
+from scanner.market import comp_from_row
 from scanner.poke_api import independent_sources as indep
+from scanner.poke_api import sources as sources_mod
 
 FIXTURE = Path(__file__).parent / "fixtures" / "comps" / "pricecharting_umbreon_ex_161.html"
 
@@ -99,3 +101,39 @@ def test_adapter_challenge_page_is_blocked():
 def test_adapter_http_403_is_blocked():
     src = indep.PriceChartingRawSource(session=_FakeSession("", status=403))
     assert src.fetch(RAW_ASSET, 1_700_000_000).status == "blocked"
+
+
+def _srcs(session):
+    return {"pc_raw": indep.PriceChartingRawSource(session=session),
+            "pc_graded": indep.PriceChartingGradedSource(session=session),
+            "tcg": indep.TcgPlayerRenderedSource(render=None)}  # rendering dormant
+
+
+def test_independent_raw_row_is_low_single_source():
+    row = sources_mod.resolve_independent_asset_row(
+        RAW_ASSET, sources=_srcs(_FakeSession(_fixture())), checked_at=1_700_000_000)
+    assert row["status"] == "ok"
+    comp, _conf = comp_from_row(row)        # row["estimate"] is a money string ("$1425.00")
+    assert comp == 1425.00
+    assert row["confidence"] == "low"       # single independent sold source
+    ok_sources = [s for s in row.get("sources", []) if s.get("status") == "ok"]
+    assert any(s["source"] == "pricecharting" for s in ok_sources)  # PC produced the number
+    assert all(s["source"] != "ppt_cards" for s in row.get("sources", []))
+
+
+def test_independent_graded_row_is_locked_low_even_psa_exact():
+    row = sources_mod.resolve_independent_asset_row(
+        PSA10, sources=_srcs(_FakeSession(_fixture())), checked_at=1_700_000_000)
+    assert row["status"] == "ok"
+    comp, _conf = comp_from_row(row)        # row["estimate"] is a money string ("$7013.08")
+    assert comp == 7013.08
+    assert row["confidence"] == "low"       # LOCKED low even on the PSA-exact cell
+    assert "PSA-exact" in (row.get("confidenceReason") or row.get("detail") or "")
+
+
+def test_independent_graded_uses_pricecharting_slug_not_ppt():
+    row = sources_mod.resolve_independent_asset_row(
+        PSA9, sources=_srcs(_FakeSession(_fixture())), checked_at=1_700_000_000)
+    slugs = [s.get("source") for s in row.get("sources", [])]
+    assert "pricecharting" in slugs
+    assert "ppt_cards" not in slugs

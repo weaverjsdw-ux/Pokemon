@@ -218,16 +218,15 @@ def test_graded_pricecharting_fallback_uncorroborated_is_low():
     assert conf == "low"
 
 
-def test_graded_pricecharting_fallback_ask_corroborated_is_medium():
-    """A PriceCharting graded price corroborated by a nearby eBay ask -> medium (the
-    ask lifts confidence but is never itself the comp)."""
+def test_graded_pricecharting_ask_no_longer_lifts_confidence():
+    """Phase F: graded PriceCharting confidence is LOCKED at low — an eBay ask is context
+    and can no longer lift it to medium (cross-source validation is the audit's job)."""
     row = sources.resolve_graded_comp(
         GRADED, checked_at=CHECKED,
         pc_source=_FixedSource(_sold("pricecharting", 240.0)),
         ebay_source=_FixedSource(_ask(250.0)))
-    comp, conf = comp_from_row(row)
-    assert comp == 240.0           # the PC sold-derived price, never the ask
-    assert conf == "medium"
+    conf = row["confidence"]
+    assert conf == "low"
 
 
 # ---- #8 limit=1 on both card calls -------------------------------------------

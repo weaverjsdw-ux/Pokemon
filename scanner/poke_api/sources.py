@@ -297,6 +297,23 @@ def resolve_asset_source_row(asset: dict, *, card_client: Any, checked_at: int,
     return resolve_graded_comp(asset, checked_at=checked_at, ppt_client=card_client)
 
 
+def resolve_independent_asset_row(asset: dict, *, sources: dict, checked_at: int,
+                                  tolerance_pct: float = 20.0,
+                                  floor_sanity_pct: float = 50.0) -> dict:
+    """Resolve a raw/graded asset comp from the INDEPENDENT (non-PPT) adapters only —
+    ``ppt_client`` is never passed, so this path spends 0 PPT credits. ``sources`` is the
+    dict from ``independent_sources.build_independent_sources`` (``pc_raw`` / ``pc_graded``
+    / ``tcg``). Raw goes through the in-house ladder (a single independent sold source is
+    ``low``, two agreeing are ``high``); graded is PriceCharting-only, locked ``low``."""
+    if str(asset.get("asset_class")) == catalog_mod.RAW:
+        return resolve_raw_comp(asset, checked_at=checked_at, ppt_client=None,
+                                pc_source=(sources or {}).get("pc_raw"),
+                                tcg_source=(sources or {}).get("tcg"),
+                                tolerance_pct=tolerance_pct, floor_sanity_pct=floor_sanity_pct)
+    return resolve_graded_comp(asset, checked_at=checked_at, ppt_client=None,
+                               pc_source=(sources or {}).get("pc_graded"))
+
+
 # ---------------------------------------------------------------- adapter plumbing
 
 def _safe_fetch(source: Any, asset: dict, checked_at: int, slug: str) -> CompSourceQuote | None:
@@ -381,22 +398,13 @@ def resolve_raw_comp(asset: dict, *, checked_at: int, ppt_client: Any = None,
 
 # ---------------------------------------------------------------- graded resolver
 
-def _ask_ok(ebay: Any) -> bool:
-    return bool(ebay and getattr(ebay, "quote", None)
-                and ebay.quote.status == "ok" and ebay.quote.price and ebay.quote.price > 0)
-
-
-def _within(a: float, b: float, tolerance_pct: float) -> bool:
-    lo = min(a, b)
-    return lo > 0 and abs(a - b) / lo * 100.0 <= tolerance_pct
-
-
 def resolve_graded_comp(asset: dict, *, checked_at: int, ppt_client: Any = None,
                         pc_source: Any = None, ebay_source: Any = None) -> dict:
     """Resolve a graded slab's comp. ``estimate`` comes ONLY from the external card
     source's graded smart price (confidence passed through 1:1) or a PriceCharting
-    graded page (single sold-derived source -> medium if an ask corroborates, else
-    low). The eBay ask is validator/context — structurally it can never be the comp."""
+    graded page (single sold-derived source -> LOCKED low, PSA-exact included). The
+    eBay ask is never fetched here — it is context/validator territory (the divergence
+    audit), structurally incapable of becoming or lifting the comp."""
     asset_key = str(asset.get("asset_key") or asset.get("name") or "asset")
 
     smart = None
@@ -413,22 +421,18 @@ def resolve_graded_comp(asset: dict, *, checked_at: int, ppt_client: Any = None,
             detail=f"external smart price for {smart.grade_key} (confidence passed through)")
 
     pc = _safe_fetch(pc_source, asset, checked_at, "pricecharting") if pc_source is not None else None
-    ebay = None
-    if ebay_source is not None:
-        try:
-            ebay = ebay_source.fetch(asset, checked_at)
-        except Exception:  # noqa: BLE001
-            ebay = None
 
     if pc is not None and pc.status == "ok" and pc.price and pc.price > 0:
-        corroborated = _ask_ok(ebay) and _within(pc.price, ebay.quote.price, 20.0)
-        conf = "medium" if corroborated else "low"
-        detail = ("single sold-derived graded source"
-                  + (", ask corroborated" if corroborated else ", uncorroborated"))
+        # Phase F: graded PriceCharting confidence is LOCKED at low. A single independent
+        # sold-derived source is low regardless of cell (PSA-exact included); an eBay ask
+        # is context and can never lift it. Cross-source validation is supplied by the
+        # divergence audit agreeing, not by this field. The PSA-exact vs grader-agnostic
+        # distinction rides in the basis note (pc.raw_excerpt / pc.detail).
+        note = pc.raw_excerpt or pc.detail or "single sold-derived graded source"
         return _legacy_row(asset_key, asset, status="ok", estimate=pc.price,
-                           confidence=conf, basis="pricecharting graded page",
+                           confidence="low", basis="pricecharting graded page",
                            source="pricecharting", url=pc.url, checked_at=checked_at,
-                           detail=detail)
+                           detail=note)
 
     return _legacy_row(asset_key, asset, status="no_match", estimate=None,
                        confidence="none", basis="", source="", url="",
