@@ -67,7 +67,7 @@ which asserts these same six values against the captured fixture
 | Asset | PriceCharting (this probe) | PPT (ledger) | Delta |
 |---|---|---|---|
 | Umbreon ex 161 — raw/ungraded | $1,425.00 | $1,528.09 | ~7.2% |
-| Umbreon ex 161 — PSA 10 | $7,013.08 | $6,925.00 | ~1.3% |
+| Umbreon ex 161 — PSA 10 | $7,013.08 | $6,925.50 | ~1.3% |
 
 Both deltas are well inside the divergence audit's 20% tolerance band — the two
 independent sources agree closely enough to cross-validate each other, not
