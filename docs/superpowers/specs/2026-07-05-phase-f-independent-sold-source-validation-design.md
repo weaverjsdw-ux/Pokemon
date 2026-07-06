@@ -1,21 +1,39 @@
 # Phase F — Independent Singles/Slabs Sold-Source Validation (Design)
 
-**Date:** 2026-07-05
-**Status:** Design — awaiting operator review before build.
+**Date:** 2026-07-05 (rev. 2026-07-06)
+**Status:** Design — revised per operator review; ready for the implementation plan.
 **Repo:** `Pokemon-main` (package `scanner/`; price-API ladder `scanner/poke_api/`)
 **Ladder position:** the next rung on the **private price-API ladder** (A → B → C → D/D.5 →
 E → **F**). Not the discovery-slice roadmap. See
 [`docs/poke/private-price-api.md`](../../poke/private-price-api.md).
+
+## Revision note (2026-07-06 operator review)
+
+1. **PriceCharting exact-slug adapter (raw + graded) is the required Phase F completion
+   gate** — F is "done" when the PC adapter resolves + persists a non-PPT comp and the local
+   audit becomes cross-source. TCGplayer is explicitly **not** on the completion path.
+2. **TCGplayer/Playwright is now conditional + non-blocking:** attempt the dependency install +
+   render **only if a render probe is approved and comes back clean**; if it is blocked (or the
+   probe/install is declined), the adapter ships as an honest `blocked` shell and F still
+   completes. It never blocks the gate.
+3. **PriceCharting graded confidence is locked at `low`** unless *independently* corroborated —
+   the confidence field is never lifted just because a cell is PSA-exact. **Cross-source
+   validation is supplied by the divergence audit agreeing** (ours vs `ppt_cards`), not by the
+   comp's own confidence.
+4. **Result-doc acceptance for gitignored ledger rows:** `data/poke/price_history.jsonl` is
+   gitignored (untracked), so the recorded independent comps are captured in a **committed
+   result doc** as the durable, reviewable evidence (mirrors the prior audit-result docs).
 
 ---
 
 ## The system in one line
 
 Add a **genuinely non-PPT, sold-derived** comp for raw singles and graded slabs — from
-PriceCharting (plain requests) and TCGplayer (rendered) — persisted into the *same* asset
-ledger, so `edge_cli divergence-audit --local` stops comparing PPT-against-PPT and becomes a
-**true independent cross-source validation**. PPT external mode stays audit-only. No verified
-entries, no live-eligibility, no broad card-database import.
+**PriceCharting (plain requests, the required completion gate)** and optionally TCGplayer
+(rendered, conditional + non-blocking) — persisted into the *same* asset ledger, so
+`edge_cli divergence-audit --local` stops comparing PPT-against-PPT and becomes a **true
+independent cross-source validation**. PPT external mode stays audit-only. No verified entries,
+no live-eligibility, no broad card-database import.
 
 ## Why now (the gap this closes)
 
@@ -102,18 +120,24 @@ confidence), never presented as PSA-specific. Non-PSA-10 top grades (`cgc10`, `b
 generic Grade-10 cell in this primary table → honest `no_match` (an extended multi-grader table
 is a deferred follow-on, not F).
 
-## Operator decisions (this session)
+## Operator decisions (this session, as revised 2026-07-06)
 
-1. **TCGplayer:** build the adapter **and add Playwright now** — a real rendered adapter with
-   live data this build (not a dormant shell).
-2. **Graded PriceCharting:** build the adapter, **probe-gate the data** — probe done, **PASS**.
-3. **Mapping:** **exact slug/id only, never fuzzy.** Seeding the `pricecharting_slug` onto the
+1. **PriceCharting exact-slug adapter is the required completion gate.** F is complete when the
+   PC raw+graded adapter resolves + persists a non-PPT comp and the local audit is cross-source.
+2. **TCGplayer/Playwright is conditional + non-blocking:** attempt the dependency install +
+   render **only if a render probe is approved and clean**; if blocked/declined, ship the honest
+   `blocked` shell — F still completes. Never on the completion path.
+3. **Graded PriceCharting:** build the adapter, **probe-gate the data** — probe done, **PASS**.
+4. **Graded confidence is locked at `low`** unless independently corroborated; cross-source
+   validation comes from the divergence audit agreeing, not from the confidence field.
+5. **Mapping:** **exact slug/id only, never fuzzy.** Seeding the `pricecharting_slug` onto the
    Umbreon assets is in F's scope.
-4. **Probe:** run the confirmatory PriceCharting GET this session — **done, PASS** (table above).
-5. **Independent fetch trigger:** **CLI-only, operator-run**
+6. **Probe:** run the confirmatory PriceCharting GET this session — **done, PASS** (table above).
+7. **Independent fetch trigger:** **CLI-only, operator-run**
    (`record-asset-comp --refresh-independent`). Read endpoints never fetch — read-first stays
    offline.
-6. **TCGplayer timing:** **full build incl. Playwright this pass.**
+8. **Result-doc acceptance:** because the ledger is gitignored, the recorded independent comps
+   are captured in a committed result doc as durable evidence.
 
 ---
 
@@ -141,18 +165,24 @@ New module `scanner/poke_api/independent_sources.py`.
 - **`PriceChartingGradedSource`** — `fetch(asset, checked_at) -> CompSourceQuote`. Maps the
   asset's `grade_key` → cell id via an explicit, verified table:
 
-  | grade_key pattern | cell id | provenance |
+  | grade_key pattern | cell id | column semantics (basis note) |
   |---|---|---|
-  | `psa10` | `manual_only_price` | PSA-exact |
-  | `*9.5` (e.g. `cgc9.5`, `bgs9.5`, `psa9.5`) | `box_only_price` | grader-agnostic proxy |
-  | `*9` (e.g. `psa9`, `cgc9`) | `graded_price` | grader-agnostic proxy |
-  | `*8` | `new_price` | grader-agnostic proxy |
-  | `*7` | `complete_price` | grader-agnostic proxy |
+  | `psa10` | `manual_only_price` | PSA-exact column |
+  | `*9.5` (e.g. `cgc9.5`, `bgs9.5`, `psa9.5`) | `box_only_price` | grader-agnostic Grade 9.5 |
+  | `*9` (e.g. `psa9`, `cgc9`) | `graded_price` | grader-agnostic Grade 9 |
+  | `*8` | `new_price` | grader-agnostic Grade 8 |
+  | `*7` | `complete_price` | grader-agnostic Grade 7 |
   | other (`cgc10`, `bgs10`, `*6`…) | — | `no_match` (no exact cell) |
 
-  Sold-derived, slug `pricecharting`. Confidence: PSA-exact cell → `medium` (single
-  sold-derived source; `low` if an eBay ask is absent to corroborate per the existing graded
-  ladder), grader-agnostic proxy → capped at `low` with the proxy basis note. No slug →
+  Sold-derived, slug `pricecharting`. **Confidence is LOCKED at `low`** — a single independent
+  sold-derived source is `low` *regardless of which cell it came from*. The confidence field is
+  **never** lifted to `medium`/`high` just because a cell is PSA-exact; it rises above `low`
+  **only** with genuine independent corroboration (a second independent sold source agreeing
+  within tolerance — not an eBay ask, which is context, and not the PPT number, which is the
+  audit's counter-party). The PSA-exact vs grader-agnostic distinction is recorded in the
+  **basis note** (provenance), not in the confidence. **Cross-source validation is a separate
+  signal supplied by the divergence audit** (F4) when `ours` (PriceCharting) agrees with
+  `theirs` (`ppt_cards`) — it does not mutate the stored comp's confidence. No slug →
   `skipped`; challenge → `blocked`; unmapped grade → `no_match`.
 - **Exact-slug only.** Both adapters resolve strictly by `pricecharting_slug` (the canonical
   `/game/...` path). No fuzzy name search — a missing/unmatched slug is honest `no_match`/`skipped`,
@@ -160,21 +190,33 @@ New module `scanner/poke_api/independent_sources.py`.
 - **Doctrine.** Browser UA (the proven sealed UA), polite timeout; a 403/429/challenge is
   recorded `blocked`, never evaded.
 
-### F2 — TCGplayer rendered adapter (Playwright; operator-approved; 0 PPT credits)
+### F2 — TCGplayer rendered adapter (Playwright; CONDITIONAL + NON-BLOCKING; 0 PPT credits)
 
-- **`TcgPlayerRenderedSource`** — `fetch(asset, checked_at) -> CompSourceQuote`. Renders the
-  product page (`https://www.tcgplayer.com/product/{tcgplayer_id}`) headless, waits for the
-  market-price node to hydrate, extracts the market price. Sold-derived, slug `tcgplayer`. No
-  `tcgplayer_id` → `skipped`. Challenge/anti-bot page → `blocked` (never evaded). Render
-  timeout / no price node → `no_match`.
-- **Dependency.** Add `playwright` to `requirements.txt`; build step runs
-  `playwright install chromium`. **Guarded import** — if Playwright (or the browser binary) is
-  unavailable, the adapter degrades to a `blocked` quote and never raises. The pytest suite
-  **never launches a browser**: the render call is injectable and mocked; a marker-gated
-  optional live test may exist but is skipped by default (suite stays network-free per repo
-  contract).
-- **Positioning.** Heavier/riskier path; the design keeps PriceCharting sufficient for F on its
-  own, so a flaky TCGplayer render never blocks the independent-source validation.
+**Not on the completion path.** The `TcgPlayerRenderedSource` adapter (with its guarded import
+and honest-degrade contract) is **always built**; whether the Playwright dependency is installed
+and a live render is attempted is **gated on an operator-approved, clean render probe**. If the
+probe/install is declined, or the render comes back blocked, the adapter ships as an honest
+`blocked` shell and **F completes anyway on PriceCharting alone**.
+
+- **`TcgPlayerRenderedSource`** — `fetch(asset, checked_at) -> CompSourceQuote`. When rendering
+  is enabled: renders the product page (`https://www.tcgplayer.com/product/{tcgplayer_id}`)
+  headless, waits for the market-price node to hydrate, extracts the market price. Sold-derived,
+  slug `tcgplayer`. No `tcgplayer_id` → `skipped`. Challenge/anti-bot page → `blocked` (never
+  evaded). Render timeout / no price node → `no_match`.
+- **Gated dependency + render probe (build-time gate).** Adding `playwright` to
+  `requirements.txt` and running `playwright install chromium` happens **only after** an
+  operator go-ahead on a **render probe** (a one-off supervised headless fetch of the Umbreon
+  TCGplayer product page confirming a parseable market price, no challenge wall). Clean probe →
+  install + wire live rendering. Declined/blocked probe → **no dependency added**, adapter stays
+  a `blocked` shell, recorded honestly in the result doc. This keeps the repo's "never install a
+  dependency without asking" doctrine intact even though the operator pre-approved the *intent*.
+- **Guarded import (always).** With or without the install, the adapter's import is guarded — if
+  Playwright/chromium is unavailable it degrades to a `blocked` quote and never raises. The
+  pytest suite **never launches a browser**: the render call is injectable and mocked; any
+  marker-gated live test is skipped by default (suite stays network-free per repo contract).
+- **Positioning.** Heavier/riskier path, deliberately off the gate: PriceCharting alone
+  satisfies F, so a declined install or flaky render never blocks the independent-source
+  validation.
 
 ### F3 — Resolver + persistence wiring
 
@@ -197,10 +239,12 @@ New module `scanner/poke_api/independent_sources.py`.
 - Sharpen `divergence._local_ours` to prefer a **sold-derived independent** slug
   (`pricecharting` / `tcgplayer`) for `ours`, and carry `ours_source` onto each row so the
   report names which independent source backed the number.
-- When `ours` (independent) and `theirs` (`ppt_cards`) agree, classify/annotate it as a
-  **cross-source validation** (distinct, stronger note than the same-provider consistency the
-  last audit could claim). No change to the blocking rule — only
-  `unexplained_material_divergence` still fails the command.
+- When `ours` (independent) and `theirs` (`ppt_cards`) agree within tolerance, the audit
+  annotates the row as a **cross-source validation** (distinct, stronger note than the
+  same-provider consistency the last audit could claim). **This audit agreement — not the
+  comp's confidence field — is what supplies the cross-source validation signal**; the persisted
+  PriceCharting comp keeps its locked `low` confidence untouched. No change to the blocking rule
+  — only `unexplained_material_divergence` still fails the command.
 - **PPT external mode unchanged and audit-only** (money-class refuse-without-key/`--yes`,
   hard-stop floor). F adds no new external/billable surface.
 
@@ -211,9 +255,18 @@ New module `scanner/poke_api/independent_sources.py`.
   `umbreon_ex_161_psa9` (all the same card; the graded cell differs by `grade_key`). `tcgplayer_id`
   `610516` is already present on the mapped assets.
 - Record the independent PriceCharting comps into `data/poke/price_history.jsonl` (0 PPT
-  credits) via `record-asset-comp --refresh-independent` so the local audit has independent data
-  on day one. Values are captured from the live source at record time (never hand-typed as
-  comps except through the audited from-value path).
+  credits) via `record-asset-comp --refresh-independent` for **`raw_nm`, `psa10`, `psa9`** so the
+  local audit has independent data on day one. **`raw_lp` is slug-mapped but not recorded** (the
+  Ungraded cell doesn't distinguish condition — F1 condition caveat). Values are captured from
+  the live source at record time (never hand-typed as comps except through the audited from-value
+  path).
+- **Durable evidence (gitignored ledger).** `data/poke/price_history.jsonl` is **gitignored**
+  (untracked), so the recorded rows are not committed. Write a **committed result doc**
+  `docs/poke/phase-f-independent-source-result-2026-07-06.md` recording each written row (asset,
+  comp, confidence, source, capture_date, source URL, basis) plus the resulting
+  `divergence-audit --local` cross-source outcome — mirroring
+  `edge-asset-divergence-audit-result-2026-07-05.md`. This result doc is the reviewable proof
+  that F's ledger writes happened, since the ledger itself is not in git.
 
 ### F6 — Tests, fixture, docs
 
@@ -225,6 +278,10 @@ New module `scanner/poke_api/independent_sources.py`.
     challenge page → `blocked` signal.
   - Adapters: `ok` / `skipped` (no slug/id) / `no_match` (missing cell) / `blocked`
     (challenge/403) / grader-agnostic-proxy provenance on middle columns.
+  - **Graded confidence lock:** every graded PriceCharting comp resolves to `low` confidence
+    regardless of cell (PSA-exact `manual_only_price` included), and is **not** lifted absent
+    independent corroboration — assert `confidence == "low"` and the basis note carries the
+    column semantics.
   - TCGplayer: mocked render `ok`; Playwright-absent → `blocked` (no crash); challenge → `blocked`.
   - Resolver wiring: independent adapter feeds the ladder; correct slug persisted; slug is
     outside `_EXTERNAL_SLUGS`.
@@ -239,7 +296,10 @@ New module `scanner/poke_api/independent_sources.py`.
 - **Docs:** new **Track F** section in `private-price-api.md`; update the edge-layer runbook
   (`record-asset-comp --refresh-independent` + cross-source audit); add
   `sources.md` verdict row (PriceCharting detail page = **fetchable-plain**); a probe-result doc
-  (`docs/poke/pricecharting-detail-probe-2026-07-05.md`) capturing the evidence table above.
+  (`docs/poke/pricecharting-detail-probe-2026-07-05.md`) capturing the evidence table above; and
+  the F5 **result doc** (`docs/poke/phase-f-independent-source-result-2026-07-06.md`) recording
+  the gitignored ledger writes + the cross-source audit outcome. The TCGplayer render-probe
+  outcome (clean → installed, or declined/blocked → shell) is recorded in the result doc too.
 
 ---
 
@@ -280,8 +340,9 @@ asset (+ pricecharting_slug / tcgplayer_id)
   capture date + basis; no source → no number; an active ask is context, never a comp.
 - **Credits:** independent adapters are **0 PPT credits** (they never call PPT). The only
   billable surfaces in the repo (`--refresh` PPT, external divergence mode) are unchanged.
-- **Dependency:** Playwright is added only because the operator approved it; guarded so its
-  absence degrades honestly.
+- **Dependency:** Playwright is added **only** after an operator-approved, clean render probe
+  (conditional, non-blocking); guarded so its absence — the default until that gate passes —
+  degrades honestly. A declined/blocked probe means no dependency is added and F still completes.
 
 ## Config surface (new)
 
@@ -300,32 +361,70 @@ asset (+ pricecharting_slug / tcgplayer_id)
 - Making read endpoints fetch independent sources (read-first stays offline).
 - Auto-seeding slugs by fuzzy search.
 
+## Completion gate vs. conditional work
+
+**Phase F is COMPLETE when the required gate below is green — independent of TCGplayer.**
+
+- **Required (the completion gate):** the PriceCharting exact-slug adapter (raw + graded)
+  resolves + persists a non-PPT comp for the mapped Umbreon assets; the graded confidence is
+  locked `low`; `divergence-audit --local` becomes a true cross-source check; the result doc
+  captures the (gitignored) ledger writes + audit outcome; full suite green.
+- **Conditional + non-blocking:** the TCGplayer rendered adapter yielding live data. Gated on an
+  approved, clean render probe. A declined/blocked probe leaves it a `blocked` shell and does
+  **not** hold up completion — that outcome is simply recorded in the result doc.
+
 ## Acceptance criteria
 
-1. `independent_sources.py` exists with the shared parser + 3 adapters (PC-raw, PC-graded,
-   TCGplayer-rendered), each degrading honestly per the matrix.
+**Required (the completion gate):**
+
+1. `independent_sources.py` exists with the shared parser + the two PriceCharting adapters
+   (raw, graded) + a TCGplayer adapter (shell or live), each degrading honestly per the matrix.
 2. The captured PriceCharting fixture parses to the exact grade→value table above in tests.
-3. `record-asset-comp --refresh-independent` persists a `pricecharting` (and, with a mapped id,
-   `tcgplayer`) comp — **never** `ppt_cards` — at **0 PPT credits** (asserted).
-4. After recording, `divergence-audit --local --assets umbreon_ex_161_raw_nm,umbreon_ex_161_psa10`
-   compares independent `ours` vs `ppt_cards` `theirs`, surfaces `ours_source`, and reports a
-   cross-source `agree` (0 credits).
-5. The Umbreon assets carry `pricecharting_slug`; the graded map resolves `psa10`→PSA-exact and
-   `psa9`→grader-agnostic proxy with honest provenance.
-6. Playwright added; suite stays network-free and green; Playwright-absent path degrades to
-   `blocked` without failing.
-7. Guardrails proven by test: 0 PPT credits on the independent path; ask never a comp; assets
+3. `record-asset-comp --refresh-independent` persists a `pricecharting` comp — **never**
+   `ppt_cards` — at **0 PPT credits** (asserted).
+4. Every graded PriceCharting comp resolves at **`low` confidence** (PSA-exact cell included),
+   not lifted absent independent corroboration; the PSA-exact vs grader-agnostic distinction
+   lives in the basis note (asserted).
+5. After recording, `divergence-audit --local --assets umbreon_ex_161_raw_nm,umbreon_ex_161_psa10`
+   compares independent `ours` vs `ppt_cards` `theirs`, surfaces `ours_source`, and annotates a
+   **cross-source** agreement (0 credits) — the audit agreement, not the confidence, being the
+   validation signal.
+6. The Umbreon assets carry `pricecharting_slug`; the graded map resolves `psa10`→`manual_only_price`
+   (PSA-exact) and `psa9`→`graded_price` (grader-agnostic proxy) with honest basis notes.
+7. The **committed result doc** records each gitignored ledger row written (asset, comp,
+   confidence, source, capture_date, URL, basis) + the `--local` cross-source outcome.
+8. Guardrails proven by test: 0 PPT credits on the independent path; ask never a comp; assets
    stay WATCH; no verified-entry fabrication.
-8. Full suite green (`.venv/Scripts/python.exe -m pytest -q`); docs updated (Track F, runbook,
-   sources.md, probe-result doc).
+9. Full suite green (`.venv/Scripts/python.exe -m pytest -q`); docs updated (Track F, runbook,
+   sources.md, probe-result doc, result doc).
+
+**Conditional (TCGplayer; only if the render probe is approved + clean):**
+
+10. Playwright added; suite stays network-free and green; the render adapter yields a
+    `tcgplayer` comp on a live probe. If the probe is declined/blocked, the adapter remains a
+    guarded `blocked` shell (suite still green) and the result doc records that outcome — this
+    does **not** block completion.
 
 ## Build task outline (for the plan)
 
+**Required gate — PriceCharting first, complete before any TCGplayer work:**
+
 1. Capture the PC fixture; write the shared parser + parser tests (TDD).
-2. `PriceChartingRawSource` + `PriceChartingGradedSource` (+ grade_key→cell map) + adapter tests.
-3. `TcgPlayerRenderedSource` + guarded Playwright + mocked-render tests; add the dependency.
-4. Resolver wiring + `poke.independent_sources` config + wiring tests.
-5. CLI `--refresh-independent` + the `_record_billed` slug-fallback fix + CLI tests.
-6. `divergence._local_ours` sharpen + `ours_source` + cross-source note + audit tests.
-7. Seed `pricecharting_slug`; record the independent comps (0 credits); guardrail tests.
-8. Docs: Track F, runbook, sources.md, probe-result doc. Full-suite green + final review.
+2. `PriceChartingRawSource` + `PriceChartingGradedSource` (+ grade_key→cell map, **confidence
+   locked `low`**) + adapter tests.
+3. Resolver wiring (PC `pc_source` slot) + `poke.independent_sources` config + wiring tests.
+4. CLI `--refresh-independent` + the `_record_billed` slug-fallback fix + CLI tests.
+5. `divergence._local_ours` sharpen + `ours_source` + cross-source annotation + audit tests.
+6. Seed `pricecharting_slug`; record the independent comps for `raw_nm`/`psa10`/`psa9`
+   (0 credits); guardrail tests; write the **result doc** capturing the gitignored ledger rows +
+   `--local` cross-source outcome.
+7. Docs: Track F, runbook, sources.md, probe-result doc. **At this point the completion gate is
+   green** — full suite green + review.
+
+**Conditional (non-blocking) — only after the gate is green:**
+
+8. `TcgPlayerRenderedSource` shell + guarded import + mocked-render tests (no dependency yet).
+9. Operator render-probe on the TCGplayer product page. If approved + clean: add `playwright`,
+   run `playwright install chromium`, wire live rendering, record a `tcgplayer` comp, and note
+   it in the result doc. If declined/blocked: leave the `blocked` shell and record that outcome.
+   Either way the suite stays network-free and green.
