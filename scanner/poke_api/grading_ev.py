@@ -17,6 +17,11 @@ from __future__ import annotations
 from typing import Any
 
 from .. import margin as margin_mod
+from .gem_rates import POP_PROXY_CAVEAT
+
+# The standard sensitivity band a grading decision is read against (never a point
+# estimate). The actual sourced/assumed rate is added alongside these.
+SENSITIVITY_RATES = (0.20, 0.30, 0.40, 0.50)
 
 
 def _pos(value) -> float | None:
@@ -26,6 +31,49 @@ def _pos(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return v if v > 0 else None
+
+
+def breakeven_gem_rate(*, upside_net, downside_net) -> float | None:
+    """The gem rate at which fee-adjusted expected net = 0 (the linear EV model
+    ``EV(g) = g*upside + (1-g)*downside``). Returns ``None`` when there is no positive
+    spread (``upside <= downside``) — raising the gem rate can never reach break-even, so
+    a break-even point is undefined rather than fabricated. The value may fall outside
+    ``[0,1]`` (already profitable at g=0, or never profitable at g=1) — reported honestly,
+    the reader interprets it against the sensitivity band."""
+    try:
+        up = float(upside_net)
+        down = float(downside_net)
+    except (TypeError, ValueError):
+        return None
+    spread = up - down
+    if spread <= 0:
+        return None
+    return round(-down / spread, 4)
+
+
+def _ev_at(gem: float, *, cost: float, upside: float, downside: float) -> tuple[float, float | None]:
+    net = round(gem * upside + (1.0 - gem) * downside, 2)
+    roi = round(net / cost * 100.0, 2) if cost > 0 else None
+    return net, roi
+
+
+def _sensitivity_rows(*, cost: float, upside: float, downside: float, actual_gem: float,
+                      buy_floor_net: float) -> list[dict]:
+    """EV across the standard 20/30/40/50 % band plus the actual sourced/assumed rate, so
+    a decision is read against a band, not a point. Same money model (``_ev_at``)."""
+    rates = {round(r, 4) for r in SENSITIVITY_RATES}
+    rates.add(round(float(actual_gem), 4))
+    rows: list[dict] = []
+    for g in sorted(rates):
+        net, roi = _ev_at(g, cost=cost, upside=upside, downside=downside)
+        rows.append({
+            "gem_rate": g,
+            "expected_net": net,
+            "expected_roi_pct": roi,
+            "clears_paper_floor": net >= buy_floor_net,
+            "is_actual": g == round(float(actual_gem), 4),
+        })
+    return rows
 
 
 def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
@@ -74,6 +122,8 @@ def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
             "gem_rate": gem_rate, "gem_rate_basis": gem_rate_basis,
             "grading_fee": grading_fee, "grading_fee_basis": grading_fee_basis,
             "assumptions": [],
+            "breakeven_gem_rate": None,
+            "sensitivity": [],
             "blockers": blockers,
             "reason": "grading EV blocked: " + "; ".join(blockers),
         }
@@ -99,7 +149,15 @@ def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
         f"upside: sell {target_grade or 'target grade'} @ ${gcomp:.2f} on eBay (after fees+tax) -> net ${upside:.2f}",
         f"downside: {down_label}; grading fee sunk -> net ${downside:.2f}",
         f"EV = {gem:.2%} x ${upside:.2f} + {1-gem:.2%} x ${downside:.2f} = ${expected_net:.2f}",
+        f"caveat: {POP_PROXY_CAVEAT}",
     ]
+    breakeven = breakeven_gem_rate(upside_net=upside, downside_net=downside)
+    sensitivity = _sensitivity_rows(cost=cost, upside=upside, downside=downside,
+                                    actual_gem=gem, buy_floor_net=buy_floor_net)
+    if breakeven is not None:
+        assumptions.append(
+            f"break-even gem rate {breakeven:.2%} (EV = $0); actual {gem:.2%} is "
+            f"{'above' if gem >= breakeven else 'below'} break-even")
     status = "actionable" if expected_net >= buy_floor_net else "watch"
     reason = (f"grading EV ${expected_net:.2f} net / {expected_roi_pct:.1f}% ROI "
               f"({'clears' if status == 'actionable' else 'below'} paper buy floor "
@@ -117,6 +175,8 @@ def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
         "grading_fee": round(fee, 2),
         "grading_fee_basis": grading_fee_basis or "poke.grading_cost_all_in (config)",
         "assumptions": assumptions,
+        "breakeven_gem_rate": breakeven,
+        "sensitivity": sensitivity,
         "blockers": [],
         "reason": reason,
     }

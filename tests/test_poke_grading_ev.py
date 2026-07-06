@@ -88,3 +88,64 @@ def test_ev_below_floor_is_watch_not_actionable():
     r = _ev(graded_comp=600.0)                    # thin upside -> EV below buy floor
     assert r["status"] == "watch"
     assert r["expected_net"] is not None          # still computed, just not actionable
+
+
+# ---------------------------------------------------------------- Phase G: break-even
+
+def test_breakeven_gem_rate_pure():
+    # EV(g)=0 at g = downside/(downside-upside). upside 333.6, downside -100.15 -> ~0.231
+    be = gev.breakeven_gem_rate(upside_net=333.6, downside_net=-100.15)
+    assert be == pytest.approx(0.2309, abs=1e-3)
+
+
+def test_breakeven_none_on_zero_spread():
+    # No spread between upside and downside -> raising the gem rate can never reach 0.
+    assert gev.breakeven_gem_rate(upside_net=100.0, downside_net=100.0) is None
+    assert gev.breakeven_gem_rate(upside_net=50.0, downside_net=100.0) is None  # upside<downside
+
+
+def test_grading_ev_includes_breakeven_and_sensitivity():
+    r = _ev()
+    assert r["status"] == "actionable"
+    # break-even sits below the assumed 0.4 (EV is positive at 0.4)
+    assert 0.0 < r["breakeven_gem_rate"] < 0.4
+    # EV crosses zero at the break-even gem rate (linear model)
+    assert isinstance(r["sensitivity"], list) and r["sensitivity"]
+
+
+def test_sensitivity_has_standard_rates_plus_actual():
+    r = _ev(gem_rate=0.35)                          # actual not among 20/30/40/50
+    rates = [round(row["gem_rate"], 2) for row in r["sensitivity"]]
+    for standard in (0.20, 0.30, 0.40, 0.50):
+        assert standard in rates
+    assert 0.35 in rates                            # the actual sourced/assumed rate too
+    actual_rows = [row for row in r["sensitivity"] if row.get("is_actual")]
+    assert len(actual_rows) == 1 and actual_rows[0]["gem_rate"] == 0.35
+    # each row carries a net + roi computed on the SAME money model
+    assert all("expected_net" in row and "expected_roi_pct" in row for row in r["sensitivity"])
+
+
+def test_sensitivity_monotonic_in_gem_rate():
+    r = _ev()
+    nets = [row["expected_net"] for row in sorted(r["sensitivity"], key=lambda x: x["gem_rate"])]
+    assert nets == sorted(nets)                     # higher gem rate -> higher EV (upside>downside)
+
+
+def test_blocked_has_no_breakeven_or_sensitivity():
+    r = _ev(gem_rate=None)                           # blocked: no dollar output preserved
+    assert r["status"] == "blocked"
+    assert r["expected_net"] is None
+    assert r.get("breakeven_gem_rate") is None
+    assert r.get("sensitivity") in (None, [])
+
+
+def test_base_rate_proxy_caveat_in_assumptions():
+    joined = " ".join(_ev()["assumptions"]).lower()
+    assert "proxy" in joined                         # base-rate-as-proxy stated explicitly
+    assert "paper_buy" in joined or "never live" in joined
+
+
+def test_grading_ev_is_paper_only_never_live():
+    r = _ev()
+    assert r["status"] in ("actionable", "watch")    # never a LIVE token
+    assert "never live" in r["reason"].lower()

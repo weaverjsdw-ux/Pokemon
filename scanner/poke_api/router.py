@@ -16,18 +16,22 @@ external credits (no provider call on any read path).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .. import resale
 from . import asset_model as asset_model_mod
 from . import candidates as candidates_mod
 from . import catalog as catalog_mod
 from . import edge as edge_mod
 from . import gem_rates as gem_rates_mod
+from . import grading_ev as grading_ev_mod
 from . import history as history_mod
 from . import lab as lab_mod
 from . import model as model_mod
+from . import opportunities as opp_mod
 from . import paper_ledger as ledger_mod
 from . import sources as sources_mod
 
@@ -434,6 +438,103 @@ def _edge_summary(deps: PokeApiDeps) -> dict:
     return _ok({"summary": edge_mod.edge_summary(packets)})
 
 
+# ---------------------------------------------------------------- Phase G (grading EV)
+
+def _grader_from_grade_key(grade_key) -> str:
+    m = re.match(r"^([a-zA-Z]+)", str(grade_key or ""))
+    return m.group(1).upper() if m else ""
+
+
+def _gem_rate_provenance(gem_row: dict | None) -> dict:
+    """Sourced-vs-assumption label + sample-size status for the read output. A sourced
+    row above the floor is ``sufficient``; an assumption is ``operator_assumption``; no
+    recorded rate is ``no_gem_rate`` (the honest reason grading EV blocks)."""
+    if not gem_row:
+        return {"label": None, "gem_rate": None, "sample_status": "no_gem_rate",
+                "reason": "no recorded gem rate for this asset+grader; record a sourced pop "
+                          "(gem-rate record) or an operator_assumption (gem-rate record-assumption)"}
+    label = gem_row.get("label")
+    size = gem_row.get("sample_size")
+    # Judge sufficiency against the floor the row was RECORDED against (persisted on the
+    # row), not the current default — a custom --sample-floor stays truthful on read.
+    floor = gem_row.get("sample_floor")
+    if not isinstance(floor, (int, float)):
+        floor = gem_rates_mod.SAMPLE_FLOOR_DEFAULT
+    if label == gem_rates_mod.LABEL_ASSUMPTION:
+        sample_status = "operator_assumption"
+    elif size is not None and size >= floor:
+        sample_status = "sufficient"
+    else:
+        sample_status = "below_floor"
+    return {
+        "label": label,
+        "gem_rate": gem_row.get("gem_rate"),
+        "grader": gem_row.get("grader"),
+        "source": gem_row.get("source"),
+        "source_url": gem_row.get("source_url"),
+        "capture_date": gem_row.get("capture_date"),
+        "sample_size": size,
+        "sample_floor": gem_row.get("sample_floor"),
+        "sample_status": sample_status,
+        "gem_rate_formula": gem_row.get("gem_rate_formula"),
+        "basis": gem_row.get("basis"),
+        "caveat": gem_rates_mod.POP_PROXY_CAVEAT,
+    }
+
+
+def _grading_ev(deps: PokeApiDeps, asset_key: str) -> dict:
+    """Read-only raw->graded grading EV. Ledger-only: the raw comp, graded-sibling comp,
+    and gem rate all come from RECORDED rows — no live PriceCharting fetch, no PPT credit,
+    capped PAPER_BUY. Blocks (via ``grading_ev``) with named inputs when any is missing."""
+    asset = deps.assets.get(asset_key)
+    if asset is None:
+        return _asset_not_found(asset_key)
+    if str(asset.get("asset_class") or "").strip().lower() != "raw":
+        return _error(400, "grading-ev is a raw->graded read; asset is not raw",
+                      asset_key=asset_key)
+
+    observations = deps.read_observations()
+    raw_row = lab_mod.resolve_asset_comp_row(observations, asset_key, asset)
+    raw_comp = resale._amount((raw_row or {}).get("estimate")) if raw_row else None
+    # exact-identity graded sibling (0 credits) — the target grade + a downside sibling.
+    gcomp, tgrade, downside = edge_mod.graded_sibling_comp(asset, deps.assets, observations)
+    grader = _grader_from_grade_key(tgrade)
+
+    # gem rate: RECORDED rows only (read paths never fetch pop live). Keyed on the raw
+    # asset + the target grade's grader (grader-specific — PSA and CGC never combined).
+    gem_rows = deps.read_gem_rates() if deps.read_gem_rates else []
+    gem_row = gem_rates_mod.latest_for(gem_rows, asset_key, grader) if grader else None
+    gem = gem_row.get("gem_rate") if gem_row else None
+    gem_label = (gem_row.get("label") if gem_row else "") or ""
+
+    # verified entry (the only buy wire). Absent => grading_ev blocks on "no raw entry"
+    # (a gem rate / comp alone never yields a dollar buy — WATCH, not BUY).
+    asset_cand = deps.asset_candidate_for(asset_key, asset) if deps.asset_candidate_for else None
+    entry_price = resale._amount(asset_cand.get("verified_price")) if asset_cand else None
+
+    result = grading_ev_mod.grading_ev(
+        raw_entry=entry_price, raw_comp=raw_comp, graded_comp=gcomp,
+        grading_fee=deps.cfg.poke.grading_cost_all_in, gem_rate=gem,
+        fees=edge_mod._fee_model(deps.cfg), tax_rate=deps.cfg.tax_rate,
+        est_shipping=opp_mod._shipping_for(asset, deps.cfg), target_grade=tgrade,
+        downside_comp=downside, buy_floor_net=deps.cfg.buy_floor_net,
+        gem_rate_basis=gem_label,
+        grading_fee_basis=(f"PSA all-in ${deps.cfg.poke.grading_cost_all_in:.2f} "
+                           f"(config poke.grading_cost_all_in)"))
+    return _ok({
+        "asset_key": asset_key,
+        "name": asset.get("name") or asset_key,
+        "target_grade": tgrade,
+        "grader": grader,
+        "capped_at": "PAPER_BUY",          # grading EV is never LIVE (population proxy)
+        "grading_ev": result,
+        "gem_rate_provenance": _gem_rate_provenance(gem_row),
+        "inputs": {"raw_comp": raw_comp, "graded_comp": gcomp, "downside_comp": downside,
+                   "verified_entry": entry_price},
+        "credits_spent": 0,
+    })
+
+
 # ---------------------------------------------------------------- dispatch
 
 def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | None:
@@ -465,6 +566,8 @@ def handle_get(path: str, query: dict[str, str], deps: PokeApiDeps) -> dict | No
         return _edge_packets(deps)
     if segments == ["edge-summary"]:
         return _edge_summary(deps)
+    if len(segments) == 2 and segments[0] == "grading-ev":
+        return _asset_catalog_error(deps) or _grading_ev(deps, segments[1])
     if len(segments) == 2 and segments[0] == "edge-packets":
         return _edge_packet(deps, segments[1])
     if len(segments) == 2 and segments[0] == "opportunities":
