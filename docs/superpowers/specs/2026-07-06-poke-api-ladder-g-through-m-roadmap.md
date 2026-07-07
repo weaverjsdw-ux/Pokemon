@@ -116,6 +116,15 @@ options, in honesty order:
 3. **PSA cert API** — useful for cert *verification*, **not** pop; do not plan a pop feed on it.
 4. **Third-party keyed pop scrapers** — rejected (unofficial/unstable).
 
+**Naming what "sourced" verifies.** A sourced PriceCharting pop rate is a **transcription check +
+coverage gap-fill against the single PSA/CGC census** — PriceCharting does not run its own grading
+population survey; it transcribes PSA's and CGC's published counts onto its card pages. Treat it as
+confirming PriceCharting copied the census correctly (and filling coverage gaps where reaching PSA's
+or CGC's own pages directly is harder), **not** as independent corroboration of the population figure:
+there is exactly **one census** underneath, and PSA, CGC, GemRate, and PriceCharting all resell the
+same numbers. "Sourced" upgrades the rate from an operator guess to a dated, attributable transcription
+of the real census — it does not add a second, independent measurement of gem rarity.
+
 The [G-handoff notes](../../poke/phase-g-handoff-notes-2026-07-06.md) remain correct on the PSA-access
 research and the field list G consumes; only their "operator-assumption is the safe default because
 pop is unreachable" conclusion is updated by §3.3 — a sourced pop path is now reachable and preferred,
@@ -142,6 +151,11 @@ off the table for *every* phase. Two tiers of "do not build" run through this do
 
 - **Per-phase deferrals** (transient — *not now, its phase is later*): listed under each phase.
 - **Permanent Rejections** (identity-level — *never, unless the product identity changes*): §12.
+
+A per-phase list may also cross-reference a Permanent Rejection inline (tagged **Permanent
+Rejection**, §12) as a reminder in context — that reference does not create a third tier; the item
+is still filed at §12. Any phase whose Do-NOT-build list carries such a reminder is headed
+"(deferrals / rejections)" so the mix is visible at a glance, never silently blurred into "(deferrals)."
 
 ---
 
@@ -241,7 +255,7 @@ records/reports decisions; it does **not** re-architect E.
   verified entry stays WATCH / DATA_NEEDED and never reaches PAPER_BUY (defends the E invariant that
   a D-era WATCH-with-comp row is never promoted off a comp alone).
 
-**Do NOT build (deferrals).**
+**Do NOT build (deferrals / rejections).**
 - Auto-buy, carting, checkout, or login automation (**Permanent Rejection**, §12).
 - Fabricated / seeded candidates of any kind.
 - Live promotion without a verified entry (a verified entry is the *only* buy wire; unchanged).
@@ -331,7 +345,7 @@ turns that manual method into an assistant that *proposes*, gated by the same ex
 - **No automatic catalog write** unless the exact checks (redirect-confirmed slug, matching card
   number/identity) all pass **and** the operator accepts.
 
-**Do NOT build (deferrals).**
+**Do NOT build (deferrals / rejections).**
 - Fuzzy auto-write of catalog truth (**Permanent Rejection**, §12).
 - "Best match" acceptance, or any acceptance without exact confirmation.
 - Bulk uncontrolled import (breadth is **L**, and even L records comps independently per asset).
@@ -476,23 +490,50 @@ traces to an existing read endpoint with its existing provenance/label.
 ## 12. Permanent Rejections (identity-level — never, unless the product identity changes)
 
 These are **off the table for every phase G–M** (and beyond). They are not "later" — they are "not
-this program." Several are *advantages over PPT*, not gaps (the gap matrix rows 13–17).
+this program." Several are *advantages over PPT*, not gaps (the gap matrix rows 13–17). Each carries
+a named cost below — a "no" that costs nothing isn't a real decision.
 
 - **Auto-buy / cart / checkout / login automation.** The human transacts; the tool advises. No
   exceptions across H (verified entry is *operator-supplied evidence*, not automated purchasing).
+  **Cost:** every buy stays manual — no speed edge on fast-moving listings, ever.
 - **Fuzzy mapping that writes catalog truth.** Exact `tcgPlayerId` / redirect-confirmed slug only; a
   "best match" is never written (J proposes for review; it never auto-writes on similarity).
-- **Portfolio / wishlist app.** Not our identity (M is a read-only operator surface, not a portfolio).
-- **Public API polish / hosting.** Local-only, read-first, never hosted.
-- **TCGplayer live enablement as "independent" validation.** TCGplayer's market price == PPT to the
-  cent (PPT resells it); `_INDEPENDENT_OF_PPT = {pricecharting}` is structural. A tcgplayer comp is
-  **never** counted as independent cross-source validation.
+  **Cost:** exact-only mapping → slower catalog growth, every new asset waits on an exact-match
+  confirmation.
+- **Portfolio / wishlist app.** Not our identity (M is a read-only operator surface, not a portfolio
+  app). **Cost:** no consumer-facing product surface. This rejects the *app*, not the underlying money
+  question: the **inventory / cost-basis / P&L ledger** (real acquisitions, real sales, realized P&L)
+  is a legitimate, separate build — specified as T8 in the
+  [real-transacting spec](2026-07-06-poke-real-transacting-build-design.md) — and is **not** covered
+  by this rejection.
+- **Public API polish / hosting.** Local-only, read-first, never hosted. **Cost:** no-public-API →
+  single-operator; no external consumers, no third-party integration surface.
+- **TCGplayer live enablement — or TCGCSV, same lineage — as "independent" validation.** TCGplayer's
+  market price == PPT to the cent (PPT resells it), and **TCGCSV is TCGplayer's own bulk export** — the
+  same underlying number by a different pipe, not a second source. `_INDEPENDENT_OF_PPT =
+  {pricecharting}` is a **conservative default under asymmetric error cost**, not a proven structural
+  fact. Counting TCGplayer/TCGCSV as independent when it in fact mirrors PPT would be *false
+  corroboration* — truth-poisoning, the dangerous error, since a cross-source check would wrongly
+  report agreement. Treating it as non-independent when it might differ merely *forgoes a check* — a
+  safe, lost-opportunity error. This is also the one independence claim Phase F.1 could not re-probe
+  live (that needs Playwright, which is not installed; F.1 re-confirmed the Phase F conclusion rather
+  than re-verifying it) — so the conservative default is **protective, not proven**. Neither a
+  tcgplayer comp nor a TCGCSV-sourced price is **ever** counted as independent cross-source validation.
+  **Cost:** one fewer cross-source check on the F.1 asset set — a forgone check, not a coverage gap,
+  since PriceCharting independence already covers it.
 - **PPT-clone behavior.** No re-hosting PPT's product; the `/sealed-products` + `/cards` facades stay
-  local compat shims, never external provenance.
+  local compat shims, never external provenance. **Cost:** no drop-in PPT replacement for anyone who
+  wants PPT's UI/export surface.
 - **Ask-only comps.** An active ask is context, never sold-comp truth (`allow_ask_only=False`).
+  **Cost:** thin/illiquid cards with no recent sale stay WATCH/DATA_NEEDED even when an ask is the
+  only signal available.
 - **Fake / seeded verified entries.** No fabricated candidates; no PAPER_BUY/LIVE off a comp alone.
+  **Cost:** no way to bootstrap or demo the buy path without a genuine listing — every walkthrough
+  needs a real one.
 - **Read-path paid calls.** No read endpoint calls a billed provider; every read reports
   `apiCallsConsumed.total = 0`. Billable surfaces are explicit, operator-gated, and accounted (I).
+  **Cost:** reads can go stale between operator-triggered refreshes — no on-demand live re-price on
+  every page view.
 
 ## 13. Build order & sequencing rationale
 
@@ -532,8 +573,12 @@ every phase boundary before the next begins.
 - **PAPER_BUY vs LIVE ceiling.** `LIVE_PACKET_ELIGIBLE` is strictly stricter than PAPER_BUY and
   reachable only through the verified evidence spine. A gem-rate/EV number (sourced or assumed) caps at
   PAPER_BUY. A comp alone never promotes off WATCH.
-- **Independent-of-PPT is structural.** `_INDEPENDENT_OF_PPT = {pricecharting}`; a material *unexplained*
-  divergence fails the audit; we investigate divergence, we do not tune to PPT.
+- **Independent-of-PPT is a conservative default, not a structural fact.** `_INDEPENDENT_OF_PPT =
+  {pricecharting}` — TCGplayer, **including its TCGCSV bulk export (same lineage, not a second
+  source)**, is excluded under **asymmetric error cost** (§12): wrongly counting it independent risks
+  false corroboration (the dangerous error); wrongly excluding it only forgoes a check (the safe
+  error). A material *unexplained* divergence fails the audit; we investigate divergence, we do not
+  tune to PPT.
 - **Local `main`, never pushed** without explicit operator instruction. No dependency added without
   asking (G/H/I/J/K/L/M add **no** new runtime dependency — no Playwright, no paid API client).
 - **Every phase is TDD** with its own tests; the full network-mocked suite
