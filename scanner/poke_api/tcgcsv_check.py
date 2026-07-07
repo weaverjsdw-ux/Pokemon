@@ -127,7 +127,12 @@ def build_pairs(assets: dict[str, dict], observations: list[dict], groups: list[
         price_rows = prices_by_group[group_id]
 
         subtype = asset.get("tcgcsv_subtype")  # optional; absent -> None (never guess a printing)
-        tcgcsv_price = tcgcsv_mod.pick_market_price(int(tcgplayer_id), subtype, price_rows)
+        try:
+            tcgplayer_id_int = int(tcgplayer_id)
+        except ValueError:
+            skipped.append({"asset_key": asset_key, "reason": "non-numeric tcgplayer_id"})
+            continue
+        tcgcsv_price = tcgcsv_mod.pick_market_price(tcgplayer_id_int, subtype, price_rows)
         if tcgcsv_price is None:
             skipped.append({"asset_key": asset_key,
                             "reason": "no clean TCGCSV market price (missing/ambiguous/null)"})

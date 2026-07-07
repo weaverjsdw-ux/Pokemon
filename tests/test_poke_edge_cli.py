@@ -486,6 +486,31 @@ def test_tcgcsv_check_skips_graded_asset_never_compares_it(tmp_path, monkeypatch
     assert "n = 0" in text
 
 
+def test_tcgcsv_check_skips_non_numeric_tcgplayer_id_no_crash(tmp_path, monkeypatch):
+    # A catalog asset with a non-numeric tcgplayer_id (typo/bad merge) must not crash
+    # int(tcgplayer_id) inside build_pairs — it's an honest, named skip, never a
+    # traceback, matching how a missing group / unclean price is already skipped.
+    bad_asset = {"asset_class": "raw", "name": "Card Bad Id", "set": "Set Bad",
+                "condition": "NM", "tcgplayer_id": "abc"}
+    assets = {"card_bad": bad_asset}
+    observations = [_ppt_row(bad_asset, "card_bad", 100.0)]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups",
+                        lambda: [{"groupId": 1, "name": "Set Bad"}])
+    monkeypatch.setattr(
+        tcgcsv_mod, "fetch_prices",
+        lambda gid: [{"productId": 1, "subTypeName": "Holofoil", "marketPrice": 101.0}])
+    monkeypatch.setattr(edge_cli, "_docs_dir", lambda: tmp_path)
+
+    deps = _deps_tcgcsv(assets=assets, observations=observations, tcgcsv=True,
+                        today="2026-07-06")
+    rc = edge_cli.main(["tcgcsv-check"], deps=deps)
+    assert rc == 1                     # 0 pairs (skipped, not crashed) -> insufficient sample
+    text = (tmp_path / "tcgcsv-sample-check-2026-07-06.md").read_text(encoding="utf-8")
+    assert "n = 0" in text
+    assert "card_bad" in text
+    assert "non-numeric tcgplayer_id" in text
+
+
 # ------------------------------------------ tcgcsv-ingest (TCGCSV foundation T3)
 #
 # Identity ingest: EXACT tcgplayer_id mapping proposals for unmapped catalog assets in
@@ -519,6 +544,26 @@ def test_tcgcsv_ingest_unknown_group_refuses_no_product_fetch(capsys, monkeypatc
     rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
     assert rc == 2
     assert "no unambiguous TCGCSV group" in capsys.readouterr().out
+
+
+def test_tcgcsv_ingest_unknown_numeric_group_refuses_no_product_fetch(
+        capsys, tmp_path, monkeypatch):
+    # A numeric --group id that doesn't correspond to any real TCGCSV group must refuse
+    # the same way an unresolvable name does (rc 2, no product fetch, no proposals file)
+    # — not silently scan zero candidates and write an empty proposals file at rc 0.
+    def _boom(*_a, **_k):
+        raise AssertionError("must not fetch products for an unknown numeric group id")
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups",
+                        lambda: [{"groupId": 1, "name": "SV: Something Else"}])
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", _boom)
+    monkeypatch.setattr(edge_cli, "_proposals_dir", lambda: tmp_path)
+
+    deps = _deps_tcgcsv(assets={}, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "999999"], deps=deps)
+    assert rc == 2
+    assert "no unambiguous TCGCSV group" in capsys.readouterr().out
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_tcgcsv_ingest_writes_proposals_never_mutates_assets_yaml(tmp_path, monkeypatch):

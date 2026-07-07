@@ -870,7 +870,9 @@ def _cmd_tcgcsv_ingest(args, deps) -> int:
 
     groups = tcgcsv_mod.fetch_groups()
     if raw_group.isdigit():
-        group_id = int(raw_group)
+        candidate_id = int(raw_group)
+        known_ids = {g.get("groupId") for g in groups}
+        group_id = candidate_id if candidate_id in known_ids else None
     else:
         group_id = tcgcsv_check_mod.resolve_group_id(raw_group, groups)
     if group_id is None:
