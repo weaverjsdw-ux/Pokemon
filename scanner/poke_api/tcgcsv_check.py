@@ -11,7 +11,7 @@ Graded assets are honestly skipped, never compared.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 from . import history as history_mod
 from . import tcgcsv as tcgcsv_mod
@@ -99,8 +99,6 @@ def build_pairs(assets: dict[str, dict], observations: list[dict], groups: list[
     prices_by_group: dict[int, list[dict]] = {}
 
     for asset_key, asset in assets.items():
-        if str(asset.get("asset_class") or "").strip().lower() != "raw":
-            continue  # graded: no comparable TCGCSV (ungraded) price — not a gate input
         tcgplayer_id = str(asset.get("tcgplayer_id") or "").strip()
         if not tcgplayer_id:
             continue  # unmapped — nothing to compare
@@ -108,6 +106,15 @@ def build_pairs(assets: dict[str, dict], observations: list[dict], groups: list[
         ppt_price = _ppt_raw_price(observations, asset, asset_key)
         if ppt_price is None:
             continue  # no held ppt_cards reference for this asset — nothing to compare
+
+        # Only past this point has the asset actually got both a mapped id AND a held
+        # ppt reference — i.e. it would otherwise qualify. NOW the raw/graded scope
+        # exclusion is worth naming (never a silent continue for a near-miss).
+        if str(asset.get("asset_class") or "").strip().lower() != "raw":
+            skipped.append({"asset_key": asset_key,
+                            "reason": "graded asset — TCGCSV marketPrice is ungraded-only, "
+                                      "not comparable to a graded ppt_cards comp"})
+            continue
 
         group_id = resolve_group_id(asset.get("set", ""), groups)
         if group_id is None:

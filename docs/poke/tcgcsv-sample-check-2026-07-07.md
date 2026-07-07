@@ -27,7 +27,9 @@ insufficient sample: n=1 below minimum 5
 
 ## Skipped (honest, never guessed)
 
-_none_
+| asset_key | reason |
+|---|---|
+| umbreon_ex_161_psa10 | graded asset — TCGCSV marketPrice is ungraded-only, not comparable to a graded ppt_cards comp |
 
 ## Scope note
 
