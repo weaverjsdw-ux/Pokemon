@@ -371,3 +371,116 @@ def test_gem_rate_list_and_show_are_ledger_only(tmp_path, capsys):
     assert edge_cli.main(["gem-rate", "show", "--asset-key", "umb"], deps=deps) == 0
     out2 = capsys.readouterr().out
     assert "umb" in out2 and "other" not in out2
+
+
+# ------------------------------------------ tcgcsv-check (TCGCSV foundation T1)
+#
+# Sample-check gate: fixed >=5 raw pairs / <=2% max diff, gated on a dedicated
+# poke.tcgcsv flag (default off, separate from poke.independent_sources), 0 PPT credits
+# (only ever reads already-recorded ppt_cards rows + a free/keyless TCGCSV fetch).
+
+from scanner.poke_api import history as history_mod
+from scanner.poke_api import tcgcsv as tcgcsv_mod
+
+
+def _tcgcsv_cfg(*, tcgcsv):
+    return cfg_mod.from_mapping({
+        "locations": {"home": "A", "work": "B"},
+        "poke": {"tcgcsv": tcgcsv},
+    })
+
+
+def _deps_tcgcsv(*, assets, observations, tcgcsv, today="2026-07-06"):
+    return router.PokeApiDeps(
+        products={}, assets=assets, read_observations=lambda: observations,
+        comp_provider=FakeProvider({}), today=today, cfg=_tcgcsv_cfg(tcgcsv=tcgcsv))
+
+
+def test_tcgcsv_check_refuses_when_gate_off_no_network(tmp_path, monkeypatch, capsys):
+    def _boom(*_a, **_k):
+        raise AssertionError("tcgcsv-check must not touch the network when the gate is off")
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", _boom)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_prices", _boom)
+
+    deps = _deps_tcgcsv(assets={}, observations=[], tcgcsv=False)
+    rc = edge_cli.main(["tcgcsv-check"], deps=deps)
+    assert rc == 2
+    assert "poke.tcgcsv" in capsys.readouterr().out
+
+
+def _raw_asset(i):
+    return {"asset_class": "raw", "name": f"Card {i}", "set": f"Set {i}",
+            "condition": "NM", "tcgplayer_id": str(i)}
+
+
+def _ppt_row(asset, asset_key, price):
+    return {"item_key": history_mod.item_key_for_asset(asset, asset_key),
+            "kind": "market_comp", "source": "ppt_cards", "comp": price,
+            "capture_date": "2026-07-05"}
+
+
+def test_tcgcsv_check_passes_with_five_raw_pairs_and_writes_doc(tmp_path, monkeypatch):
+    assets = {f"card{i}": _raw_asset(i) for i in range(1, 6)}
+    observations = [_ppt_row(a, key, 100.0) for key, a in assets.items()]
+    groups = [{"groupId": i, "name": f"Set {i}"} for i in range(1, 6)]
+    prices_by_group = {i: [{"productId": i, "subTypeName": "Holofoil", "marketPrice": 101.0}]
+                       for i in range(1, 6)}
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_prices", lambda gid: prices_by_group[gid])
+    monkeypatch.setattr(edge_cli, "_docs_dir", lambda: tmp_path)
+
+    deps = _deps_tcgcsv(assets=assets, observations=observations, tcgcsv=True,
+                        today="2026-07-06")
+    rc = edge_cli.main(["tcgcsv-check"], deps=deps)
+    assert rc == 0
+
+    doc_path = tmp_path / "tcgcsv-sample-check-2026-07-06.md"
+    assert doc_path.exists()
+    text = doc_path.read_text(encoding="utf-8")
+    assert "PASS" in text
+    assert "card1" in text
+
+
+def test_tcgcsv_check_fails_below_minimum_sample(tmp_path, monkeypatch):
+    # Only 2 eligible raw pairs (below the fixed min_n=5) -> honest fail, never a guess.
+    assets = {f"card{i}": _raw_asset(i) for i in range(1, 3)}
+    observations = [_ppt_row(a, key, 100.0) for key, a in assets.items()]
+    groups = [{"groupId": i, "name": f"Set {i}"} for i in range(1, 3)]
+    prices_by_group = {i: [{"productId": i, "subTypeName": "Holofoil", "marketPrice": 100.0}]
+                       for i in range(1, 3)}
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_prices", lambda gid: prices_by_group[gid])
+    monkeypatch.setattr(edge_cli, "_docs_dir", lambda: tmp_path)
+
+    deps = _deps_tcgcsv(assets=assets, observations=observations, tcgcsv=True,
+                        today="2026-07-06")
+    rc = edge_cli.main(["tcgcsv-check"], deps=deps)
+    assert rc == 1
+    text = (tmp_path / "tcgcsv-sample-check-2026-07-06.md").read_text(encoding="utf-8")
+    assert "FAIL" in text and "insufficient sample" in text
+
+
+def test_tcgcsv_check_skips_graded_asset_never_compares_it(tmp_path, monkeypatch):
+    # A graded asset's ppt_cards comp is a different quantity (slab price) than TCGCSV's
+    # ungraded marketPrice — it must be skipped, never turned into a misleading pair.
+    graded = {"asset_class": "graded", "name": "Card 1", "set": "Set 1",
+              "grader": "PSA", "grade": "10", "tcgplayer_id": "1"}
+    assets = {"card1_psa10": graded}
+    observations = [_ppt_row(graded, "card1_psa10", 5000.0)]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups",
+                        lambda: [{"groupId": 1, "name": "Set 1"}])
+    monkeypatch.setattr(
+        tcgcsv_mod, "fetch_prices",
+        lambda gid: (_ for _ in ()).throw(
+            AssertionError("must never fetch prices for a graded-only asset set")))
+    monkeypatch.setattr(edge_cli, "_docs_dir", lambda: tmp_path)
+
+    deps = _deps_tcgcsv(assets=assets, observations=observations, tcgcsv=True,
+                        today="2026-07-06")
+    rc = edge_cli.main(["tcgcsv-check"], deps=deps)
+    assert rc == 1                     # 0 pairs -> insufficient sample, honest fail
+    text = (tmp_path / "tcgcsv-sample-check-2026-07-06.md").read_text(encoding="utf-8")
+    assert "n = 0" in text

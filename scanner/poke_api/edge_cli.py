@@ -27,6 +27,8 @@ from . import edge as edge_mod
 from . import gem_rates as gem_rates_mod
 from . import paper_ledger as ledger_mod
 from . import sources as sources_mod
+from . import tcgcsv as tcgcsv_mod
+from . import tcgcsv_check as tcgcsv_check_mod
 
 
 def _packets(deps):
@@ -202,6 +204,15 @@ def _build_argparser():
                            help="recorded gem-rate rows for one asset (ledger-only, 0 network)")
     grs.add_argument("--asset-key", required=True)
     grs.add_argument("--json", action="store_true")
+
+    # TCGCSV foundation T1: sample-check gate. Earns the "TCGplayer market == PPT"
+    # credit-saving claim at real n BEFORE TCGCSV is trusted as a reference source.
+    # Free/keyless (0 credits) but gated on a dedicated poke.tcgcsv flag (default off).
+    ptc = sub.add_parser(
+        "tcgcsv-check",
+        help="TCGCSV-vs-PPT sample-check gate (fixed >=5 raw pairs / <=2%%; 0 credits; "
+             "gated on poke.tcgcsv)")
+    ptc.add_argument("--json", action="store_true")
     return p
 
 
@@ -671,6 +682,114 @@ def _cmd_gem_rate(args, deps) -> int:
     return 1
 
 
+# ---------------------------------------------------------------- TCGCSV sample-check (T1)
+
+def _docs_dir():
+    """``docs/poke`` under the repo root. A function (not a module constant) so tests can
+    monkeypatch it to a tmp dir — the CLI must never write into the real committed docs
+    tree as a side effect of a test run."""
+    from .. import config as config_mod
+    return config_mod.ROOT / "docs" / "poke"
+
+
+def _print_tcgcsv_check(result: dict, skipped: list[dict]) -> None:
+    print(f"tcgcsv-check [{result['status'].upper()}] - {result['reason']}\n")
+    for p in result["pairs"]:
+        print(f"  {p['asset_key']:<28} ppt=${p['ppt_price']:.2f} "
+              f"tcgcsv=${p['tcgcsv_price']:.2f}  diff={p['diff_pct']:.2f}%")
+    if skipped:
+        print("\n  skipped (honest, never guessed):")
+        for s in skipped:
+            print(f"    {s['asset_key']:<28} {s['reason']}")
+    print(f"\n  result: {result['status']}  n={result['n']}  credits_spent=0")
+
+
+def _write_tcgcsv_check_doc(result: dict, skipped: list[dict], capture_date: str,
+                            docs_dir) -> "Path":
+    from pathlib import Path
+
+    docs_dir = Path(docs_dir)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    path = docs_dir / f"tcgcsv-sample-check-{capture_date}.md"
+
+    max_diff = result.get("max_diff_pct")
+    max_diff_line = f"- max diff = {max_diff:.2f}%" if max_diff is not None \
+        else "- max diff = n/a (no pairs)"
+    lines = [
+        f"# TCGCSV Sample-Check Result — {capture_date}",
+        "",
+        f"**Status:** {result['status'].upper()}",
+        "**Gate:** fixed >= 5 raw pairs, <= 2% max diff (spec T1, not per-run tunable)",
+        "**Credits:** 0 PPT (reads only already-recorded `ppt_cards` rows; TCGCSV is "
+        "free/keyless)",
+        "",
+        "## Verdict",
+        "",
+        result["reason"],
+        "",
+        f"- n = {result['n']}",
+        max_diff_line,
+        "",
+        "## Pairs compared",
+        "",
+    ]
+    if result["pairs"]:
+        lines += ["| asset_key | tcgplayer_id | ppt_price | tcgcsv_price | diff_pct |",
+                  "|---|---|---:|---:|---:|"]
+        for p in result["pairs"]:
+            lines.append(f"| {p['asset_key']} | {p['tcgplayer_id']} | "
+                        f"${p['ppt_price']:.2f} | ${p['tcgcsv_price']:.2f} | "
+                        f"{p['diff_pct']:.2f}% |")
+    else:
+        lines.append("_none_")
+    lines += ["", "## Skipped (honest, never guessed)", ""]
+    if skipped:
+        lines += ["| asset_key | reason |", "|---|---|"]
+        for s in skipped:
+            lines.append(f"| {s['asset_key']} | {s['reason']} |")
+    else:
+        lines.append("_none_")
+    lines += [
+        "",
+        "## Scope note",
+        "",
+        "Only **raw** assets are eligible for a pair. TCGCSV `marketPrice` is an "
+        "ungraded-card price with no graded-slab (PSA/CGC) counterpart in the catalog — "
+        "comparing a graded asset's `ppt_cards` comp (a different quantity, e.g. a PSA10 "
+        "smart price) against it would fail on tolerance for a reason that has nothing to "
+        "do with TCGCSV-vs-PPT agreement. Graded assets are honestly skipped, never "
+        "compared.",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _cmd_tcgcsv_check(args, deps) -> int:
+    """TCGCSV-vs-PPT sample-check gate (spec T1). Refuses (no network call) unless
+    ``poke.tcgcsv`` is true. Compares held ``ppt_cards`` raw comps against a live TCGCSV
+    market price for the same exact identity; writes the committed result doc (the
+    ledger is gitignored, so the doc is the durable proof)."""
+    if not tcgcsv_mod.tcgcsv_enabled(deps.cfg):
+        print("refused: TCGCSV live fetch is off (set poke.tcgcsv: true)")
+        return 2
+
+    assets = getattr(deps, "assets", None) or {}
+    observations = deps.read_observations() if getattr(deps, "read_observations", None) else []
+    groups = tcgcsv_mod.fetch_groups()
+    pairs, skipped = tcgcsv_check_mod.build_pairs(assets, observations, groups)
+    result = tcgcsv_check_mod.sample_check(pairs)
+
+    doc_path = _write_tcgcsv_check_doc(result, skipped, deps.today, _docs_dir())
+
+    if getattr(args, "json", False):
+        print(json.dumps({**result, "skipped": skipped, "doc_path": str(doc_path)}, indent=2))
+    else:
+        _print_tcgcsv_check(result, skipped)
+        print(f"  wrote {doc_path}")
+    return 0 if result["status"] == "pass" else 1
+
+
 def main(argv=None, *, deps=None) -> int:
     args = _build_argparser().parse_args(argv)
     if deps is None:                       # lazy import avoids an import cycle with router
@@ -694,6 +813,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_record_asset_comps(args, deps)
     if args.cmd == "gem-rate":
         return _cmd_gem_rate(args, deps)
+    if args.cmd == "tcgcsv-check":
+        return _cmd_tcgcsv_check(args, deps)
     return 0
 
 

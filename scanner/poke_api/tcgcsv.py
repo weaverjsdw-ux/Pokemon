@@ -61,6 +61,14 @@ def card_number_of(product: dict) -> str | None:
     return None
 
 
+def tcgcsv_enabled(cfg) -> bool:
+    """The ``poke.tcgcsv`` gate (default False). Kept separate from
+    ``poke.independent_sources`` (spec: a dedicated flag) — purely a 'live TCGCSV
+    network is allowed on the CLI path' switch. TCGCSV is free/keyless (0 credits);
+    the gate exists to keep it off by default, not because it costs anything."""
+    return bool(getattr(getattr(cfg, "poke", None), "tcgcsv", False))
+
+
 def pick_market_price(product_id: int, subtype: str | None,
                       price_rows: list[dict]) -> float | None:
     """Exact-subtype marketPrice for a product, or None (never guess).
