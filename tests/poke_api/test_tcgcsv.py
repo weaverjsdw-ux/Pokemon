@@ -63,3 +63,23 @@ def test_fetch_groups_degrades_on_network_error():
     import requests as _rq
     with patch("scanner.poke_api.tcgcsv.requests.get", side_effect=_rq.RequestException):
         assert tcgcsv.fetch_groups() == []
+
+
+def test_fetch_degrades_on_json_parse_failure():
+    # 200 status but body is not JSON -> _Resp.json() raises ValueError -> honest []
+    with patch("scanner.poke_api.tcgcsv.requests.get", return_value=_Resp(200, None)):
+        assert tcgcsv.fetch_groups() == []
+        assert tcgcsv.fetch_products(3170) == []
+        assert tcgcsv.fetch_prices(3170) == []
+
+
+def test_pick_market_price_no_matching_row_returns_none():
+    rows = [{"productId": 1, "subTypeName": "Holofoil", "marketPrice": 5.0}]
+    assert tcgcsv.pick_market_price(999, None, rows) is None
+
+
+def test_pick_market_price_nonpositive_returns_none():
+    zero = [{"productId": 5, "subTypeName": "Holofoil", "marketPrice": 0}]
+    neg = [{"productId": 5, "subTypeName": "Holofoil", "marketPrice": -5}]
+    assert tcgcsv.pick_market_price(5, "Holofoil", zero) is None
+    assert tcgcsv.pick_market_price(5, "Holofoil", neg) is None
