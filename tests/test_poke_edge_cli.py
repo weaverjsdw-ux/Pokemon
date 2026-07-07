@@ -484,3 +484,147 @@ def test_tcgcsv_check_skips_graded_asset_never_compares_it(tmp_path, monkeypatch
     assert rc == 1                     # 0 pairs -> insufficient sample, honest fail
     text = (tmp_path / "tcgcsv-sample-check-2026-07-06.md").read_text(encoding="utf-8")
     assert "n = 0" in text
+
+
+# ------------------------------------------ tcgcsv-ingest (TCGCSV foundation T3)
+#
+# Identity ingest: EXACT tcgplayer_id mapping proposals for unmapped catalog assets in
+# one TCGCSV set/group. Same poke.tcgcsv gate as tcgcsv-check. Writes a REVIEW artifact
+# (data/poke/tcgcsv-proposals-<group>.json) — the catalog (assets.yaml) must NEVER be
+# touched (exact identity stays human-confirmed; a non-exact candidate is 'none',
+# surfaced for review, never auto-accepted).
+
+def test_tcgcsv_ingest_refuses_when_gate_off_no_network(capsys, monkeypatch):
+    def _boom(*_a, **_k):
+        raise AssertionError("tcgcsv-ingest must not touch the network when the gate is off")
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", _boom)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", _boom)
+
+    deps = _deps_tcgcsv(assets={}, observations=[], tcgcsv=False)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
+    assert rc == 2
+    assert "poke.tcgcsv" in capsys.readouterr().out
+
+
+def test_tcgcsv_ingest_unknown_group_refuses_no_product_fetch(capsys, monkeypatch):
+    def _boom(*_a, **_k):
+        raise AssertionError("must not fetch products when the group can't be resolved")
+
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups",
+                        lambda: [{"groupId": 1, "name": "SV: Something Else"}])
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", _boom)
+
+    deps = _deps_tcgcsv(assets={}, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
+    assert rc == 2
+    assert "no unambiguous TCGCSV group" in capsys.readouterr().out
+
+
+def test_tcgcsv_ingest_writes_proposals_never_mutates_assets_yaml(tmp_path, monkeypatch):
+    from scanner.poke_api import catalog as catalog_mod
+
+    assets_yaml = tmp_path / "assets.yaml"
+    assets_yaml.write_text(
+        "umbreon_ex_161:\n"
+        "  asset_class: raw\n"
+        "  name: Umbreon ex\n"
+        "  set: Prismatic Evolutions\n"
+        "  condition: NM\n"
+        "  card_number: \"161/131\"\n",
+        encoding="utf-8")
+    before_bytes = assets_yaml.read_bytes()
+    before_mtime = assets_yaml.stat().st_mtime_ns
+
+    assets = catalog_mod.load_assets(assets_yaml)
+
+    groups = [{"groupId": 23821, "name": "SV: Prismatic Evolutions"}]
+    products = [{"productId": 999111, "name": "Umbreon ex",
+                "extendedData": [{"name": "Number", "value": "161/131"}]}]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", lambda gid: products)
+    out_dir = tmp_path / "data_poke"
+    monkeypatch.setattr(edge_cli, "_proposals_dir", lambda: out_dir)
+
+    deps = _deps_tcgcsv(assets=assets, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
+    assert rc == 0
+
+    proposals_path = out_dir / "tcgcsv-proposals-prismatic_evolutions.json"
+    assert proposals_path.exists()
+    data = json.loads(proposals_path.read_text(encoding="utf-8"))
+    assert data["proposals"][0]["match"] == "exact"
+    assert data["proposals"][0]["tcgplayer_id"] == 999111
+    assert data["proposals"][0]["asset_key"] == "umbreon_ex_161"
+
+    # STOP-class: exact identity stays human-confirmed — assets.yaml must be untouched,
+    # byte-for-byte and mtime-for-mtime, by a proposals-only ingest run.
+    assert assets_yaml.read_bytes() == before_bytes
+    assert assets_yaml.stat().st_mtime_ns == before_mtime
+
+
+def test_tcgcsv_ingest_skips_mapped_and_other_set_assets_no_product_fetch(tmp_path, monkeypatch):
+    def _boom(*_a, **_k):
+        raise AssertionError("must not fetch products when there are no candidate assets")
+
+    groups = [{"groupId": 1, "name": "SV: Prismatic Evolutions"}]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", _boom)
+    monkeypatch.setattr(edge_cli, "_proposals_dir", lambda: tmp_path)
+
+    assets = {
+        "already_mapped": {"asset_class": "raw", "name": "Umbreon ex",
+                           "set": "Prismatic Evolutions", "condition": "NM",
+                           "card_number": "161/131", "tcgplayer_id": "111"},
+        "other_set": {"asset_class": "raw", "name": "Other Card",
+                     "set": "Some Other Set", "condition": "NM", "card_number": "1/100"},
+    }
+    deps = _deps_tcgcsv(assets=assets, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
+    assert rc == 0
+    data = json.loads(
+        (tmp_path / "tcgcsv-proposals-prismatic_evolutions.json").read_text(encoding="utf-8"))
+    assert data["proposals"] == []
+
+
+def test_tcgcsv_ingest_accepts_numeric_group_id(tmp_path, monkeypatch):
+    groups = [{"groupId": 23821, "name": "SV: Prismatic Evolutions"}]
+    products = [{"productId": 999111, "name": "Umbreon ex",
+                "extendedData": [{"name": "Number", "value": "161/131"}]}]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", lambda gid: products)
+    monkeypatch.setattr(edge_cli, "_proposals_dir", lambda: tmp_path)
+
+    assets = {"umbreon_ex_161": {"asset_class": "raw", "name": "Umbreon ex",
+                                 "set": "Prismatic Evolutions", "condition": "NM",
+                                 "card_number": "161/131"}}
+    deps = _deps_tcgcsv(assets=assets, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "23821"], deps=deps)
+    assert rc == 0
+    data = json.loads(
+        (tmp_path / "tcgcsv-proposals-23821.json").read_text(encoding="utf-8"))
+    assert data["group_id"] == 23821
+    assert data["proposals"][0]["match"] == "exact"
+
+
+def test_tcgcsv_ingest_non_exact_candidate_never_guessed(tmp_path, monkeypatch):
+    # A number match with a different printing name must surface as 'none', never a
+    # guessed tcgplayer_id — the STOP-class exact-identity guarantee, exercised at the
+    # CLI layer (not just the pure propose_mappings unit tests).
+    groups = [{"groupId": 1, "name": "SV: Prismatic Evolutions"}]
+    products = [{"productId": 999111, "name": "Umbreon ex (Alt Art)",
+                "extendedData": [{"name": "Number", "value": "161/131"}]}]
+    monkeypatch.setattr(tcgcsv_mod, "fetch_groups", lambda: groups)
+    monkeypatch.setattr(tcgcsv_mod, "fetch_products", lambda gid: products)
+    monkeypatch.setattr(edge_cli, "_proposals_dir", lambda: tmp_path)
+
+    assets = {"umbreon_ex_161": {"asset_class": "raw", "name": "Umbreon ex",
+                                 "set": "Prismatic Evolutions", "condition": "NM",
+                                 "card_number": "161/131"}}
+    deps = _deps_tcgcsv(assets=assets, observations=[], tcgcsv=True)
+    rc = edge_cli.main(["tcgcsv-ingest", "--group", "Prismatic Evolutions"], deps=deps)
+    assert rc == 0
+    data = json.loads(
+        (tmp_path / "tcgcsv-proposals-prismatic_evolutions.json").read_text(encoding="utf-8"))
+    assert data["proposals"][0]["match"] == "none"
+    assert data["proposals"][0]["tcgplayer_id"] is None

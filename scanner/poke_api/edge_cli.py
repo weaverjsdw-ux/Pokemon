@@ -29,6 +29,7 @@ from . import paper_ledger as ledger_mod
 from . import sources as sources_mod
 from . import tcgcsv as tcgcsv_mod
 from . import tcgcsv_check as tcgcsv_check_mod
+from . import tcgcsv_ingest as tcgcsv_ingest_mod
 
 
 def _packets(deps):
@@ -213,6 +214,19 @@ def _build_argparser():
         help="TCGCSV-vs-PPT sample-check gate (fixed >=5 raw pairs / <=2%%; 0 credits; "
              "gated on poke.tcgcsv)")
     ptc.add_argument("--json", action="store_true")
+
+    # TCGCSV foundation T3: identity ingest — EXACT mapping proposals only, never
+    # writes assets.yaml (exact identity stays human-confirmed). Free/keyless (0
+    # credits) but gated on the same poke.tcgcsv flag as tcgcsv-check.
+    pti = sub.add_parser(
+        "tcgcsv-ingest",
+        help="TCGCSV exact-identity mapping proposals for unmapped catalog assets in "
+             "a set (writes a REVIEW artifact only, never assets.yaml; 0 credits; "
+             "gated on poke.tcgcsv)")
+    pti.add_argument("--group", required=True,
+                     help="TCGCSV set name (catalog-native, e.g. 'Prismatic Evolutions') "
+                          "or a numeric TCGCSV groupId")
+    pti.add_argument("--json", action="store_true")
     return p
 
 
@@ -790,6 +804,102 @@ def _cmd_tcgcsv_check(args, deps) -> int:
     return 0 if result["status"] == "pass" else 1
 
 
+# ---------------------------------------------------------------- TCGCSV identity ingest (T3)
+
+def _proposals_dir():
+    """``data/poke`` under the repo root. A function (not a module constant) so tests
+    can monkeypatch it to a tmp dir — the CLI must never write into the real
+    committed data tree as a side effect of a test run. This is a REVIEW artifact
+    directory, never the ``assets.yaml`` catalog itself."""
+    from .. import config as config_mod
+    return config_mod.ROOT / "data" / "poke"
+
+
+def _slug(text: str) -> str:
+    """A filesystem-safe slug for the proposals artifact filename, e.g.
+    'SV: Prismatic Evolutions' / '23821' -> 'sv_prismatic_evolutions' / '23821'."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower()).strip("_")
+    return slug or "group"
+
+
+def _write_tcgcsv_proposals(proposals: list[dict], raw_group: str, group_id: int,
+                            data_dir) -> "Path":
+    from pathlib import Path
+
+    data_dir = Path(data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = data_dir / f"tcgcsv-proposals-{_slug(raw_group)}.json"
+    path.write_text(json.dumps({"group": raw_group, "group_id": group_id,
+                                "proposals": proposals}, indent=2), encoding="utf-8")
+    return path
+
+
+def _print_tcgcsv_ingest(proposals: list[dict], raw_group: str, group_id: int, path) -> None:
+    exact = [p for p in proposals if p["match"] == "exact"]
+    none_ = [p for p in proposals if p["match"] != "exact"]
+    print(f"tcgcsv-ingest [{raw_group}] group_id={group_id} - {len(proposals)} candidate(s), "
+          f"0 credits\n")
+    for p in exact:
+        print(f"  [ACCEPT?] {p['asset_key']:<28} -> tcgplayer_id={p['tcgplayer_id']} "
+              f"({p['product_name']!r}, card_number={p['card_number']})")
+    for p in none_:
+        print(f"  [REJECT ] {p['asset_key']:<28} -> no exact match "
+              f"(card_number={p['card_number']!r}) — never guessed")
+    print(f"\n  result: {len(exact)} exact / {len(none_)} none — proposals only, "
+          f"assets.yaml NOT modified; review + hand-confirm at {path}")
+
+
+def _cmd_tcgcsv_ingest(args, deps) -> int:
+    """TCGCSV identity ingest (spec T3): EXACT tcgplayer_id mapping proposals for the
+    unmapped catalog assets in one set. Refuses (no network) unless ``poke.tcgcsv``
+    is true. ``--group`` accepts a catalog-native set name or a numeric TCGCSV
+    groupId; a name/id that doesn't resolve to exactly one TCGCSV group is a clean
+    refusal with no product fetch. Writes a REVIEW artifact under
+    ``data/poke/tcgcsv-proposals-<group>.json`` — NEVER assets.yaml; exact identity
+    stays human-confirmed (a non-exact candidate is surfaced as 'none', never
+    auto-accepted)."""
+    if not tcgcsv_mod.tcgcsv_enabled(deps.cfg):
+        print("refused: TCGCSV live fetch is off (set poke.tcgcsv: true)")
+        return 2
+
+    raw_group = str(args.group or "").strip()
+    if not raw_group:
+        print("tcgcsv-ingest needs --group <set name or numeric groupId>")
+        return 1
+
+    groups = tcgcsv_mod.fetch_groups()
+    if raw_group.isdigit():
+        group_id = int(raw_group)
+    else:
+        group_id = tcgcsv_check_mod.resolve_group_id(raw_group, groups)
+    if group_id is None:
+        print(f"refused: no unambiguous TCGCSV group for {raw_group!r} — no products fetched")
+        return 2
+
+    assets = getattr(deps, "assets", None) or {}
+    candidates = []
+    for asset_key, asset in assets.items():
+        if str(asset.get("tcgplayer_id") or "").strip():
+            continue  # already mapped — not up for ingest proposal
+        if tcgcsv_check_mod.resolve_group_id(asset.get("set", ""), groups) != group_id:
+            continue  # different (or unresolvable) set — out of scope for this group
+        candidates.append({**asset, "asset_key": asset_key})
+
+    proposals = (tcgcsv_ingest_mod.propose_mappings(tcgcsv_mod.fetch_products(group_id),
+                                                     candidates)
+                 if candidates else [])
+
+    path = _write_tcgcsv_proposals(proposals, raw_group, group_id, _proposals_dir())
+
+    if getattr(args, "json", False):
+        print(json.dumps({"group": raw_group, "group_id": group_id,
+                          "proposals": proposals, "path": str(path)}, indent=2))
+    else:
+        _print_tcgcsv_ingest(proposals, raw_group, group_id, path)
+    return 0
+
+
 def main(argv=None, *, deps=None) -> int:
     args = _build_argparser().parse_args(argv)
     if deps is None:                       # lazy import avoids an import cycle with router
@@ -815,6 +925,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_gem_rate(args, deps)
     if args.cmd == "tcgcsv-check":
         return _cmd_tcgcsv_check(args, deps)
+    if args.cmd == "tcgcsv-ingest":
+        return _cmd_tcgcsv_ingest(args, deps)
     return 0
 
 
