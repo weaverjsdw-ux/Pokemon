@@ -411,7 +411,7 @@ def test_tcgcsv_check_refuses_when_gate_off_no_network(tmp_path, monkeypatch, ca
 
 def _raw_asset(i):
     return {"asset_class": "raw", "name": f"Card {i}", "set": f"Set {i}",
-            "condition": "NM", "tcgplayer_id": str(i)}
+            "condition": "NM", "tcgplayer_id": str(i), "tcgcsv_group_id": i}
 
 
 def _ppt_row(asset, asset_key, price):
@@ -491,7 +491,7 @@ def test_tcgcsv_check_skips_non_numeric_tcgplayer_id_no_crash(tmp_path, monkeypa
     # int(tcgplayer_id) inside build_pairs — it's an honest, named skip, never a
     # traceback, matching how a missing group / unclean price is already skipped.
     bad_asset = {"asset_class": "raw", "name": "Card Bad Id", "set": "Set Bad",
-                "condition": "NM", "tcgplayer_id": "abc"}
+                "condition": "NM", "tcgplayer_id": "abc", "tcgcsv_group_id": 1}
     assets = {"card_bad": bad_asset}
     observations = [_ppt_row(bad_asset, "card_bad", 100.0)]
     monkeypatch.setattr(tcgcsv_mod, "fetch_groups",

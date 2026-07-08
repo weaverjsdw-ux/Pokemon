@@ -889,7 +889,7 @@ def _cmd_tcgcsv_ingest(args, deps) -> int:
         candidates.append({**asset, "asset_key": asset_key})
 
     proposals = (tcgcsv_ingest_mod.propose_mappings(tcgcsv_mod.fetch_products(group_id),
-                                                     candidates)
+                                                     candidates, group_id=group_id)
                  if candidates else [])
 
     path = _write_tcgcsv_proposals(proposals, raw_group, group_id, _proposals_dir())

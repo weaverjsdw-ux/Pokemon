@@ -13,7 +13,7 @@ def _norm(s) -> str:
     return " ".join(str(s or "").strip().lower().split())
 
 
-def propose_mappings(products: list[dict], assets: list[dict]) -> list[dict]:
+def propose_mappings(products: list[dict], assets: list[dict], *, group_id=None) -> list[dict]:
     by_number: dict[str, list[dict]] = {}
     for p in products:
         num = card_number_of(p)
@@ -29,7 +29,8 @@ def propose_mappings(products: list[dict], assets: list[dict]) -> list[dict]:
             out.append({"asset_key": asset.get("asset_key"),
                         "tcgplayer_id": exact[0].get("productId"),
                         "card_number": want_num,
-                        "product_name": exact[0].get("name"), "match": "exact"})
+                        "product_name": exact[0].get("name"), "match": "exact",
+                        "tcgcsv_group_id": group_id})
         else:
             out.append({"asset_key": asset.get("asset_key"), "tcgplayer_id": None,
                         "card_number": want_num, "product_name": None, "match": "none"})

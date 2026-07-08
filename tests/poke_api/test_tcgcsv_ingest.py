@@ -72,3 +72,12 @@ def test_multiple_assets_independent_results_preserve_order():
     assert [o["asset_key"] for o in out] == ["a_match", "b_no_match"]
     assert out[0]["match"] == "exact"
     assert out[1]["match"] == "none"
+
+
+def test_proposal_carries_group_id():
+    products = [{"productId": 111, "name": "Umbreon ex",
+                 "extendedData": [{"name": "Number", "value": "161/131"}]}]
+    assets = [{"asset_key": "umbreon_ex_161", "name": "Umbreon ex", "card_number": "161/131"}]
+    out = tcgcsv_ingest.propose_mappings(products, assets, group_id=23821)
+    assert out[0]["match"] == "exact"
+    assert out[0]["tcgcsv_group_id"] == 23821

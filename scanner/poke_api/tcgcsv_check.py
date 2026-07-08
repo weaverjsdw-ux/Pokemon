@@ -116,10 +116,17 @@ def build_pairs(assets: dict[str, dict], observations: list[dict], groups: list[
                                       "not comparable to a graded ppt_cards comp"})
             continue
 
-        group_id = resolve_group_id(asset.get("set", ""), groups)
-        if group_id is None:
+        # groups no longer used for asset->group (exact tcgcsv_group_id); kept for signature stability
+        raw_group_id = str(asset.get("tcgcsv_group_id") or "").strip()
+        if not raw_group_id:
             skipped.append({"asset_key": asset_key,
-                            "reason": f"no unambiguous TCGCSV group for set {asset.get('set')!r}"})
+                            "reason": "no tcgcsv_group_id mapped (exact-id only; set-name "
+                                      "matching retired)"})
+            continue
+        try:
+            group_id = int(raw_group_id)
+        except ValueError:
+            skipped.append({"asset_key": asset_key, "reason": "non-numeric tcgcsv_group_id"})
             continue
 
         if group_id not in prices_by_group:
