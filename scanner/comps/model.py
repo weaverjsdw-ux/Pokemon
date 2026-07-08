@@ -148,8 +148,8 @@ def _exact_source_url(n: NormalizedComp) -> str:
     for quote in n.sources:
         if quote.status != "ok":
             continue
-        if quote.source == "tcgplayer" and quote.url:
-            return quote.url                       # always a product page by construction
+        if quote.source in ("tcgplayer", "tcgcsv") and quote.url:
+            return quote.url                       # product page (tcgplayer) / prices endpoint (tcgcsv)
         if quote.source == "pricecharting" and quote.url.startswith(_EXACT_PC_PREFIX):
             return quote.url
     return ""

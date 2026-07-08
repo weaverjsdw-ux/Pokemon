@@ -1,5 +1,6 @@
 """Confidence resolution matrix - spec 4.3, exhaustive per tier + edges."""
 from scanner.comps import model
+from scanner.comps import model as m
 
 
 def q(source, price, kind=model.SOLD_DERIVED, status="ok", url="", sample_size=None):
@@ -146,3 +147,12 @@ def test_legacy_row_carries_annotate_quote_keys():
                 "needsVerification", "asterisk", "compBasis", "ebayFloor",
                 "ebayActiveCount", "sources"):
         assert key in row, key
+
+
+def test_exact_source_url_accepts_tcgcsv():
+    q = m.CompSourceQuote("tcgcsv", m.SOLD_DERIVED, "ok", 1528.09,
+                          "https://tcgcsv.com/tcgplayer/3/23821/prices", "2026-07-07T00:00:00")
+    n = m.NormalizedComp(item_key="k", comp=1528.09, comp_basis="b", confidence="high",
+                         confidence_reason="r", sources=(q,), ebay_floor=None,
+                         ebay_active_count=None, spread_pct=None, captured_at="2026-07-07")
+    assert m._exact_source_url(n) == "https://tcgcsv.com/tcgplayer/3/23821/prices"

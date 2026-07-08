@@ -47,7 +47,14 @@ class CompEngine:
 
     @classmethod
     def from_config(cls, cfg: Any) -> "CompEngine":
-        return cls(cfg)
+        # Sealed tcg slot: the free TCGCSV mirror when poke.tcgcsv is on (spec §9.2 — its
+        # number lifts confidence via the unchanged tcg+pc agreement path); else the dead
+        # TcgPlayerSource. TCGCSV stays NON-independent (edge/divergence classification).
+        # Lazy import: comps must not import poke_api at module load (cycle-proofing).
+        from ..poke_api import tcgcsv as _tcgcsv
+        from ..poke_api.tcgcsv_source import TcgCsvSource
+        tcg = TcgCsvSource(cfg) if _tcgcsv.tcgcsv_enabled(cfg) else None
+        return cls(cfg, tcg_source=tcg)
 
     @property
     def state(self) -> State:

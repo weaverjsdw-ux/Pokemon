@@ -4,7 +4,10 @@ from pathlib import Path
 
 from scanner.comps import model
 from scanner.comps.engine import CompEngine
+from scanner.comps.tcgplayer import TcgPlayerSource
+from scanner.poke_api.tcgcsv_source import TcgCsvSource
 from scanner.state import State
+from scanner import config as cfg_mod
 from scanner import market as market_mod
 from scanner.discovery import sweep as sweep_mod
 
@@ -141,3 +144,19 @@ def test_ledger_one_observation_per_ok_source_per_day(tmp_path):
     engine.estimate("k", PRODUCT, 1_000_000 + 21601)
     lines2 = (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines2) == 2
+
+
+def _cfg(tcgcsv_on):
+    # a real Config (from_mapping supplies every fee/ebay/comps default) so from_config's
+    # pc/ebay source construction never trips on a missing field. Same builder the divergence
+    # + comps tests use. `locations` is the only required key.
+    return cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"},
+                                 "poke": {"tcgcsv": tcgcsv_on}})
+
+
+def test_from_config_uses_tcgcsv_when_enabled():
+    assert isinstance(CompEngine.from_config(_cfg(True)).tcg, TcgCsvSource)
+
+
+def test_from_config_uses_dead_tcgplayer_when_disabled():
+    assert isinstance(CompEngine.from_config(_cfg(False)).tcg, TcgPlayerSource)
