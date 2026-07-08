@@ -216,3 +216,44 @@ def test_run_audit_external_material_unexplained_fails():
     result = dv.run_audit(deps, product_keys=["a"], local=False, yes=True, client_sealed=client)
     assert result["failed"] is True
     assert any(r["category"] == "unexplained_material_divergence" for r in result["rows"])
+
+
+# ---------------------------------------------------------------- tcgcsv independence guards
+
+_RAW = {"asset_class": "raw", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+        "card_number": "161", "condition": "NM"}
+_IK_RAW = history.item_key_for_asset(_RAW)
+
+
+def _mc(source, price, date, conf="low"):
+    # observation shape used throughout the suite: an explicit "item_key" STRING field.
+    return {"item_key": _IK_RAW, "kind": "market_comp", "comp": price,
+            "capture_date": date, "source": source, "comp_confidence": conf}
+
+
+def _deps_raw(obs):
+    cfg = cfg_mod.from_mapping({"locations": {"home": "A", "work": "B"}})
+    return router.PokeApiDeps(products={}, assets={"umbreon_raw": _RAW},
+                             read_observations=lambda: list(obs), comp_provider=_NoProvider(),
+                             today="2026-07-07", cfg=cfg, card_client=_FailingClient())
+
+
+def test_tcgcsv_agreeing_with_ppt_is_never_cross_source_validated():
+    # tcgcsv agreeing to the cent with ppt_cards must NOT be cross-source-validated
+    # (contrast: the existing pricecharting+ppt test yields cross=True). NOTE: cross keys on
+    # _INDEPENDENT_OF_PPT membership, so this holds by construction — the SUBSTANTIVE
+    # exclusion guard is the matrix test below; the extra `ours_source` assert makes this
+    # one also fail if tcgcsv is ever wrongly picked as the local/"ours" side.
+    obs = [_mc("tcgcsv", 1528.09, "2026-07-07"), _mc("ppt_cards", 1528.09, "2026-07-07")]
+    row = dv.audit_local(_deps_raw(obs), asset_keys=["umbreon_raw"])["rows"][0]
+    assert row["cross_source_validated"] is False
+    assert row["ours_source"] != "tcgcsv"          # tcgcsv is never the local/independent side
+
+
+def test_recorded_tcgcsv_is_never_the_independent_ours_side_of_the_matrix():
+    # a MORE-RECENT tcgcsv comp must not shadow the independent pricecharting comp as "ours".
+    obs = [_mc("pricecharting", 1500.00, "2026-07-05"),
+           _mc("tcgcsv", 1528.09, "2026-07-07"),
+           _mc("ppt_cards", 1528.09, "2026-07-07")]
+    row = dv.audit_matrix(_deps_raw(obs), asset_keys=["umbreon_raw"])["rows"][0]
+    assert row["ours_source"] == "pricecharting"           # tcgcsv excluded from the independent side

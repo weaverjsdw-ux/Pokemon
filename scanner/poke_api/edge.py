@@ -52,7 +52,9 @@ EDGE_TRADE_TYPES.update({
 
 # Source-slug provenance classes (Slice E). External-origin = a paid card provider;
 # local-origin = our own / free-fetch sources; ask = an active listing (context only).
-_EXTERNAL_SLUGS = frozenset({"ppt_cards"})
+_EXTERNAL_SLUGS = frozenset({"ppt_cards", "tcgcsv"})
+# NOTE: legacy "tcgplayer" stays in _LOCAL_SLUGS below — same lineage as tcgcsv but inert
+# (that source is always-blocked/dead). tcgcsv is the live external-footing reference.
 _LOCAL_SLUGS = frozenset({"tcgplayer", "pricecharting", "inhouse", "ledger", "ledger latest"})
 _ASK_SLUGS = frozenset({"ebay"})
 

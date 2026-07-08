@@ -33,10 +33,11 @@ from . import model as model_mod
 
 HARD_STOP_REMAINING = ppt_validator.HARD_STOP_REMAINING  # 15 — reuse the money-class floor
 MAPPING_ERROR_PCT = 100.0                                # >=100% gap => likely a wrong id/variant
-_EXTERNAL_SLUGS = frozenset({"ppt_cards"})
+_EXTERNAL_SLUGS = frozenset({"ppt_cards", "tcgcsv"})   # non-independent-of-PPT; never the "ours" side
+_PPT_SLUGS = frozenset({"ppt_cards"})                  # the canonical audited PPT number (the "theirs" side)
 # Sources genuinely INDEPENDENT of the PPT market number for cross-source validation.
-# TCGplayer is excluded: the Phase F probe found its market price == PPT to the cent
-# (PPT resells the TCGplayer number), so a tcgplayer-vs-ppt agreement is NOT independent.
+# TCGplayer/TCGCSV are excluded: they mirror the PPT number (Phase F finding), so agreement
+# with PPT is NOT independent corroboration.
 _INDEPENDENT_OF_PPT = frozenset({"pricecharting"})
 
 # The full divergence vocabulary (exposed for docs/CLI). ``fee_assumption_difference``
@@ -108,8 +109,11 @@ def _latest_market_comp(observations, item_key, *, external: bool):
     best = None
     for o in history_mod.filter_observations(observations, item_key=item_key,
                                              kind=history_mod.MARKET_COMP):
-        is_ext = history_mod.source_of(o) in _EXTERNAL_SLUGS
-        if is_ext != external:
+        src = history_mod.source_of(o)
+        if external:
+            if src not in _PPT_SLUGS:      # "theirs" is strictly the PPT number
+                continue
+        elif src in _EXTERNAL_SLUGS:       # "ours" excludes ppt_cards AND tcgcsv (non-independent)
             continue
         if best is None or str(o.get("capture_date") or "") >= str(best.get("capture_date") or ""):
             best = o

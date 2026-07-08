@@ -39,6 +39,16 @@ def test_posture_external_only_single_source():
     assert "local_only" not in tags
 
 
+def test_tcgcsv_slug_is_external_footing_not_local():
+    assert "tcgcsv" in edge._EXTERNAL_SLUGS
+    assert "tcgcsv" not in edge._LOCAL_SLUGS
+    # a tcgcsv + ppt_cards comp is external_only, never local_plus_external_audit
+    comp = {"estimate": 1528.09,
+            "sources": [{"source": "tcgcsv"}, {"source": "ppt_cards"}]}
+    assert "external_only" in edge.source_posture(comp)
+    assert "local_plus_external_audit" not in edge.source_posture(comp)
+
+
 def test_posture_local_plus_external_audit():
     tags = edge.source_posture(
         {"estimate": 50.0, "sources": [{"source": "tcgplayer"}, {"source": "ppt_cards"}],
