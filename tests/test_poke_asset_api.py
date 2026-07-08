@@ -6,7 +6,7 @@ sealed routes are untouched (#1)."""
 from __future__ import annotations
 
 from scanner import config as cfg_mod
-from scanner.poke_api import history, router, sources
+from scanner.poke_api import history, lab, router, sources
 
 
 ASSETS = {
@@ -416,3 +416,47 @@ def test_invalid_encoding_asset_catalog_does_not_break_sealed(tmp_path):
     assert prod["ok"] is True and prod["count"] == len(cfg.products)   # sealed unaffected
     assets = router.handle_get("/api/poke/assets", {}, deps)
     assert assets["ok"] is False and _status(assets) == 500           # honest error, not empty
+
+
+# --- resolve_asset_comp_row: tcgcsv reference never displaces the served headline -------
+#
+# Task 5 / spec §9.3: a free tcgcsv REFERENCE market_comp must never displace an
+# independent/paid comp as the SERVED headline, no matter how much newer it is. It is
+# only ever served when it is the sole comp for the item (the free number is still
+# useful when nothing else exists).
+
+_RAW5 = {"asset_class": "raw", "name": "Umbreon ex 161", "set": "Prismatic Evolutions",
+         "card_number": "161", "condition": "NM"}
+_IK5 = history.item_key_for_asset(_RAW5)
+
+
+def _mc5(source, price, date):
+    return {"item_key": _IK5, "kind": "market_comp", "comp": price, "capture_date": date,
+            "source": source, "comp_confidence": "low"}
+
+
+def test_tcgcsv_reference_never_displaces_independent_comp_as_headline():
+    # newer tcgcsv reference must NOT become the served comp over an older pricecharting comp
+    obs = [_mc5("pricecharting", 1500.0, "2026-07-05"), _mc5("tcgcsv", 1528.09, "2026-07-07")]
+    row = lab.resolve_asset_comp_row(obs, "umbreon_raw", _RAW5)
+    assert row is not None
+    assert row["sources"][0]["source"] == "pricecharting"    # served headline, not tcgcsv
+    assert row["sources"][0]["price"] == 1500.0
+    assert row["estimate"] == "$1500.00"
+
+
+def test_tcgcsv_reference_served_when_it_is_the_only_comp():
+    obs = [_mc5("tcgcsv", 1528.09, "2026-07-07")]
+    row = lab.resolve_asset_comp_row(obs, "umbreon_raw", _RAW5)
+    assert row is not None                      # the sole number IS served (free reference value)
+    assert row["sources"][0]["source"] == "tcgcsv"
+    assert row["sources"][0]["price"] == 1528.09
+
+
+def test_no_tcgcsv_comp_behaves_identically_to_today():
+    # regression guard: with zero tcgcsv comps, latest-wins is unchanged by the rule.
+    obs = [_mc5("pricecharting", 1500.0, "2026-07-01"), _mc5("ppt_cards", 1550.0, "2026-07-05")]
+    row = lab.resolve_asset_comp_row(obs, "umbreon_raw", _RAW5)
+    assert row is not None
+    assert row["sources"][0]["source"] == "ppt_cards"
+    assert row["sources"][0]["price"] == 1550.0

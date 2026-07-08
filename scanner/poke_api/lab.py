@@ -58,13 +58,16 @@ def resolve_comp_row(comp_provider, observations, key, product):
 
 
 def resolve_asset_comp_row(observations, asset_key, asset):
-    """Read-first asset comp resolution: the latest ledger market_comp for the
-    asset's identity (offline), else None. There is no in-house comp cache/engine
-    for raw/graded (those key off the TCGplayer id), so this is ledger-only;
-    a live source is reached only via the ``sources`` resolvers on ``refresh=true``.
-    Never constructs a network source."""
+    """Read-first asset comp resolution (offline). A free tcgcsv REFERENCE never displaces
+    an independent/paid comp as the served headline (spec §9.3): serve the latest non-tcgcsv
+    market_comp when one exists, else fall back to the latest tcgcsv (reference is the sole
+    number). Never constructs a network source."""
     ikey = history_mod.item_key_for_asset(asset)
-    latest = history_mod.latest(observations, ikey)
+    non_ref = [o for o in history_mod.filter_observations(
+        observations, item_key=ikey, kind=history_mod.MARKET_COMP)
+        if history_mod.source_of(o) != "tcgcsv"]
+    latest = (history_mod.latest(non_ref, ikey) if non_ref
+              else history_mod.latest(observations, ikey))
     return _ledger_comp_row(latest, asset_key, asset) if latest is not None else None
 
 

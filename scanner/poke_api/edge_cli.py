@@ -30,6 +30,7 @@ from . import sources as sources_mod
 from . import tcgcsv as tcgcsv_mod
 from . import tcgcsv_check as tcgcsv_check_mod
 from . import tcgcsv_ingest as tcgcsv_ingest_mod
+from . import tcgcsv_source as tcgcsv_source_mod
 
 
 def _packets(deps):
@@ -227,6 +228,19 @@ def _build_argparser():
                      help="TCGCSV set name (catalog-native, e.g. 'Prismatic Evolutions') "
                           "or a numeric TCGCSV groupId")
     pti.add_argument("--json", action="store_true")
+
+    # TCGCSV raw-asset reference recording (Task 5 Part B): the free TCGplayer-market
+    # mirror for one mapped raw asset, recorded as a low-confidence, external-footing
+    # market_comp. Never displaces an independent/paid comp as the served headline
+    # (see lab.resolve_asset_comp_row, Part A). 0 credits; gated on poke.tcgcsv.
+    ptr = sub.add_parser(
+        "tcgcsv-ref",
+        help="record the free TCGCSV TCGplayer-market reference for a mapped raw asset "
+             "as a low-confidence market_comp (0 credits; gated on poke.tcgcsv; never "
+             "displaces an independent/paid comp as the served headline)")
+    ptr.add_argument("--asset", required=True, dest="asset_key",
+                     help="asset_key from the asset catalog")
+    ptr.add_argument("--json", action="store_true")
     return p
 
 
@@ -902,6 +916,66 @@ def _cmd_tcgcsv_ingest(args, deps) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- TCGCSV raw reference (Task 5)
+
+def _cmd_tcgcsv_ref(args, deps) -> int:
+    """Record the free TCGCSV TCGplayer-market reference for one mapped raw asset as a
+    ``low``-confidence, external-footing ``market_comp`` (spec §9.3). Refuses (0 network)
+    unless ``poke.tcgcsv`` is true — mirrors ``_cmd_tcgcsv_check``'s refuse pattern. The
+    reference never lifts live confidence (single-source + external) and, per Part A's
+    never-displace rule in ``lab.resolve_asset_comp_row``, never overwrites an existing
+    independent/paid comp as the served headline; it is recorded purely for provenance/
+    audit. Raw-only: a graded asset (which can share its raw counterpart's tcgplayer_id)
+    is an honest, named skip — TCGCSV's marketPrice is ungraded-only, not a comp for a
+    graded identity (same scope exclusion ``tcgcsv-check`` already applies to pairs). Any
+    non-``ok`` quote status records nothing and prints the honest reason."""
+    if not tcgcsv_mod.tcgcsv_enabled(deps.cfg):
+        print("refused: TCGCSV live fetch is off (set poke.tcgcsv: true)")
+        return 2
+
+    asset = (getattr(deps, "assets", None) or {}).get(args.asset_key)
+    if asset is None:
+        print(f"unknown asset_key: {args.asset_key!r} (not in the asset catalog) — not written")
+        return 1
+    # A graded asset can share its raw counterpart's tcgplayer_id/tcgcsv_group_id (same
+    # physical card), so raw_reference_quote would happily resolve one — but TCGCSV's
+    # marketPrice is an UNGRADED quantity, not comparable to a graded identity (same scope
+    # exclusion tcgcsv-check already names for pairs). Honest, named skip — never fetched.
+    if str(asset.get("asset_class") or "").strip().lower() != "raw":
+        print(f"skipped {args.asset_key}: graded asset — TCGCSV marketPrice is "
+              f"ungraded-only, not a comp for a graded identity — nothing recorded")
+        return 1
+    ledger_path = getattr(deps, "ledger_path", None)
+    if ledger_path is None:
+        print("refused: no ledger_path configured on deps")
+        return 1
+
+    quote = tcgcsv_source_mod.raw_reference_quote(asset, _today_ts(deps.today))
+    if quote.status != "ok":
+        print(f"tcgcsv-ref {args.asset_key}: {quote.status} ({quote.detail}) — "
+              f"nothing recorded (0 credits)")
+        return 1
+
+    try:
+        wrote = sources_mod.record_asset_comp(
+            ledger_path, asset, comp=quote.price, confidence="low", source="tcgcsv",
+            capture_date=deps.today, source_url=quote.url, basis=quote.detail,
+            asset_key=args.asset_key)
+    except ValueError as exc:
+        print(f"refused: {exc}")
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps({"asset_key": args.asset_key, "wrote": wrote, "source": "tcgcsv",
+                          "confidence": "low", "comp": quote.price, "source_url": quote.url,
+                          "capture_date": deps.today, "credits_spent": 0}, indent=2))
+    else:
+        print(f"{'recorded' if wrote else 'already recorded'} tcgcsv reference "
+              f"{args.asset_key} = ${quote.price:.2f} [tcgcsv, low] capture {deps.today} "
+              f"(0 credits; never served over an independent/paid comp)")
+    return 0
+
+
 def main(argv=None, *, deps=None) -> int:
     args = _build_argparser().parse_args(argv)
     if deps is None:                       # lazy import avoids an import cycle with router
@@ -929,6 +1003,8 @@ def main(argv=None, *, deps=None) -> int:
         return _cmd_tcgcsv_check(args, deps)
     if args.cmd == "tcgcsv-ingest":
         return _cmd_tcgcsv_ingest(args, deps)
+    if args.cmd == "tcgcsv-ref":
+        return _cmd_tcgcsv_ref(args, deps)
     return 0
 
 

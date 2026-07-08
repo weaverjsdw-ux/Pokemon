@@ -673,3 +673,116 @@ def test_tcgcsv_ingest_non_exact_candidate_never_guessed(tmp_path, monkeypatch):
         (tmp_path / "tcgcsv-proposals-prismatic_evolutions.json").read_text(encoding="utf-8"))
     assert data["proposals"][0]["match"] == "none"
     assert data["proposals"][0]["tcgplayer_id"] is None
+
+
+# ------------------------------------------ tcgcsv-ref (Task 5 Part B) ------------------
+#
+# Records the free TCGCSV TCGplayer-market reference for a mapped raw asset as a
+# low-confidence, external-footing market_comp (never the served headline — see
+# lab.resolve_asset_comp_row / Part A above). Same poke.tcgcsv gate as tcgcsv-check;
+# 0 credits by construction (TCGCSV is free/keyless).
+
+from scanner.poke_api import tcgcsv_source as tcgcsv_source_mod
+
+
+def _deps_tcgcsv_ref(*, assets, tcgcsv, ledger_path, today="2026-07-07"):
+    return router.PokeApiDeps(
+        products={}, assets=assets, read_observations=lambda: [],
+        comp_provider=FakeProvider({}), today=today,
+        cfg=_tcgcsv_cfg(tcgcsv=tcgcsv), ledger_path=ledger_path)
+
+
+def test_tcgcsv_ref_refuses_when_gate_off(capsys, monkeypatch, tmp_path):
+    def _boom(*_a, **_k):
+        raise AssertionError("tcgcsv-ref must not fetch when the gate is off")
+
+    monkeypatch.setattr(tcgcsv_source_mod, "raw_reference_quote", _boom)
+
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_tcgcsv_ref(assets={"card1": _raw_asset(1)}, tcgcsv=False,
+                            ledger_path=ledger)
+    rc = edge_cli.main(["tcgcsv-ref", "--asset", "card1"], deps=deps)
+    assert rc != 0
+    assert "poke.tcgcsv" in capsys.readouterr().out
+    assert not ledger.exists()                # nothing recorded, 0 network
+
+
+def test_tcgcsv_ref_records_low_confidence_tcgcsv_observation(monkeypatch, tmp_path, capsys):
+    from scanner.comps.model import SOLD_DERIVED, CompSourceQuote
+
+    asset = _raw_asset(1)
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_tcgcsv_ref(assets={"card1": asset}, tcgcsv=True, ledger_path=ledger,
+                            today="2026-07-07")
+
+    def _ok_quote(asset_arg, checked_at, **_kw):
+        assert asset_arg is asset
+        return CompSourceQuote("tcgcsv", SOLD_DERIVED, "ok", 1528.09,
+                               "https://tcgcsv.com/tcgplayer/3/1/prices",
+                               "2026-07-07T00:00:00",
+                               detail="TCGCSV TCGplayer market (reference)")
+
+    monkeypatch.setattr(tcgcsv_source_mod, "raw_reference_quote", _ok_quote)
+
+    rc = edge_cli.main(["tcgcsv-ref", "--asset", "card1"], deps=deps)
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert "0 credit" in out
+
+    rec = history_mod.read_ledger(ledger).observations[-1]
+    assert rec["source"] == "tcgcsv"
+    assert rec["comp_confidence"] == "low"
+    assert rec["comp"] == 1528.09
+    assert rec["item_key"] == history_mod.item_key_for_asset(asset, "card1")
+
+
+def test_tcgcsv_ref_non_ok_status_records_nothing(monkeypatch, tmp_path, capsys):
+    from scanner.comps.model import CompSourceQuote
+
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_tcgcsv_ref(assets={"card1": _raw_asset(1)}, tcgcsv=True,
+                            ledger_path=ledger)
+
+    def _no_match(asset_arg, checked_at, **_kw):
+        return CompSourceQuote("tcgcsv", "sold_derived", "no_match", None,
+                               "https://tcgcsv.com/tcgplayer/3/1/prices",
+                               "2026-07-07T00:00:00",
+                               detail="no clean TCGCSV market price (missing/ambiguous/null)")
+
+    monkeypatch.setattr(tcgcsv_source_mod, "raw_reference_quote", _no_match)
+
+    rc = edge_cli.main(["tcgcsv-ref", "--asset", "card1"], deps=deps)
+    assert rc == 1
+    assert "no_match" in capsys.readouterr().out
+    assert not ledger.exists()
+
+
+def test_tcgcsv_ref_unknown_asset_nonzero(capsys, tmp_path):
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_tcgcsv_ref(assets={}, tcgcsv=True, ledger_path=ledger)
+    rc = edge_cli.main(["tcgcsv-ref", "--asset", "nope"], deps=deps)
+    assert rc == 1
+    assert "nope" in capsys.readouterr().out
+    assert not ledger.exists()
+
+
+def test_tcgcsv_ref_skips_graded_asset_no_fetch(monkeypatch, tmp_path, capsys):
+    # A graded asset can share its raw counterpart's tcgplayer_id/tcgcsv_group_id (same
+    # physical card), so raw_reference_quote would happily resolve one — but TCGCSV's
+    # marketPrice is an UNGRADED quantity; recording it against a graded (e.g. PSA10)
+    # identity would be a wrong-quantity comp (the same scope hole tcgcsv-check already
+    # names for pairs). Must be an honest, named skip — never fetched, never recorded.
+    def _boom(*_a, **_k):
+        raise AssertionError("must not fetch a TCGCSV reference for a graded asset")
+
+    monkeypatch.setattr(tcgcsv_source_mod, "raw_reference_quote", _boom)
+
+    graded = {"asset_class": "graded", "name": "Card 1", "set": "Set 1",
+              "grader": "PSA", "grade": "10", "tcgplayer_id": "1", "tcgcsv_group_id": 1}
+    ledger = tmp_path / "price_history.jsonl"
+    deps = _deps_tcgcsv_ref(assets={"card1_psa10": graded}, tcgcsv=True, ledger_path=ledger)
+
+    rc = edge_cli.main(["tcgcsv-ref", "--asset", "card1_psa10"], deps=deps)
+    assert rc == 1
+    assert "graded" in capsys.readouterr().out.lower()
+    assert not ledger.exists()
