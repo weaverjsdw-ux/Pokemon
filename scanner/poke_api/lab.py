@@ -46,14 +46,28 @@ def _ledger_comp_row(obs: dict, product_key: str, product: dict) -> dict:
     }
 
 
+def _latest_non_tcgcsv_pref(observations, ikey):
+    """Latest ledger ``market_comp``, DEPRIORITIZING a free tcgcsv REFERENCE: serve the
+    latest non-tcgcsv comp when one exists, else fall back to the latest tcgcsv (the
+    reference is the sole number, still useful when nothing else exists). A tcgcsv
+    reference never displaces an independent/paid comp as the served headline (spec §9.3),
+    on BOTH the sealed and asset read paths. For a ledger with no tcgcsv comp this is
+    identical to ``history.latest`` — no regression."""
+    non_ref = [o for o in history_mod.filter_observations(
+        observations, item_key=ikey, kind=history_mod.MARKET_COMP)
+        if history_mod.source_of(o) != "tcgcsv"]
+    return history_mod.latest(non_ref, ikey) if non_ref else history_mod.latest(observations, ikey)
+
+
 def resolve_comp_row(comp_provider, observations, key, product):
     """Read-first comp resolution: in-house comp cache (offline), else the latest
-    ledger market_comp (offline), else None. Never constructs a network source."""
+    ledger market_comp (tcgcsv-deprioritized, offline), else None. Never constructs a
+    network source."""
     cached = comp_provider.cached(key, product)
     if cached:
         return cached
     ikey = history_mod.item_key_for_product(product, key)
-    latest = history_mod.latest(observations, ikey)
+    latest = _latest_non_tcgcsv_pref(observations, ikey)
     return _ledger_comp_row(latest, key, product) if latest is not None else None
 
 
@@ -63,11 +77,7 @@ def resolve_asset_comp_row(observations, asset_key, asset):
     market_comp when one exists, else fall back to the latest tcgcsv (reference is the sole
     number). Never constructs a network source."""
     ikey = history_mod.item_key_for_asset(asset)
-    non_ref = [o for o in history_mod.filter_observations(
-        observations, item_key=ikey, kind=history_mod.MARKET_COMP)
-        if history_mod.source_of(o) != "tcgcsv"]
-    latest = (history_mod.latest(non_ref, ikey) if non_ref
-              else history_mod.latest(observations, ikey))
+    latest = _latest_non_tcgcsv_pref(observations, ikey)
     return _ledger_comp_row(latest, asset_key, asset) if latest is not None else None
 
 

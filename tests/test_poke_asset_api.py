@@ -460,3 +460,45 @@ def test_no_tcgcsv_comp_behaves_identically_to_today():
     assert row is not None
     assert row["sources"][0]["source"] == "ppt_cards"
     assert row["sources"][0]["price"] == 1550.0
+
+
+# --- resolve_comp_row (SEALED path): same tcgcsv never-displace rule -------------------
+#
+# Final-review follow-up: the sealed ledger-fallback must deprioritize a free tcgcsv
+# reference exactly like the asset path, so a cold-cache sealed headline can't surface
+# source=tcgcsv at `high`. Attribution-opacity only (the high is earned via a same-day
+# tcg+pc agreement) — but the served headline must show the independent comp.
+
+_SEALED5 = {"name": "Prismatic Evolutions ETB", "set": "Prismatic Evolutions", "ppt_id": "593355"}
+_IK_SEALED5 = history.item_key_for_product(_SEALED5, "pe_etb")
+
+
+def _mcs(source, price, date):
+    return {"item_key": _IK_SEALED5, "kind": "market_comp", "comp": price,
+            "capture_date": date, "source": source, "comp_confidence": "high"}
+
+
+def test_sealed_tcgcsv_reference_never_displaces_independent_comp_as_headline():
+    # newer tcgcsv reference must NOT become the served sealed comp over an older non-tcgcsv comp
+    obs = [_mcs("pricecharting", 60.0, "2026-07-05"), _mcs("tcgcsv", 65.0, "2026-07-07")]
+    row = lab.resolve_comp_row(_StubProvider(), obs, "pe_etb", _SEALED5)
+    assert row is not None
+    assert row["sources"][0]["source"] == "pricecharting"    # served headline, not tcgcsv
+    assert row["sources"][0]["price"] == 60.0
+
+
+def test_sealed_tcgcsv_reference_served_when_it_is_the_only_comp():
+    obs = [_mcs("tcgcsv", 65.0, "2026-07-07")]
+    row = lab.resolve_comp_row(_StubProvider(), obs, "pe_etb", _SEALED5)
+    assert row is not None                      # the sole number IS served (free reference value)
+    assert row["sources"][0]["source"] == "tcgcsv"
+    assert row["sources"][0]["price"] == 65.0
+
+
+def test_sealed_no_tcgcsv_comp_behaves_identically_to_today():
+    # regression guard: zero tcgcsv comps -> latest-wins unchanged by the rule
+    obs = [_mcs("tcgplayer", 60.0, "2026-07-01"), _mcs("pricecharting", 62.0, "2026-07-05")]
+    row = lab.resolve_comp_row(_StubProvider(), obs, "pe_etb", _SEALED5)
+    assert row is not None
+    assert row["sources"][0]["source"] == "pricecharting"
+    assert row["sources"][0]["price"] == 62.0
