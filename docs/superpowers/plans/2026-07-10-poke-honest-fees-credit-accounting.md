@@ -84,8 +84,8 @@ def test_tcgplayer_channel_nets_commission_processing_and_fixed():
     fees = margin.FeeModel()
     r = margin.net_margin(cost_incl_tax=30.0, comp=100.0, channel="tcgplayer",
                           est_shipping=8.0, fees=fees)
-    # fee = 100*(0.1075+0.025) + 0.30 = 13.25 ; net = 100 - 13.25 - 8 = 78.75
-    assert round(r.net_proceeds, 2) == 78.75
+    # fee = 100*(0.1075+0.025) + 0.30 = 13.55 ; net = 100 - 13.55 - 8 = 78.45
+    assert round(r.net_proceeds, 2) == 78.45
     assert r.channel == "tcgplayer"
 
 
