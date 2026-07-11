@@ -50,11 +50,18 @@ def comp_response(product_key: str, product: dict, comp_row: dict, *,
 
     Numeric ``estimate`` (and its compat alias ``unopenedPrice``) come from
     market.comp_from_row so a no-match/degraded row honestly reports None,
-    never an invented number."""
+    never an invented number.
+
+    ``apiCallsConsumed`` preserves (never drops nor synthesizes) the row's
+    ``creditsConsumed``: 0/"local" on the structurally-0-credit CompEngine
+    route (comps/engine.py), or the billed value/"external" carried through
+    unchanged if a billing provider row (market.py-shaped) is ever passed
+    here. ``dailyRemaining`` passes through when the row carries one."""
     row = comp_row or {}
     comp, _conf = market_mod.comp_from_row(row)
     resolved_cache_hit = bool(row.get("cacheHit")) if cache_hit is None else cache_hit
-    return {
+    total = int(row.get("creditsConsumed") or 0)
+    resp = {
         "product_key": product_key,
         "name": product.get("name") or product_key,
         "set": product.get("set", ""),
@@ -73,7 +80,11 @@ def comp_response(product_key: str, product: dict, comp_row: dict, *,
         "cacheHit": resolved_cache_hit,
         "stale": bool(row.get("stale")),
         "detail": str(row.get("detail") or ""),
+        "apiCallsConsumed": {"total": total, "source": "external" if total > 0 else "local"},
     }
+    if "dailyRemaining" in row:
+        resp["dailyRemaining"] = row.get("dailyRemaining")
+    return resp
 
 
 def no_comp_response(product_key: str, product: dict, *, status: str,

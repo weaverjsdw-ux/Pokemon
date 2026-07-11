@@ -103,6 +103,24 @@ def test_no_comp_response_is_honest_placeholder():
     assert r["detail"] == "no cached comp and refresh not requested"
 
 
+def test_sealed_comp_response_reports_zero_local_on_free_route():
+    # a CompEngine-style row (structurally 0-credit) -> field PRESENT, 0/local, never dropped
+    row = {"status": "ok", "estimate": "$50.00", "creditsConsumed": 0, "sources": []}
+    resp = model.comp_response("pe_etb", {"name": "X", "set": "S"}, row)
+    assert resp["apiCallsConsumed"]["total"] == 0
+    assert resp["apiCallsConsumed"]["source"] == "local"
+
+
+def test_sealed_comp_response_preserves_a_billing_rows_credits_never_zeroes_it():
+    # a billing provider row (market.py-shaped) must NOT be silently dropped/zeroed
+    row = {"status": "ok", "estimate": "$50.00", "creditsConsumed": 1,
+           "dailyRemaining": 87, "sources": []}
+    resp = model.comp_response("pe_etb", {"name": "X", "set": "S"}, row)
+    assert resp["apiCallsConsumed"]["total"] == 1        # preserved, not 0
+    assert resp["apiCallsConsumed"]["source"] == "external"
+    assert resp.get("dailyRemaining") == 87
+
+
 # --- price_points -------------------------------------------------------------
 
 def test_price_points_chronological_from_observations():
