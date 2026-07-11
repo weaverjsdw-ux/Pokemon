@@ -58,6 +58,9 @@ deal_intelligence:
     ebay_fixed_fee: 0.40    # eBay per-order fixed fee
     ebay_est_shipping: 8.00 # seller-paid shipping estimate per sealed item (~2lb); per-product 'est_shipping' overrides
     local_haircut_pct: 0.15 # local/FB sells below online comp by this fraction
+    tcgplayer_commission_pct: 0.1075  # TCGplayer marketplace commission (eff. 2026-02-10)
+    tcgplayer_processing_pct: 0.025   # TCGplayer payment processing
+    tcgplayer_fixed_fee: 0.30         # TCGplayer per-order fixed fee
   verdict:
     skip_floor_net: 5.00
     buy_floor_net: 15.00

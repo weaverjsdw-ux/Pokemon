@@ -38,17 +38,18 @@ def fake_markdown_flags(
     return flags
 
 
-def _fees(cfg) -> margin_mod.FeeModel:
-    return margin_mod.FeeModel(
-        ebay_fvf_pct=cfg.ebay_fvf_pct,
-        ebay_fixed_fee=cfg.ebay_fixed_fee,
-        local_haircut_pct=cfg.local_haircut_pct,
-    )
+def _fees(cfg, *, as_of=None) -> margin_mod.FeeModel:
+    return margin_mod.fee_model_from_cfg(cfg, as_of=as_of)
 
 
-def flipper_is_buy(deal_price: float, market_comp: float, cfg) -> bool:
+def flipper_is_buy(deal_price: float, market_comp: float, cfg, *, channel="ebay", as_of=None) -> bool:
+    """``channel`` selects the sell venue fee shape (default "ebay" -- spec 8.3);
+    ``as_of`` selects the era-correct dated fee schedule snapshot (default None ->
+    newest). A ``DealRow`` carries no observation date, so callers without one keep
+    ``as_of=None`` (never a guessed date)."""
     cost = margin_mod.cost_basis(deal_price, cfg.tax_rate)
-    result = margin_mod.net_margin(cost, market_comp, "ebay", cfg.ebay_est_shipping, _fees(cfg))
+    result = margin_mod.net_margin(
+        cost, market_comp, channel, cfg.ebay_est_shipping, _fees(cfg, as_of=as_of))
     v = verdict_mod.buy_verdict(result, "high", verdict_mod.thresholds_from_config(cfg))
     return v.tier == "BUY"
 

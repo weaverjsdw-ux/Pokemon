@@ -135,6 +135,10 @@ class Config:
     ebay_fixed_fee: float = 0.40
     ebay_est_shipping: float = 8.0
     local_haircut_pct: float = 0.15
+    # TCGplayer channel (defaults match margin.FeeModel's TCGplayer defaults).
+    tcgplayer_commission_pct: float = 0.1075
+    tcgplayer_processing_pct: float = 0.025
+    tcgplayer_fixed_fee: float = 0.30
     skip_floor_net: float = 5.0
     buy_floor_net: float = 15.0
     roi_gate_enabled: bool = True
@@ -388,6 +392,15 @@ def from_mapping(raw: dict[str, Any]) -> Config:
         ebay_fixed_fee=_num(fees_raw, "ebay_fixed_fee", 0.40, "deal_intelligence.fees.ebay_fixed_fee"),
         ebay_est_shipping=_num(fees_raw, "ebay_est_shipping", 8.0, "deal_intelligence.fees.ebay_est_shipping"),
         local_haircut_pct=_num(fees_raw, "local_haircut_pct", 0.15, "deal_intelligence.fees.local_haircut_pct"),
+        tcgplayer_commission_pct=_num(
+            fees_raw, "tcgplayer_commission_pct", 0.1075,
+            "deal_intelligence.fees.tcgplayer_commission_pct"),
+        tcgplayer_processing_pct=_num(
+            fees_raw, "tcgplayer_processing_pct", 0.025,
+            "deal_intelligence.fees.tcgplayer_processing_pct"),
+        tcgplayer_fixed_fee=_num(
+            fees_raw, "tcgplayer_fixed_fee", 0.30,
+            "deal_intelligence.fees.tcgplayer_fixed_fee"),
         skip_floor_net=_num(verdict_raw, "skip_floor_net", 5.0, "deal_intelligence.verdict.skip_floor_net"),
         buy_floor_net=_num(verdict_raw, "buy_floor_net", 15.0, "deal_intelligence.verdict.buy_floor_net"),
         roi_gate_enabled=bool(verdict_raw.get("roi_gate_enabled", True)),

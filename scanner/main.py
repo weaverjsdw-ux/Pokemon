@@ -352,21 +352,22 @@ def _shipping_for(product, cfg) -> float:
         return cfg.ebay_est_shipping
 
 
-def verdict_for_alert(cfg, product, observed_price, comp_row) -> str:
-    """Headline verdict string for an alert, or '' when no usable comp/price."""
+def verdict_for_alert(cfg, product, observed_price, comp_row, *, channel="ebay", as_of=None) -> str:
+    """Headline verdict string for an alert, or '' when no usable comp/price.
+
+    ``channel`` selects the sell venue fee shape (default "ebay" -- spec 8.3);
+    ``as_of`` selects the era-correct dated fee schedule snapshot (default None ->
+    newest, i.e. "now" for a live alert). Both are additive: the default path nets
+    byte-identical dollars to before Task 4."""
     comp, confidence = market_mod.comp_from_row(comp_row or {})
     observed = _price_to_float(observed_price)
     if comp is None or observed is None:
         return ""
-    fees = margin_mod.FeeModel(
-        ebay_fvf_pct=cfg.ebay_fvf_pct,
-        ebay_fixed_fee=cfg.ebay_fixed_fee,
-        local_haircut_pct=cfg.local_haircut_pct,
-    )
+    fees = margin_mod.fee_model_from_cfg(cfg, as_of=as_of)
     cost = margin_mod.cost_basis(observed, cfg.tax_rate)
-    ebay = margin_mod.net_margin(cost, comp, "ebay", _shipping_for(product, cfg), fees)
+    result = margin_mod.net_margin(cost, comp, channel, _shipping_for(product, cfg), fees)
     v = verdict_mod.buy_verdict(
-        ebay, confidence, verdict_mod.thresholds_from_config(cfg)
+        result, confidence, verdict_mod.thresholds_from_config(cfg)
     )
     return v.headline
 

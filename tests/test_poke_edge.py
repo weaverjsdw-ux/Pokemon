@@ -19,6 +19,38 @@ def _cfg():
                         "exit_venue": {"sealed_retail_arbitrage": "ebay"}}})
 
 
+# ---------------------------------------------------------------- _fee_model (Task 4)
+
+def test_fee_model_default_matches_old_three_scalar_construction():
+    """Regression guard: _fee_model's dollars must be byte-identical to the pre-Task-4
+    bare FeeModel(ebay_fvf_pct=..., ebay_fixed_fee=..., local_haircut_pct=...) build."""
+    from scanner import margin
+    cfg = _cfg()
+    old_style = margin.FeeModel(
+        ebay_fvf_pct=cfg.ebay_fvf_pct, ebay_fixed_fee=cfg.ebay_fixed_fee,
+        local_haircut_pct=cfg.local_haircut_pct)
+    new_style = edge._fee_model(cfg)
+    assert (margin.net_margin(32.1, 100.0, "ebay", 8.0, old_style)
+            == margin.net_margin(32.1, 100.0, "ebay", 8.0, new_style))
+
+
+def test_fee_model_now_carries_tcgplayer_and_provenance_fields():
+    """The gap Task-4 fixes: the old 3-scalar build silently dropped the new TCGplayer/
+    provenance FeeModel fields. _fee_model must now carry them from the dated schedule."""
+    from scanner import margin
+    fees = edge._fee_model(_cfg())
+    assert fees.tcgplayer_commission_pct == margin.FEE_SCHEDULE[-1].tcgplayer_commission_pct
+    assert fees.tcgplayer_processing_pct == margin.FEE_SCHEDULE[-1].tcgplayer_processing_pct
+    assert fees.tcgplayer_fixed_fee == margin.FEE_SCHEDULE[-1].tcgplayer_fixed_fee
+    assert fees.effective_date == margin.FEE_SCHEDULE[-1].effective_date
+    assert fees.source_url == margin.FEE_SCHEDULE[-1].source_url
+
+
+def test_fee_model_accepts_as_of_for_era_correct_selection():
+    fees = edge._fee_model(_cfg(), as_of="2026-07-05")
+    assert fees is not None
+
+
 # ---------------------------------------------------------------- source posture (E)
 
 def test_posture_missing_comp():

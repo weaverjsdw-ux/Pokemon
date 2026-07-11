@@ -96,3 +96,56 @@ def test_fee_model_for_malformed_date_returns_newest_never_stale():
     assert margin.fee_model_for("not-a-date") is margin.FEE_SCHEDULE[-1]
     assert margin.fee_model_for("0000-00-00") is margin.FEE_SCHEDULE[-1]
     assert margin.fee_model_for("2026-07-10T12:00:00") is margin.FEE_SCHEDULE[-1]  # datetime str ok (date part valid)
+
+
+# ---------------------------------------------------------------- fee_model_from_cfg
+
+class _FeeCfg:
+    """Minimal cfg stand-in carrying only the fee scalars fee_model_from_cfg reads."""
+    ebay_fvf_pct = 0.1325
+    ebay_fixed_fee = 0.40
+    local_haircut_pct = 0.15
+    tcgplayer_commission_pct = 0.1075
+    tcgplayer_processing_pct = 0.025
+    tcgplayer_fixed_fee = 0.30
+
+
+def test_fee_model_from_cfg_starts_from_dated_schedule_not_bare_defaults():
+    # Carries the schedule's provenance + TCGplayer/high-value fields -- NOT just the
+    # 3 config scalars a bare FeeModel(...) construction would have (the gap Task-4 fixes).
+    fees = margin.fee_model_from_cfg(_FeeCfg())
+    assert fees.effective_date == margin.FEE_SCHEDULE[-1].effective_date
+    assert fees.source_url == margin.FEE_SCHEDULE[-1].source_url
+    assert fees.ebay_high_value_fvf_pct == margin.FEE_SCHEDULE[-1].ebay_high_value_fvf_pct
+    assert fees.ebay_high_value_threshold == margin.FEE_SCHEDULE[-1].ebay_high_value_threshold
+
+
+def test_fee_model_from_cfg_layers_config_scalars_on_top():
+    class Cfg(_FeeCfg):
+        ebay_fvf_pct = 0.10
+        ebay_fixed_fee = 0.30
+        local_haircut_pct = 0.20
+        tcgplayer_commission_pct = 0.09
+        tcgplayer_processing_pct = 0.02
+        tcgplayer_fixed_fee = 0.25
+
+    fees = margin.fee_model_from_cfg(Cfg())
+    assert fees.ebay_fvf_pct == 0.10
+    assert fees.ebay_fixed_fee == 0.30
+    assert fees.local_haircut_pct == 0.20
+    assert fees.tcgplayer_commission_pct == 0.09
+    assert fees.tcgplayer_processing_pct == 0.02
+    assert fees.tcgplayer_fixed_fee == 0.25
+    # never overridden -- stays FAIL-SAFE regardless of config
+    assert fees.ebay_high_value_fvf_pct == margin.FeeModel().ebay_high_value_fvf_pct
+
+
+def test_fee_model_from_cfg_default_equals_old_three_scalar_construction():
+    # The regression guard for every consumer's cutover: at config defaults, the new
+    # helper must net IDENTICAL dollars to the old FeeModel(ebay_fvf_pct=..., ebay_fixed_fee=...,
+    # local_haircut_pct=...) construction it replaces.
+    old_style = margin.FeeModel(ebay_fvf_pct=0.1325, ebay_fixed_fee=0.40, local_haircut_pct=0.15)
+    new_style = margin.fee_model_from_cfg(_FeeCfg())
+    r_old = margin.net_margin(32.1, 100.0, "ebay", 8.0, old_style)
+    r_new = margin.net_margin(32.1, 100.0, "ebay", 8.0, new_style)
+    assert r_old == r_new

@@ -5,7 +5,7 @@ No network or disk I/O — every input is passed in, every output is a value.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date as _date
 
 
@@ -48,6 +48,26 @@ def fee_model_for(as_of: str | None = None) -> FeeModel:
         return FEE_SCHEDULE[-1]
     applicable = [m for m in FEE_SCHEDULE if m.effective_date <= as_of]
     return applicable[-1] if applicable else FEE_SCHEDULE[0]
+
+
+def fee_model_from_cfg(cfg, as_of: str | None = None) -> FeeModel:
+    """The dated schedule model for ``as_of``, with the operator's config-scalar
+    overrides layered on top (config wins on the 3 fields it carries: eBay FVF/fixed
+    fee, local haircut). Starting from ``fee_model_for`` (not a bare 3-scalar
+    ``FeeModel(...)``) is what carries the TCGplayer + eBay-high-value + provenance
+    fields to every consumer instead of losing them to the config-only fields.
+    TCGplayer config overrides layer the same way; ``ebay_high_value_fvf_pct`` is
+    NEVER overridden here (stays FAIL-SAFE at the schedule's default -- see
+    PIN-FIRST HARD GATE)."""
+    return replace(
+        fee_model_for(as_of),
+        ebay_fvf_pct=cfg.ebay_fvf_pct,
+        ebay_fixed_fee=cfg.ebay_fixed_fee,
+        local_haircut_pct=cfg.local_haircut_pct,
+        tcgplayer_commission_pct=cfg.tcgplayer_commission_pct,
+        tcgplayer_processing_pct=cfg.tcgplayer_processing_pct,
+        tcgplayer_fixed_fee=cfg.tcgplayer_fixed_fee,
+    )
 
 
 @dataclass(frozen=True)

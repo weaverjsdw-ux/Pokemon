@@ -140,18 +140,19 @@ def _primary_source(comp: dict) -> str:
 
 # ---------------------------------------------------------------- money math
 
-def compute_margin(entry_price, comp, confidence, product, cfg):
+def compute_margin(entry_price, comp, confidence, product, cfg, *, channel="ebay", as_of=None):
     """(expected_net, expected_roi_pct, verdict_tier) via the exact alert-path
-    composition. No verified entry price or no comp => (None, None, 'n/a')."""
+    composition. No verified entry price or no comp => (None, None, 'n/a').
+
+    ``channel`` selects the sell venue fee shape (default "ebay" -- spec 8.3);
+    ``as_of`` selects the era-correct dated fee schedule snapshot (default None ->
+    newest). Both are additive: the default path nets byte-identical dollars to
+    before Task 4."""
     if entry_price is None or comp is None:
         return None, None, "n/a"
-    fees = margin_mod.FeeModel(
-        ebay_fvf_pct=cfg.ebay_fvf_pct,
-        ebay_fixed_fee=cfg.ebay_fixed_fee,
-        local_haircut_pct=cfg.local_haircut_pct,
-    )
+    fees = margin_mod.fee_model_from_cfg(cfg, as_of=as_of)
     cost = margin_mod.cost_basis(entry_price, cfg.tax_rate)
-    result = margin_mod.net_margin(cost, comp, "ebay", _shipping_for(product, cfg), fees)
+    result = margin_mod.net_margin(cost, comp, channel, _shipping_for(product, cfg), fees)
     v = verdict_mod.buy_verdict(result, confidence, verdict_mod.thresholds_from_config(cfg))
     return result.dollar_margin, result.roi_pct, v.tier
 
@@ -345,7 +346,7 @@ def build_opportunity(product_key, product, comp, momentum, candidate, cfg, *, a
     latest_confidence = confidence if confidence != "none" else None
 
     expected_net, expected_roi_pct, verdict_tier = compute_margin(
-        entry_price, market_comp, confidence, product, cfg)
+        entry_price, market_comp, confidence, product, cfg, as_of=as_of)
     source_agreement = _source_agreement(source_count, confidence)
 
     trade_type = classify_trade(

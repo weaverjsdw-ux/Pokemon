@@ -272,6 +272,29 @@ def test_verdict_for_alert_no_comp_returns_empty():
     assert v == ""
 
 
+def test_verdict_for_alert_default_channel_is_ebay_unchanged():
+    # Regression guard: default channel/as_of nets the exact pre-Task-4 eBay dollars.
+    # entry 30 -> cost 32.10; fee = 100*0.1325+0.40=13.65; net = 100-13.65-8=78.35 -> margin 46.25
+    row = {"status": "ok", "estimate": 100.0, "confidence": "high"}
+    v = main_mod.verdict_for_alert(
+        cfg=_mini_cfg(), product={}, observed_price="$30.00", comp_row=row,
+    )
+    assert v.startswith("BUY")
+    assert "+$46.25 net" in v
+
+
+def test_verdict_for_alert_tcgplayer_channel_nets_tcgplayer_fees():
+    # Same inputs, channel="tcgplayer": fee = 100*(0.1075+0.025)+0.30=13.55;
+    # net = 100-13.55-8=78.45 -> margin 46.35 (a $0.10 delta from eBay).
+    row = {"status": "ok", "estimate": 100.0, "confidence": "high"}
+    v = main_mod.verdict_for_alert(
+        cfg=_mini_cfg(), product={}, observed_price="$30.00", comp_row=row,
+        channel="tcgplayer",
+    )
+    assert v.startswith("BUY")
+    assert "+$46.35 net" in v
+
+
 def test_missing_costco_pc_ids_do_not_break_run_pass(tmp_path):
     """Engine must run with zero Costco/PC IDs (graceful, not an exception)."""
     from scanner import config as cfg_mod

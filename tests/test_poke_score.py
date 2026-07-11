@@ -53,6 +53,23 @@ def test_flipper_buy_matches_backbone():
     assert flipper_is_buy(58.0, 60.0, CFG) is False
 
 
+def test_flipper_is_buy_default_channel_is_ebay_unchanged():
+    # Regression guard: default channel/as_of matches the pre-Task-4 eBay-only behavior
+    # exactly (same BUY/not-BUY calls as test_flipper_buy_matches_backbone).
+    assert flipper_is_buy(40.0, 100.0, CFG, channel="ebay") == flipper_is_buy(40.0, 100.0, CFG)
+    assert flipper_is_buy(58.0, 60.0, CFG, channel="ebay") == flipper_is_buy(58.0, 60.0, CFG)
+
+
+def test_flipper_is_buy_tcgplayer_channel_nets_tcgplayer_fees():
+    # deal 58, comp 60 is THIN on eBay (fee 60*0.1325+0.40=8.35, ship 8 -> net 43.65,
+    # cost 58*1.07=62.06 -> margin negative -> not BUY on either channel here, but the
+    # channel kwarg must be accepted and actually change which fee model prices it.
+    assert flipper_is_buy(58.0, 60.0, CFG, channel="tcgplayer") is False
+    # deal 40, comp 100 clears BUY on tcgplayer too (fee 100*0.1325+0.30=13.55, ship 8
+    # -> net 78.45, cost 40*1.07=42.8 -> margin 35.65, healthy BUY)
+    assert flipper_is_buy(40.0, 100.0, CFG, channel="tcgplayer") is True
+
+
 def test_steal_requires_verified_and_threshold():
     steal = assign_badges(_row(deal_price=39.99, market_comp=60.0, pct_off=33), CFG)
     assert "STEAL" in steal                       # verified, 33% >= steal_pct 30

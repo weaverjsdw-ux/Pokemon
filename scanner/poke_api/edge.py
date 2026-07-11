@@ -253,10 +253,11 @@ def _status_block(comp: dict, momentum: dict) -> dict:
     }
 
 
-def _fee_model(cfg) -> margin_mod.FeeModel:
-    return margin_mod.FeeModel(
-        ebay_fvf_pct=cfg.ebay_fvf_pct, ebay_fixed_fee=cfg.ebay_fixed_fee,
-        local_haircut_pct=cfg.local_haircut_pct)
+def _fee_model(cfg, *, as_of=None) -> margin_mod.FeeModel:
+    """``as_of`` selects the era-correct dated fee schedule snapshot (default None ->
+    newest). Channel-agnostic: grading_ev always sells the graded slab on eBay, so
+    there is no channel choice to thread here (unlike the sell-side consumers)."""
+    return margin_mod.fee_model_from_cfg(cfg, as_of=as_of)
 
 
 def build_sealed_packet(product_key, product, comp, momentum, candidate, cfg, *, as_of) -> dict:
@@ -338,7 +339,7 @@ def build_asset_packet(asset_key, asset, comp, momentum, asset_candidate, cfg, *
         discount_pct = round((market_comp - entry_price) / market_comp * 100.0, 2)
 
     expected_net, expected_roi_pct, verdict_tier = opp.compute_margin(
-        entry_price, market_comp, confidence, asset, cfg)
+        entry_price, market_comp, confidence, asset, cfg, as_of=as_of)
 
     trade_type = classify_asset_edge_trade(asset_class, market_comp, momentum_status, entry_price)
     hint, reason, blockers = decide_edge(
@@ -355,7 +356,7 @@ def build_asset_packet(asset_key, asset, comp, momentum, asset_candidate, cfg, *
         gem_src = gem_rate_source or str(asset.get("gem_rate_source") or "")
         grading = gev_mod.grading_ev(
             raw_entry=entry_price, raw_comp=market_comp, graded_comp=graded_sibling_comp,
-            grading_fee=cfg.poke.grading_cost_all_in, gem_rate=gem, fees=_fee_model(cfg),
+            grading_fee=cfg.poke.grading_cost_all_in, gem_rate=gem, fees=_fee_model(cfg, as_of=as_of),
             tax_rate=cfg.tax_rate, est_shipping=opp._shipping_for(asset, cfg),
             target_grade=target_grade, downside_comp=downside_comp,
             buy_floor_net=cfg.buy_floor_net, gem_rate_basis=gem_src,

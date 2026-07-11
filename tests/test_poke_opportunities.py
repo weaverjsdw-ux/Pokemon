@@ -85,6 +85,25 @@ def test_compute_margin_none_when_no_entry_or_comp(cfg):
     assert opp.compute_margin(58.0, None, "high", PRODUCT, cfg) == (None, None, "n/a")
 
 
+def test_compute_margin_default_channel_is_ebay_unchanged(cfg):
+    # Regression guard: default channel/as_of must net the exact pre-Task-4 eBay dollars.
+    # entry 30 -> cost 30*1.07=32.10; fee = 100*0.1325+0.40=13.65; net = 100-13.65-8=78.35
+    # margin = 78.35-32.10 = 46.25
+    net, roi, tier = opp.compute_margin(30.0, 100.0, "high", {}, cfg)
+    assert net == pytest.approx(46.25)
+    assert roi == pytest.approx(46.25 / 32.10 * 100.0, rel=1e-6)
+    assert tier == "BUY"
+
+
+def test_compute_margin_tcgplayer_channel_nets_tcgplayer_fees(cfg):
+    # Same inputs, channel="tcgplayer": fee = 100*(0.1075+0.025)+0.30=13.55;
+    # net = 100-13.55-8=78.45; margin = 78.45-32.10 = 46.35 (a $0.10 delta from eBay).
+    net, roi, tier = opp.compute_margin(30.0, 100.0, "high", {}, cfg, channel="tcgplayer")
+    assert net == pytest.approx(46.35)
+    assert roi == pytest.approx(46.35 / 32.10 * 100.0, rel=1e-6)
+    assert tier == "BUY"
+
+
 # ---------------------------------------------------------------- classify_trade
 
 def test_classify_catalog_gap_no_comp(cfg):
