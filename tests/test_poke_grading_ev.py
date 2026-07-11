@@ -180,3 +180,22 @@ def test_explicit_grading_fee_still_honored_as_operator_override():
     r = _ev(grading_fee=150.0)
     assert r["grading_fee"] == 150.0
     assert r["grading_fee_provenance"] is None       # no derivation happened
+
+
+def test_grading_fee_derived_and_sentinel_not_leaked_when_blocked():
+    """Regression: when grading_fee is OMITTED entirely (derive-from-schedule path)
+    AND another required input is missing (gem_rate), the blocked-branch result must
+    carry the already-resolved derived fee (a real float) and its provenance -- the
+    internal ``_FEE_NOT_GIVEN`` sentinel object must never leak into the returned
+    ``grading_fee`` field."""
+    kw = dict(raw_entry=400.0, raw_comp=500.0, graded_comp=1000.0,
+              gem_rate=None, fees=FEES, tax_rate=0.07, est_shipping=8.0,
+              target_grade="psa10", buy_floor_net=15.0,
+              grading_fee_as_of="2026-07-01")   # grading_fee omitted -> derive path
+    r = gev.grading_ev(**kw)
+    assert r["status"] == "blocked"
+    assert any("gem rate" in b.lower() for b in r["blockers"])
+    assert isinstance(r["grading_fee"], float)       # resolved derived fee, not the sentinel
+    assert r["grading_fee"] >= 80.0                  # real post-pause floor
+    prov = r["grading_fee_provenance"]
+    assert prov is not None and prov.get("effective_date") and prov.get("source_url")

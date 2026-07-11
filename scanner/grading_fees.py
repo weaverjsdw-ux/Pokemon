@@ -23,6 +23,12 @@ from __future__ import annotations
 # for EV purposes must be landed cost, not just the grading-tier sticker price.
 RETURN_SHIPPING_ASSUMED = 15.0
 
+# operator_assumption: the PSA Regular-tier grading sticker price (pre return
+# shipping), seeded as a conservative (higher-is-safer) floor -- see PIN-FIRST note
+# above. Shared by BOTH the ``tiers`` value and the provenance ``source_url`` prose
+# below so a future PIN-FIRST update to the real number can never desync the two.
+PSA_REGULAR_FEE_ASSUMED = 80.0
+
 # operator_assumption badge text, threaded into every un-pinned snapshot's source_url so
 # any consumer (grading_ev provenance, CLI output, tests) can see at a glance that this
 # number is not yet a cited live-page figure.
@@ -34,15 +40,16 @@ GRADING_SCHEDULE: list[dict] = [
         "source_url": (
             f"{_OPERATOR_ASSUMPTION_BADGE}: PSA discount 'value' grading tiers paused "
             "2026-06-02 (value tier ~$25 no longer offered); Regular tier all-in seeded "
-            f"at $80.00 grading + ${RETURN_SHIPPING_ASSUMED:.2f} return shipping/insurance "
-            "as a conservative (higher-is-safer) floor -- PENDING pin of the live PSA "
-            "pricing page + capture date, see PIN-FIRST note in scanner/grading_fees.py"
+            f"at ${PSA_REGULAR_FEE_ASSUMED:.2f} grading + ${RETURN_SHIPPING_ASSUMED:.2f} "
+            "return shipping/insurance as a conservative (higher-is-safer) floor -- "
+            "PENDING pin of the live PSA pricing page + capture date, see PIN-FIRST "
+            "note in scanner/grading_fees.py"
         ),
         "tiers": {
             # No "value" key here: the tier is paused, not just expensive -- absence is
             # the honest representation. grading_fee_for() falls back to the cheapest
             # tier actually present (today, "regular") rather than inventing one.
-            "regular": 80.0 + RETURN_SHIPPING_ASSUMED,
+            "regular": PSA_REGULAR_FEE_ASSUMED + RETURN_SHIPPING_ASSUMED,
         },
     },
 ]
