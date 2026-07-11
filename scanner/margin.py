@@ -6,6 +6,7 @@ No network or disk I/O — every input is passed in, every output is a value.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date as _date
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,15 @@ FEE_SCHEDULE: tuple[FeeModel, ...] = (
 
 
 def fee_model_for(as_of: str | None = None) -> FeeModel:
+    """The dated fee snapshot in effect on ``as_of`` (ISO ``YYYY-MM-DD``). ``None`` or a
+    MALFORMED date -> the newest snapshot (never a stale era); a valid date before every
+    snapshot -> the oldest snapshot. Validated on the ``YYYY-MM-DD`` prefix so a datetime
+    string still resolves by its date part."""
+    if as_of:
+        try:
+            _date.fromisoformat(str(as_of)[:10])
+        except ValueError:
+            as_of = None            # malformed -> newest, never a stale/oldest era
     if not as_of:
         return FEE_SCHEDULE[-1]
     applicable = [m for m in FEE_SCHEDULE if m.effective_date <= as_of]

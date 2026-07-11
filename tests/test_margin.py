@@ -88,3 +88,11 @@ def test_fee_model_for_selects_by_date():
     # a date before the newest era selects an older snapshot when one exists, else the oldest
     m = margin.fee_model_for("2000-01-01")
     assert m.effective_date <= "2000-01-01" or m is margin.FEE_SCHEDULE[0]
+
+
+def test_fee_model_for_malformed_date_returns_newest_never_stale():
+    # spec: empty/malformed date -> NEWEST (never a stale/oldest era). A valid early date
+    # still resolves to the oldest era (that's the test above); only garbage routes to newest.
+    assert margin.fee_model_for("not-a-date") is margin.FEE_SCHEDULE[-1]
+    assert margin.fee_model_for("0000-00-00") is margin.FEE_SCHEDULE[-1]
+    assert margin.fee_model_for("2026-07-10T12:00:00") is margin.FEE_SCHEDULE[-1]  # datetime str ok (date part valid)
