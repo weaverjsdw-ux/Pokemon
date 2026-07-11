@@ -26,6 +26,20 @@ class FeeModel:
     source_url: str = ""
 
 
+FEE_SCHEDULE: tuple[FeeModel, ...] = (
+    FeeModel(effective_date="2026-02-10",
+             source_url="https://www.ebay.com/help/selling/fees-credits-invoices/"
+                        "selling-fees | https://help.tcgplayer.com/ (TCGplayer 10.75% eff 2026-02-10)"),
+)
+
+
+def fee_model_for(as_of: str | None = None) -> FeeModel:
+    if not as_of:
+        return FEE_SCHEDULE[-1]
+    applicable = [m for m in FEE_SCHEDULE if m.effective_date <= as_of]
+    return applicable[-1] if applicable else FEE_SCHEDULE[0]
+
+
 @dataclass(frozen=True)
 class MarginResult:
     channel: str

@@ -76,3 +76,15 @@ def test_unknown_channel_still_raises():
     import pytest
     with pytest.raises(ValueError):
         margin.net_margin(30.0, 100.0, "carrier-pigeon", 8.0, margin.FeeModel())
+
+
+def test_fee_model_for_returns_newest_by_default():
+    m = margin.fee_model_for()
+    assert m.effective_date and m.source_url            # provenance present
+    assert m is margin.FEE_SCHEDULE[-1]
+
+
+def test_fee_model_for_selects_by_date():
+    # a date before the newest era selects an older snapshot when one exists, else the oldest
+    m = margin.fee_model_for("2000-01-01")
+    assert m.effective_date <= "2000-01-01" or m is margin.FEE_SCHEDULE[0]
