@@ -13,6 +13,17 @@ class FeeModel:
     ebay_fvf_pct: float = 0.1325
     ebay_fixed_fee: float = 0.40
     local_haircut_pct: float = 0.15
+    tcgplayer_commission_pct: float = 0.1075
+    tcgplayer_processing_pct: float = 0.025
+    tcgplayer_fixed_fee: float = 0.30
+    ebay_high_value_threshold: float = 1000.0
+    # FAIL-SAFE: equal to the full FVF, i.e. NO discount applies, until the live eBay
+    # Trading Cards *category* fee structure is pinned + cited (see PIN-FIRST HARD GATE
+    # in docs/superpowers/specs/2026-06-28-resale-engine-program-roadmap.md). An
+    # unverified fee must err toward higher fees / lower net, never toward fake profit.
+    ebay_high_value_fvf_pct: float = 0.1325
+    effective_date: str = ""
+    source_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -44,15 +55,36 @@ def net_margin(
 ) -> MarginResult:
     """Net proceeds and margin for selling at `comp` on `channel`.
 
-    eBay: fee = comp*fvf + fixed; seller-paid shipping is a cost.
+    eBay: fee = comp*fvf + fixed; seller-paid shipping is a cost. The FVF rate
+        switches to `ebay_high_value_fvf_pct` at `ebay_high_value_threshold`, but
+        that rate defaults to the full FVF (fail-safe, no discount) until pinned.
+    tcgplayer: fee = comp*(commission_pct + processing_pct) + fixed.
     local: no platform fee/shipping; comp is haircut to a derived local price.
     """
     if channel == "ebay":
-        fee = comp * fees.ebay_fvf_pct + fees.ebay_fixed_fee
+        # FAIL-SAFE: ebay_high_value_fvf_pct defaults to the FULL FVF, so this branch is a
+        # no-op discount (full rate at any comp) until the live eBay Trading Cards category
+        # is pinned + a real discounted rate/threshold is set (see PIN-FIRST HARD GATE).
+        fvf_pct = (
+            fees.ebay_high_value_fvf_pct
+            if comp >= fees.ebay_high_value_threshold
+            else fees.ebay_fvf_pct
+        )
+        fee = comp * fvf_pct + fees.ebay_fixed_fee
         net = comp - fee - est_shipping
-        denom = 1.0 - fees.ebay_fvf_pct
+        denom = 1.0 - fvf_pct
         breakeven = (
             (cost_incl_tax + fees.ebay_fixed_fee + est_shipping) / denom
+            if denom > 0
+            else float("inf")
+        )
+    elif channel == "tcgplayer":
+        combined_pct = fees.tcgplayer_commission_pct + fees.tcgplayer_processing_pct
+        fee = comp * combined_pct + fees.tcgplayer_fixed_fee
+        net = comp - fee - est_shipping
+        denom = 1.0 - combined_pct
+        breakeven = (
+            (cost_incl_tax + fees.tcgplayer_fixed_fee + est_shipping) / denom
             if denom > 0
             else float("inf")
         )
