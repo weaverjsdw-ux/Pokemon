@@ -12,6 +12,7 @@
 
 - **Package is `scanner/`** (never `target_scanner/`); price subsystem `scanner/poke_api/`.
 - **Price/fee accuracy is STOP-class.** Every fee/rate carries a `source_url` + `effective_date`. Estimates are badged; a fee is never fabricated. No source → cite the operator assumption explicitly.
+- **Two PIN-FIRST hard gates (operator-mandated, STOP-class).** The eBay ≥$1,000 high-value FVF discount (Task 1) and the PSA grading floor (Task 3) ship **fail-safe** — full FVF / conservative `operator_assumption` grading cost — and are NOT switched to their real values until pinned against the LIVE **eBay Trading Cards category** page and the LIVE **PSA pricing** page respectively, cited with a capture date. An unverified fee/cost always errs toward **higher fees / lower net / higher grading cost — never toward fake profit or a cheaper grade.**
 - **Extend, don't rebuild.** `FeeModel` (`margin.py:11-15`), `net_margin` (`margin.py:38-73`), `cost_basis` (`margin.py:27-29`) keep their current call contracts working; new behavior is additive. `MarginResult` (`margin.py:18-24`) already carries `channel`.
 - **Fee channel default = eBay** (spec §8.3): when a packet/sale has no chosen sell channel, `net_margin` defaults to `"ebay"` (conservative, higher fees). Explicit channel override allowed. The pre-existing `"local"` channel is unchanged.
 - **Versioning is required, not gold-plating.** Fees change often (TCGplayer 2026-02-10; PSA 2026-02 & 2026-06-02). A dated fee schedule selects the era; un-versioned fees silently misprice.
@@ -49,25 +50,26 @@ Extend the pure fee model: add the TCGplayer channel, the eBay ≥$1,000 50%-FVF
 **Interfaces:**
 - Consumes: nothing new.
 - Produces:
-  - `FeeModel` gains (all with defaults): `tcgplayer_commission_pct: float = 0.1075`, `tcgplayer_processing_pct: float = 0.025`, `tcgplayer_fixed_fee: float = 0.30`, `ebay_high_value_threshold: float = 1000.0`, `ebay_high_value_fvf_pct: float = 0.066` (≈ 50% of 0.1325), `effective_date: str = ""`, `source_url: str = ""`.
+  - `FeeModel` gains (all with defaults): `tcgplayer_commission_pct: float = 0.1075`, `tcgplayer_processing_pct: float = 0.025`, `tcgplayer_fixed_fee: float = 0.30`, `ebay_high_value_threshold: float = 1000.0`, **`ebay_high_value_fvf_pct: float = 0.1325` — FAIL-SAFE default equal to the full FVF (i.e. NO discount applies) until the live eBay Trading Cards category structure is pinned + cited (see PIN-FIRST). An unverified fee model MUST err toward higher fees / lower net, never toward fake profit.**, `effective_date: str = ""`, `source_url: str = ""`.
   - `net_margin(cost_incl_tax, comp, channel, est_shipping, fees)` — unchanged signature; adds a `channel == "tcgplayer"` branch and, in the `"ebay"` branch, applies `ebay_high_value_fvf_pct` when `comp >= ebay_high_value_threshold`.
 
-> **PIN-FIRST (STOP-class fee fact):** Before locking the ≥$1,000 test below, verify eBay's *current* high-value FVF structure against the live eBay selling-fees page and cite it in the `FeeModel` `source_url`. The worked example encodes a **provisional** whole-comp 50% discount (`ebay_high_value_fvf_pct = 0.066`). If eBay applies the reduced rate only to the **portion above** the threshold (a tiered structure — common), rewrite BOTH the `net_margin` eBay branch AND `test_ebay_high_value_fvf_discount_applies_at_threshold` to the confirmed structure + number. (Same pin-then-cite for the TCGplayer ~2.5% processing rate — lower stakes, within the spec's stated range.)
+> **PIN-FIRST — HARD GATE (STOP-class; the load-bearing risk of this plan):** The eBay high-value FVF discount ships **OFF (fail-safe = full FVF)** and stays off until the LIVE **eBay Trading Cards *category* fee page** (not the generic selling-fees rate) is pinned. Extract, with a capture date in `source_url`: the category FVF %, the threshold(s), and whether the reduced rate is **marginal** (applied only to the portion *above* the threshold) or flat. eBay card FVF is almost certainly **marginal tiering** with a category threshold likely **far above $1,000** (historically ~$7,500 for collectible cards) — so a $1,500 card is likely **entirely below** the threshold and pays the **full** FVF. A whole-comp discount here would overstate net by ~$100 on the operator's single biggest card — the exact fake profit this plan exists to kill. Only after the live structure is pinned + cited may the discount switch on (set the real rate/threshold; rewrite the eBay branch to marginal if confirmed) with a matching real-discount test. Until then: **full FVF, no discount.** (Same pin-then-cite for the TCGplayer ~2.5% processing rate — lower stakes, within the spec's stated range.)
 
-- [ ] **Step 1: Write failing tests (worked fee examples — the ≥$1,000 one is provisional until the PIN-FIRST check confirms eBay's structure)**
+- [ ] **Step 1: Write failing tests (worked fee examples — the ≥$1,000 case asserts the FAIL-SAFE full FVF, not a discount, until the PIN-FIRST gate is met)**
 
 ```python
 # add to tests/test_margin.py
 from scanner import margin
 
 
-def test_ebay_high_value_fvf_discount_applies_at_threshold():
+def test_ebay_high_value_defaults_to_full_fvf_until_pinned():
+    # FAIL-SAFE: the >=$1,000 discount is OFF by default -> full 13.25% FVF, never fake profit.
+    # A real-discount test is added ONLY after the live eBay Trading Cards category is pinned+cited.
     fees = margin.FeeModel()
-    # $1,500 single on eBay: discounted FVF 6.6% (not 13.25%) + $0.40 + $8 ship
     r = margin.net_margin(cost_incl_tax=1000.0, comp=1500.0, channel="ebay",
                           est_shipping=8.0, fees=fees)
-    # fee = 1500*0.066 + 0.40 = 99.40 ; net = 1500 - 99.40 - 8 = 1392.60
-    assert round(r.net_proceeds, 2) == 1392.60
+    # fee = 1500*0.1325 + 0.40 = 199.15 ; net = 1500 - 199.15 - 8 = 1292.85 (matches reality, not +$100)
+    assert round(r.net_proceeds, 2) == 1292.85
 
 
 def test_ebay_standard_fvf_below_threshold():
@@ -104,6 +106,9 @@ Read the current `FeeModel` (`margin.py:11-15`) and `net_margin` (`margin.py:38-
 
 ```python
     if channel == "ebay":
+        # FAIL-SAFE: ebay_high_value_fvf_pct defaults to the FULL FVF, so this branch is a
+        # no-op discount (full rate at any comp) until the live eBay Trading Cards category
+        # is pinned + a real discounted rate/threshold is set (see PIN-FIRST HARD GATE).
         fvf_pct = (fees.ebay_high_value_fvf_pct
                    if comp >= fees.ebay_high_value_threshold else fees.ebay_fvf_pct)
         fee = comp * fvf_pct + fees.ebay_fixed_fee
@@ -209,6 +214,8 @@ Encode PSA grading cost with the live reality (value tiers **paused 2026-06-02**
 **Interfaces:**
 - Produces: `grading_fee_for(as_of: str | None = None, tier: str = "regular") -> tuple[float, str, str]` returning `(all_in_fee, effective_date, source_url)`. `GRADING_SCHEDULE` holds dated snapshots; the 2026-06-02 snapshot has NO value tier (paused) and a `regular` all-in ≈ $80 grading + ~$15 return shipping. Unknown tier at a date where it doesn't exist → the cheapest *available* tier at that date (never a paused/nonexistent tier), with a note.
 
+> **PIN-FIRST (STOP-class, money-class — grading-EV gates whether the operator grades a raw):** Pin the LIVE PSA pricing page for the Regular-tier all-in + the value-tier **pause date (2026-06-02)**, and cite with a capture date in the snapshot `source_url`. Do NOT lock the ≥$80 figure on memory. FAIL-SAFE direction: for grading-EV a *higher* grading cost is the conservative error (it makes the EV *less* likely to greenlight grading), so until the live page is pinned the schedule value is an explicit **`operator_assumption`** at or above the known real floor, and the tests below assert a **floor** (`>= 80`, cost never understated) — not an exact memory-locked number. Flip the badge from `operator_assumption` to sourced only once the live PSA page is pinned + cited.
+
 - [ ] **Step 1: Write failing tests**
 
 ```python
@@ -229,7 +236,7 @@ def test_value_tier_unavailable_after_pause_falls_back_never_fabricates():
 
 - [ ] **Step 2: Run to verify they fail** — `.venv/Scripts/python.exe -m pytest tests/test_grading_fees.py -q`
 
-- [ ] **Step 3: Implement `grading_fees.py`** — a dated `GRADING_SCHEDULE` (each snapshot: `effective_date`, `source_url`, a `tiers: dict[str, float]` all-in map) + `grading_fee_for` selecting the snapshot by date then the tier (fallback to the cheapest available tier when the requested one is absent). Seed the 2026-06-02 snapshot: `tiers={"regular": 80.0 + return_shipping}` (cite PSA 2026 pricing + the 2026-06-02 value-tier pause). Include an earlier snapshot only if a real prior tier is being modeled; otherwise one honest current snapshot.
+- [ ] **Step 3: Implement `grading_fees.py`** — a dated `GRADING_SCHEDULE` (each snapshot: `effective_date`, `source_url`, a `tiers: dict[str, float]` all-in map) + `grading_fee_for` selecting the snapshot by date then the tier (fallback to the cheapest available tier when the requested one is absent). Seed the 2026-06-02 snapshot: `tiers={"regular": 80.0 + return_shipping}`, **badged `operator_assumption` in the `source_url`/note until the live PSA page is pinned + cited** (PIN-FIRST; higher-is-safer for grading-EV). Include an earlier snapshot only if a real prior tier is being modeled; otherwise one honest current snapshot.
 
 - [ ] **Step 4: Run to verify** (PASS) — `.venv/Scripts/python.exe -m pytest tests/test_grading_fees.py -q`
 
