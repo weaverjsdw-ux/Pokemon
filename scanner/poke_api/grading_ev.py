@@ -16,12 +16,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import grading_fees as grading_fees_mod
 from .. import margin as margin_mod
 from .gem_rates import POP_PROXY_CAVEAT
 
 # The standard sensitivity band a grading decision is read against (never a point
 # estimate). The actual sourced/assumed rate is added alongside these.
 SENSITIVITY_RATES = (0.20, 0.30, 0.40, 0.50)
+
+# Sentinel distinguishing "caller omitted grading_fee" (derive from the sourced,
+# dated schedule) from "caller explicitly passed None" (a genuine missing-input
+# block, exercised by test_missing_grading_fee_blocks). A plain ``None`` default
+# cannot make this distinction, so a private sentinel object stands in for "not
+# supplied" instead.
+_FEE_NOT_GIVEN = object()
 
 
 def _pos(value) -> float | None:
@@ -76,23 +84,43 @@ def _sensitivity_rows(*, cost: float, upside: float, downside: float, actual_gem
     return rows
 
 
-def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
+def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee=_FEE_NOT_GIVEN, gem_rate,
                fees: margin_mod.FeeModel, tax_rate: float, est_shipping: float,
                target_grade: str = "", ship_insurance: float = 0.0,
                downside_comp=None, buy_floor_net: float = 15.0,
-               gem_rate_basis: str = "", grading_fee_basis: str = "") -> dict[str, Any]:
+               gem_rate_basis: str = "", grading_fee_basis: str = "",
+               grading_fee_as_of: str | None = None,
+               grading_fee_tier: str = "regular") -> dict[str, Any]:
     """(status, expected_net, expected_roi_pct, downside_net, ...) for grading a raw
     single to ``target_grade``. Blocks (dollars ``None``) unless every required input
-    is present and valid; ``gem_rate`` must be in ``(0, 1]``."""
+    is present and valid; ``gem_rate`` must be in ``(0, 1]``.
+
+    ``grading_fee`` is an explicit **operator override** when supplied (e.g.
+    ``cfg.poke.grading_cost_all_in``) — including an explicit ``None``, which is a
+    genuine missing-input block, never silently backfilled. When the caller omits
+    ``grading_fee`` entirely, the fee is derived from the sourced, dated PSA schedule
+    (``scanner.grading_fees.grading_fee_for``) for ``grading_fee_as_of``/
+    ``grading_fee_tier``, and its ``(effective_date, source_url)`` is recorded in the
+    result's ``grading_fee_provenance``."""
     blockers: list[str] = []
     entry = _pos(raw_entry)
     rcomp = _pos(raw_comp)
     gcomp = _pos(graded_comp)
-    fee = None
-    try:
-        fee = float(grading_fee)
-    except (TypeError, ValueError):
-        fee = None
+
+    fee_provenance: dict[str, str] | None = None
+    if grading_fee is _FEE_NOT_GIVEN:
+        derived_fee, eff_date, source_url = grading_fees_mod.grading_fee_for(
+            grading_fee_as_of, grading_fee_tier)
+        fee = derived_fee
+        fee_provenance = {"effective_date": eff_date, "source_url": source_url}
+        grading_fee_basis = grading_fee_basis or (
+            f"sourced schedule: PSA {grading_fee_tier} tier ${derived_fee:.2f} all-in "
+            f"(effective {eff_date}; {source_url})")
+    else:
+        try:
+            fee = float(grading_fee)
+        except (TypeError, ValueError):
+            fee = None
     if entry is None:
         blockers.append("no verified raw entry price")
     if rcomp is None:
@@ -120,7 +148,8 @@ def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
             "expected_net": None, "expected_roi_pct": None,
             "downside_net": None, "upside_net": None, "cost": None,
             "gem_rate": gem_rate, "gem_rate_basis": gem_rate_basis,
-            "grading_fee": grading_fee, "grading_fee_basis": grading_fee_basis,
+            "grading_fee": fee, "grading_fee_basis": grading_fee_basis,
+            "grading_fee_provenance": fee_provenance,
             "assumptions": [],
             "breakeven_gem_rate": None,
             "sensitivity": [],
@@ -174,6 +203,7 @@ def grading_ev(*, raw_entry, raw_comp, graded_comp, grading_fee, gem_rate,
         "gem_rate_basis": gem_rate_basis or "operator_assumption",
         "grading_fee": round(fee, 2),
         "grading_fee_basis": grading_fee_basis or "poke.grading_cost_all_in (config)",
+        "grading_fee_provenance": fee_provenance,
         "assumptions": assumptions,
         "breakeven_gem_rate": breakeven,
         "sensitivity": sensitivity,

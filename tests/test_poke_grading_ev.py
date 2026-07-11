@@ -149,3 +149,34 @@ def test_grading_ev_is_paper_only_never_live():
     r = _ev()
     assert r["status"] in ("actionable", "watch")    # never a LIVE token
     assert "never live" in r["reason"].lower()
+
+
+# ---------------------------------------------- sourced dated grading fee (Task 3)
+
+def test_grading_fee_derived_from_sourced_schedule_when_omitted():
+    """Omitting grading_fee (no explicit operator override) derives the fee from the
+    sourced, dated PSA schedule (value tiers paused 2026-06-02 -> real >=$80 floor,
+    not a stale ~$25 assumption). Break-even/cost reflect the FLOOR, never an exact
+    memory-locked number."""
+    kw = dict(raw_entry=400.0, raw_comp=500.0, graded_comp=1000.0,
+              gem_rate=0.4, fees=FEES, tax_rate=0.07, est_shipping=8.0,
+              target_grade="psa10", buy_floor_net=15.0,
+              gem_rate_basis="operator_assumption 2026-07-05",
+              grading_fee_as_of="2026-07-01")   # grading_fee omitted -> derive
+    r = gev.grading_ev(**kw)
+    assert r["status"] != "blocked"                 # sourced fee always resolves, never blocks
+    assert r["grading_fee"] >= 80.0                  # real post-pause floor, never the stale ~$25
+    # landed cost must reflect >= the sourced floor, not a lower stale assumption
+    assert r["cost"] >= 400.0 * 1.07 + 80.0
+    prov = r["grading_fee_provenance"]
+    assert prov is not None and prov["effective_date"] and prov["source_url"]
+    assert "operator_assumption" in prov["source_url"].lower()   # PIN-FIRST badge
+    assert "sourced schedule" in r["grading_fee_basis"].lower()
+
+
+def test_explicit_grading_fee_still_honored_as_operator_override():
+    """cfg.poke.grading_cost_all_in (an explicit fee) still wins over the sourced
+    schedule -- the derivation only fires when grading_fee is omitted entirely."""
+    r = _ev(grading_fee=150.0)
+    assert r["grading_fee"] == 150.0
+    assert r["grading_fee_provenance"] is None       # no derivation happened
