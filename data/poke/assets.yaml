@@ -27,6 +27,7 @@ umbreon_ex_161_raw_nm:
   card_number: "161"
   condition: "NM"
   tcgplayer_id: "610516"   # Umbreon ex - 161/131; verified 2026-07-05
+  tcgcsv_group_id: 23821   # SV: Prismatic Evolutions (TCGCSV group); double-verified live 2026-07-10 (T1 gate-pass)
   pricecharting_slug: "pokemon-prismatic-evolutions/umbreon-ex-161"  # Phase F; verified 2026-07-05
   # ebay_query: "Umbreon ex 161 Prismatic Evolutions raw NM"
 
@@ -75,6 +76,8 @@ charizard_ex_199_151_raw_nm:
   set: "Scarlet & Violet 151"
   card_number: "199"
   condition: "NM"
+  tcgplayer_id: "517045"   # Charizard ex - 199/165 (TCGCSV productId, group 23237); double-verified live 2026-07-10 (T1 gate-pass)
+  tcgcsv_group_id: 23237   # SV: Scarlet & Violet 151 (TCGCSV group)
   pricecharting_slug: "pokemon-scarlet-&-violet-151/charizard-ex-199"  # F.1; verified 2026-07-06
 
 charizard_ex_199_151_psa10:
@@ -106,6 +109,8 @@ pikachu_ex_238_ss_raw_nm:
   set: "Surging Sparks"
   card_number: "238"
   condition: "NM"
+  tcgplayer_id: "590027"   # Pikachu ex - 238/191 (TCGCSV productId, group 23651); double-verified live 2026-07-10 (T1 gate-pass)
+  tcgcsv_group_id: 23651   # SV: Surging Sparks (TCGCSV group)
   pricecharting_slug: "pokemon-surging-sparks/pikachu-ex-238"  # F.1; verified 2026-07-06
 
 pikachu_ex_238_ss_psa9:
@@ -128,3 +133,29 @@ sylveon_ex_156_raw_lp:
   card_number: "156"
   condition: "LP"
   pricecharting_slug: "pokemon-prismatic-evolutions/sylveon-ex-156"  # F.1; verified 2026-07-06
+
+# Sylveon ex #156 NM — added 2026-07-10 for the T1 gate-pass (raw NM, clean single Holofoil
+# subtype). Distinct item_key from the LP entry above (condition slot), so the ungraded
+# TCGCSV/ppt market is recorded against an NM identity, never against the LP entry.
+sylveon_ex_156_raw_nm:
+  asset_class: raw
+  name: "Sylveon ex 156"
+  set: "Prismatic Evolutions"
+  card_number: "156"
+  condition: "NM"
+  tcgplayer_id: "610511"   # Sylveon ex - 156/131 (TCGCSV productId, group 23821); double-verified live 2026-07-10 (T1 gate-pass)
+  tcgcsv_group_id: 23821   # SV: Prismatic Evolutions (TCGCSV group)
+  pricecharting_slug: "pokemon-prismatic-evolutions/sylveon-ex-156"  # F.1; verified 2026-07-06
+
+# Leafeon ex #144 NM — the 5th T1 gate sample (2026-07-10). Regime-matched ($332.86, in the
+# $362-$1,528 band, not a liquid low-tier card) + eeveelution-representative. tcgplayer_id +
+# tcgcsv_group_id only; pricecharting_slug intentionally UNMAPPED (not verified live — the gate
+# uses tcgcsv-vs-ppt_cards, never PriceCharting; honest none for the independent path).
+leafeon_ex_144_raw_nm:
+  asset_class: raw
+  name: "Leafeon ex 144"
+  set: "Prismatic Evolutions"
+  card_number: "144"
+  condition: "NM"
+  tcgplayer_id: "610499"   # Leafeon ex - 144/131 (TCGCSV productId, group 23821); double-verified live 2026-07-10 (T1 gate-pass, 5th sample)
+  tcgcsv_group_id: 23821   # SV: Prismatic Evolutions (TCGCSV group)
