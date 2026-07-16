@@ -1,6 +1,8 @@
 # Local config with addresses + webhooks. NEVER commit.
 config.yaml
 config.local.yaml
+# Proxy list with endpoints/credentials. NEVER commit.
+proxies.json
 .env
 .env.*
 !.env.example

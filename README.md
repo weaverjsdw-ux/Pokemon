@@ -314,3 +314,62 @@ Every successful TCG restock tracker (BrickSeek, HotStock, NowInStock, the major
 4. **Notify fast.**
 
 The "edge" isn't a leaked guide. It's coverage (more SKUs × more retailers × more stores) and latency (alert → tap-to-buy in <30s). This codebase is built to be extended on both axes.
+
+---
+
+## Weather CLI (proxy-rotating session)
+
+A separate, self-contained tool in `weather/` that pulls current conditions
+from the [Open-Meteo](https://open-meteo.com) public API. It exists mainly to
+house a reusable **proxy-rotating HTTP session** for staying within a public
+API's per-IP rate limits by spreading requests across a pool of proxies.
+
+```bash
+cp proxies.example.json proxies.json   # then edit in your own proxy endpoints
+python -m weather "Tokyo" --proxies proxies.json -v
+```
+
+```
+Tokyo, Japan
+  Partly cloudy
+  18.4°C, wind 11 km/h
+```
+
+**Proxy file** — `proxies.json` (gitignored, so endpoints/credentials never
+get committed). Either a bare list of URLs or a `{"proxies": [...]}` object;
+entries may be URL strings (applied to both http and https) or per-scheme maps:
+
+```json
+{
+  "proxies": [
+    "http://user:pass@proxy-a.example.com:8080",
+    {"http": "http://proxy-c:3128", "https": "http://proxy-c:3128"}
+  ]
+}
+```
+
+**How the rotation works** (`weather/proxy_session.py`, `ProxyRotatingSession`):
+
+- Routes each request through the current proxy; rotates to the next one on a
+  connection/timeout error, an HTTP `429`, or a `5xx`.
+- Honours a `Retry-After` header on `429`s; otherwise applies jittered
+  exponential backoff between attempts.
+- Puts a failing proxy on a short **cooldown** so rotation favours healthy
+  exits, and resets a proxy's failure count on success.
+- Caps total tries via `max_attempts` (defaults to one per proxy), then raises
+  `AllProxiesFailedError`. Non-retryable responses (e.g. `404`) are returned to
+  the caller untouched. Credentials in proxy URLs are redacted from logs.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `-p`, `--proxies` | `proxies.json` | Path to the JSON proxy file |
+| `--cooldown` | `60` | Seconds to skip a proxy after it fails |
+| `--timeout` | `15` | Per-request timeout in seconds |
+| `--max-attempts` | one per proxy | Total tries across the whole pool |
+| `-v`, `--verbose` | off | Log each proxy rotation |
+
+**Be a good API citizen.** Rotation here is for respecting per-IP rate limits,
+not defeating them — check the target API's terms first. Some providers treat
+multi-IP rotation as circumvention even when the intent is politeness; in that
+case a single-IP throttle is the right fit. Don't use this to mask abusive
+traffic or bypass authentication.
