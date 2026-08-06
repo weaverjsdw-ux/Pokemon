@@ -5,6 +5,10 @@ config.local.yaml
 .env.*
 !.env.example
 
+# SDD workspace — per-plan ledgers, task briefs, implementer reports, review packages.
+# Short-lived scratch: git history is the durable record. (.claude/skills/poke-sdd/ writes here.)
+.superpowers/
+
 # Runtime state
 *.db
 *.db-journal

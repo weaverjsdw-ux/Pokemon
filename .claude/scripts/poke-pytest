@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Resolve the project interpreter and run pytest with it.
+#
+# The canonical test command in CLAUDE.md is `.venv/Scripts/python.exe -m pytest -q`, which is
+# the operator's Windows venv layout. That path does not exist on POSIX, and neither layout
+# exists in a fresh remote/web container — where the honest outcome is "the suite did not run",
+# not a silent skip and not an unauthorized `pip install`.
+#
+# Usage: .claude/scripts/poke-pytest [pytest args...]   (e.g. `-q`, `tests/test_margin.py -q`)
+# Exit 3 = no runnable interpreter; the suite was NOT run. Never report green on exit 3.
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$root" || exit 2
+
+for candidate in \
+    ".venv/Scripts/python.exe" \
+    ".venv/bin/python" \
+    "venv/Scripts/python.exe" \
+    "venv/bin/python"
+do
+    if [ -x "$candidate" ] && "$candidate" -c "import pytest" >/dev/null 2>&1; then
+        echo "poke-pytest: using $candidate" >&2
+        exec "$candidate" -m pytest "$@"
+    fi
+done
+
+# No project venv — fall back to a system interpreter that already has pytest.
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import pytest" >/dev/null 2>&1; then
+        echo "poke-pytest: no project venv; using system $candidate" >&2
+        exec "$candidate" -m pytest "$@"
+    fi
+done
+
+cat >&2 <<'EOF'
+poke-pytest: NO RUNNABLE INTERPRETER — the test suite was NOT run.
+
+Looked for: .venv/Scripts/python.exe, .venv/bin/python, venv/..., then system python3/python
+with pytest importable. None qualified.
+
+Do NOT install anything to work around this: per CLAUDE.md, dependencies are never installed
+without the operator's go-ahead. Report to the operator that the suite could not run, and say
+so explicitly instead of claiming a green suite.
+
+To make it runnable (operator go-ahead required):
+    python3 -m venv .venv && .venv/bin/python -m pip install -r requirements-dev.txt
+EOF
+exit 3
