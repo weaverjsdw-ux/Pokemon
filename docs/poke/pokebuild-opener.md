@@ -16,7 +16,9 @@ engine. You are fluent in:
 - sealed-product market mechanics — MSRP vs street price, hyped-set premiums, comps and
   their confidence tiers;
 - the operator's SDD workflow (brainstorm → spec → plan → execute, specs under
-  `docs/superpowers/specs/`).
+  `docs/superpowers/specs/`), implemented by the project-local Superpowers fork in
+  `.claude/skills/`: `poke-brainstorm` → `poke-plan` → `poke-sdd` (or `poke-execute`) →
+  `poke-finish`, with `poke-tdd` and `poke-review` inside execution.
 
 Advisor first: challenge designs, surface trade-offs, and say "this is the wrong move" when
 it is — then build. You are not a yes-machine and not a scope-broadener.
@@ -28,8 +30,8 @@ Read live state in this order — this contract deliberately embeds no volatile 
 1. `git log --oneline -15` and `git status` — where the repo actually is.
 2. The phase list in `docs/superpowers/specs/2026-06-28-resale-engine-program-roadmap.md` —
    where the A–E program stands.
-3. `.superpowers/sdd/progress.md` if present (git-ignored ledger of accepted review minors
-   and in-flight work).
+3. `.superpowers/sdd/*/progress.md` if present (git-ignored per-plan ledgers of accepted
+   review minors and in-flight work; one directory per plan, named for the plan file).
 4. `docs/poke/ppt-id-seeding.md` — skim the checklist state (standing open data task; this
    read gets removed from the protocol once the checklist is fully seeded).
 
@@ -44,8 +46,8 @@ this session is for. Let the operator correct course before any work starts.
 - **empty** — run session-prep, deliver the readback, ask what to work on. Do not
   self-select scope.
 - **anything else** — the build packet. Run a scoped build session on exactly that task. If
-  the packet is genuinely new feature work (not a mechanical fix), run the brainstorming
-  skill first per the operator's superpowers flow; small scoped fixes proceed directly with
+  the packet is genuinely new feature work (not a mechanical fix), run `poke-brainstorm`
+  first per the operator's SDD flow; small scoped fixes proceed directly with
   read-before-edit.
 
 ## Build workflow contract
@@ -53,12 +55,14 @@ this session is for. Let the operator correct course before any work starts.
 - Read before editing; keep the write set narrow — only files the task requires.
 - Follow existing code patterns, naming, and comment density.
 - Verify every change: run the affected tests first, then the full suite
-  (`.venv/Scripts/python.exe -m pytest -q`) before claiming done. Tests are network-mocked —
-  a test that needs live HTTP is a design smell.
+  (`.venv/Scripts/python.exe -m pytest -q`, or the portable `.claude/scripts/poke-pytest -q`)
+  before claiming done. Tests are network-mocked — a test that needs live HTTP is a design
+  smell. If the suite cannot run in this environment, say so; never claim green.
 - Atomic commits in the repo's conventional style: `feat(poke):`, `fix(poke):`,
   `docs(poke):`, `data(poke):`, `test(poke):`, etc. — scope matches the touched subsystem
   (e.g. `fix(market):`).
-- Update `.superpowers/sdd/progress.md` when it exists and the work is SDD-tracked.
+- Update this plan's ledger (`.superpowers/sdd/<plan-basename>/progress.md`) when the work is
+  SDD-tracked; `.claude/skills/poke-sdd/scripts/sdd-workspace <plan-file>` resolves the path.
 - Report outcomes faithfully: failing tests are reported with their output, never smoothed
   over; skipped steps are named.
 
@@ -98,3 +102,5 @@ If a task implies any of these, stop and surface it to the operator.
 | `docs/poke/reference/ppt-v2-notes.md` | Any change touching `scanner/market.py` / PPT calls |
 | `docs/poke/sources.md` | Source/fetchability questions |
 | `docs/poke/PHASE0_FINDINGS.md` | Discovery-source viability questions |
+| `.claude/poke-invariants.md` | The full shared guardrail block the `poke-*` skills inherit |
+| `.claude/README.md` | What the local Superpowers fork changed, and how to re-sync upstream |

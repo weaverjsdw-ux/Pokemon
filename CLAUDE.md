@@ -7,6 +7,10 @@ subsystem lives at `scanner/discovery/`.
 ## Test command
 
 - Full suite: `.venv/Scripts/python.exe -m pytest -q` — tests are network-mocked; no live HTTP.
+- Portable equivalent: `.claude/scripts/poke-pytest -q` — resolves the Windows venv, a POSIX venv,
+  or a system interpreter. **Exit 3 means the suite did not run** (typical in a remote/web
+  container, which has no venv): say so plainly, never claim green, and never `pip install` to
+  work around it.
 
 ## Price accuracy (STOP-class — never bend these)
 
@@ -34,3 +38,8 @@ subsystem lives at `scanner/discovery/`.
 - Feature work follows the SDD flow: brainstorm → spec in `docs/superpowers/specs/` → plan →
   execute. Roadmap: `docs/superpowers/specs/2026-06-28-resale-engine-program-roadmap.md`.
 - For a full dev advisor/coder session, run `/pokebuild`.
+- The flow is implemented by the project-local Superpowers fork in `.claude/skills/` — these load
+  in every environment, including Claude Code on the web where marketplace plugins are absent:
+  `poke-brainstorm` → `poke-plan` → `poke-sdd` (or `poke-execute`) → `poke-finish`, with
+  `poke-tdd` and `poke-review` running inside execution. Shared guardrails:
+  `.claude/poke-invariants.md`; rationale and upstream re-sync notes: `.claude/README.md`.
