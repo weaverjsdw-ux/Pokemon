@@ -79,7 +79,9 @@ is a complete and respectable outcome. Most findings should end there.
 ## Standing authorization — do all of this without asking
 
 - Create `.venv` and install `requirements-dev.txt` if not present. Already-declared deps only.
-- Run the suite freely: `.claude/scripts/poke-pytest -q` (network-mocked, ~10s).
+- Run the suite freely: `.claude/scripts/poke-pytest -q`, or on Windows
+  `.\.venv\Scripts\python.exe -m pytest -q` (network-mocked, ~10-20s). If the bash wrapper does
+  not run on this platform, use the direct interpreter form — do not treat that as a blocker.
 - Read anything on disk you can reach. Search broadly.
 - Create and edit files in the repo. Commit freely in the repo's conventional style
   (`feat(poke):`, `fix(poke):`, `docs(poke):`, `test(poke):`, `data(poke):`).
@@ -135,9 +137,40 @@ FINDING | <territory> | <what is wrong, one sentence> | <concrete cost today>
    — do not hunt.
 7. **The wider machine, time-boxed to 10 minutes.** Look for artifacts belonging to this project that
    live outside the repo: exports, spreadsheets, screenshots, downloaded CSVs, scratch notes, old
-   copies of the repo. You have connectors for Google Drive, Notion, Airtable, and Gmail — check
-   whether project data is stranded in one of them, or duplicated between one of them and the repo.
+   copies of the repo. **Specifically: the repo at `C:\Users\Weave\Pokemon` is a fresh clone made
+   2026-08-10 — if an older working copy exists anywhere on this machine, it may hold local-`main`
+   commits that were never pushed, plus the gitignored `config.yaml` with the PPT API key. Finding
+   it (or confirming it is gone) is the single most valuable thing this territory can do.** You have
+   connectors for Google Drive, Notion, Airtable, and Gmail — check whether project data is stranded
+   in one of them, or duplicated between one of them and the repo.
    **Report locations only. Move nothing outside the repo in this phase.**
+8. **Credit-billing paths (money-class — the highest-stakes territory).**
+   `docs/poke/ppt-id-seeding.md` records an undiagnosed incident: **85 credits consumed before the
+   2026-07-02 session's first call.** Until it is explained, every credit budget in this project is
+   built on sand. This is a **static audit — zero live calls**. Start at `scanner/market.py:49` and
+   `scanner/poke_api/sources.py`, follow every caller transitively, and build a table: entry point →
+   HTTP call site → `limit` passed → what it reports consumed → can that report be dropped
+   downstream. Flag: (a) any call site where `limit` is not explicitly pinned — the API bills on
+   *requested* limit; an omitted limit defaults to 50 and bills 50, confirmed live in the seeding
+   doc; (b) any path that can bill but report `0` or drop the field — the shape of the bug T5
+   half-fixed in `comp_response`; (c) anything that can fire more than once per logical lookup —
+   retry/backoff wrappers, loops without a between-item budget check, import-time or fixture calls;
+   (d) how the code reads `X-RateLimit-Daily-Remaining` — the seeding doc establishes the header is
+   **post-charge**, and any code reading it as pre-charge is off by the size of the call being made.
+   If the evidence cannot explain the 85, rank the candidates and say what would settle each — do
+   not construct a theory to have one. Fabricating a cause here is the same failure as fabricating
+   a price. Fixes and regression tests (asserting `limit` is actually passed; a billed value
+   survives to the caller) become FIX NOW items.
+9. **Runtime & platform drift.** The operator works in PowerShell on Windows; parts of this repo
+   assume bash. Today, live, `CLAUDE.md`'s canonical test command failed in PowerShell (needs the
+   `.\` prefix and backslashes). Audit every *documented or configured* command for whether it runs
+   on the operator's actual platform: the test commands in `CLAUDE.md` and
+   `docs/poke/pokebuild-opener.md`; `.claude/scripts/poke-pytest` and the three
+   `.claude/skills/poke-sdd/scripts/*` (all bash — do they run here at all?); the SessionStart hook
+   in `.claude/settings.json` pointing at a `.sh` (does it error on every Windows session start?);
+   anything in `scripts/`. A documented command that fails on the operator's real machine is a
+   finding with a named cost: every session that follows the doc burns its first minutes rediscovering
+   this.
 
 ### Recon rules
 
@@ -170,6 +203,12 @@ Then split explicitly:
   longest one.** If it is not, you are not being honest about what matters.
 - **NEEDS MY DECISION** — real, significant, and not yours to call. Anything that deletes data,
   changes doctrine, spends credits, or picks between two defensible architectures.
+
+The triage doc also gets a **system map**: one diagram (mermaid or ASCII) of how data actually flows
+today — catalog → observation ledger → scoring → decision → outcome; scanner → alerts; discovery →
+dashboards — with every break, dead end, and manual gap **marked where it occurs**. Draw what IS, not
+what the specs intend. This is the artifact that makes "my systems don't talk to each other" visible
+and checkable, and it costs ten minutes once the territory reports are in.
 
 Then, in one short paragraph: **what is the single biggest thing wrong with my setup?** Your honest
 opinion, not a hedge. If the answer is "nothing structural, it is mostly fine," say that — I would
@@ -289,15 +328,18 @@ Deliberate contradictions. Re-read the spec that established each before touchin
 Lead with the answer. In this order:
 
 1. **The single biggest thing wrong with my setup**, and whether you fixed it.
-2. **The triage table** — how many findings, how many fixed, how many logged, how many need me.
-3. **What you fixed** — one line each, with the commit.
-4. **What you deliberately did not fix**, and why. I want to see the judgment, not just the output.
-5. **Anything needing my decision**, with enough context to answer without scrolling back.
-6. **Test delta** — baseline → final, confirmed you ran it. Never report a green you did not observe.
-7. **Credit spend: 0.** Confirm no live PPT call. If one happened, that is the *first* line, not the
-   sixth.
-8. **The move manifest** — every file that moved, and confirmation that references were updated.
-9. **Where the next session should start.**
+2. **The credit answer** — what explains the 85 credits, or the ranked candidates with what would
+   settle each. Territory 8's output, and the thing I most want to know.
+3. **The system map** — or where to find it in the triage doc.
+4. **The triage table** — how many findings, how many fixed, how many logged, how many need me.
+5. **What you fixed** — one line each, with the commit.
+6. **What you deliberately did not fix**, and why. I want to see the judgment, not just the output.
+7. **Anything needing my decision**, with enough context to answer without scrolling back.
+8. **Test delta** — baseline → final, confirmed you ran it. Never report a green you did not observe.
+9. **Credit spend: 0.** Confirm no live PPT call. If one happened, that is the *first* line, not the
+   ninth.
+10. **The move manifest** — every file that moved, and confirmation that references were updated.
+11. **Where the next session should start.**
 
 ## First message
 
