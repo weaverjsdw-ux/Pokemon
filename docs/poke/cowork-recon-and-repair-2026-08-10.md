@@ -65,6 +65,36 @@ Before you spend effort on anything, answer in one line each:
 **Anything that fails the gate gets one line in the findings doc and zero minutes of work.** Logging
 is a complete and respectable outcome. Most findings should end there.
 
+### Token economy — cheap on process, never on coverage
+
+My usage budget is finite and sometimes nearly spent. Economise on **how you work**, never on
+**what you cover**. Skipping a territory to save tokens is a failure; narrating your way through one
+is waste. Concretely:
+
+- **Never pull a large file into your own context to skim it.** Grep for what you need, read the
+  matching range. Reading a 50k-line file to find one line is the most expensive mistake available
+  to you.
+- **Subagents return findings, not content.** A recon agent's reply is structured rows. It must not
+  quote file bodies, paste diffs, or narrate its search. If a subagent needs to hand over something
+  large, it writes a file and returns the path.
+- **Diffs and logs go to files, never into a context window.** Use
+  `.claude/skills/poke-sdd/scripts/review-package` and pass the path.
+- **Cheap models for read-only sweeps.** Recon is grep-and-report; it does not need your best model.
+  Save the expensive tier for the triage synthesis and the final review, where judgment actually
+  compounds.
+- **One pass per territory.** Do not re-read what you have already read. If you find yourself opening
+  a file a second time, you needed a note the first time.
+- **No narration between tool calls.** No "now I'll look at…", no progress summaries, no restating
+  what you just did. The findings table is the record.
+- **Do not re-verify established facts.** If this packet or a prior finding states something, take it
+  as given unless you have evidence it is wrong.
+- **Stay inside the territory.** An interesting thread outside your assigned scope is a one-line
+  finding for someone else, not an excuse to explore.
+
+If the budget is genuinely too tight to finish, **cut depth per territory, not the number of
+territories** — a shallow sweep of all nine beats a deep sweep of four, because the point of recon is
+knowing where the problems are, not solving them.
+
 ### Effort caps
 
 - **No single item gets more than 45 minutes** without you stopping to re-justify it against the
