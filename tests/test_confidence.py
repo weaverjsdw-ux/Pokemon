@@ -92,3 +92,25 @@ def test_confidence_report_from_coverage():
     assert by_slug["costco"]["state"] == c.NEEDS_ID
     assert by_slug["target"]["state"] == c.ID_SUSPECT
     assert by_slug["target"]["name"] == "Target"
+
+
+# --- provenance-BLOCKED must never read as healthy --------------------------
+# Regression guard. Verified-unreachable IDs stopped being ID_SUSPECT once an
+# unreachable source was correctly separated from a malformed one; without its
+# own signal a stale-but-healthy scan row would render them WORKING.
+
+def test_provenance_blocked_ids_are_not_reported_as_working():
+    row = c.source_state(
+        "target", supported=True, enabled=True, with_id=19, total=19,
+        health_row={"last_status": "OK", "state": "healthy", "last_check_ts": 1},
+        id_blocked=True,
+    )
+    assert row["state"] == c.BLOCKED
+
+
+def test_healthy_source_with_no_blocked_ids_is_unaffected():
+    row = c.source_state(
+        "walmart", supported=True, enabled=True, with_id=1, total=1,
+        health_row={"last_status": "OK", "state": "healthy", "last_check_ts": 1},
+    )
+    assert row["state"] == c.WORKING

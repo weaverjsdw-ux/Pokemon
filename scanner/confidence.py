@@ -67,12 +67,17 @@ def source_state(
     total: int = 0,
     health_row: dict[str, Any] | None = None,
     id_suspect: bool = False,
+    id_blocked: bool = False,
     unsupported_reason: str = "",
 ) -> dict[str, Any]:
     """Return ``{state, label, detail, action, severity}`` for one retailer.
 
     ``health_row`` is a row from :func:`scanner.health.snapshot` (or ``None``).
     ``id_suspect`` is True when any of this retailer's IDs failed verification.
+    ``id_blocked`` is True when any of them was verified UNREACHABLE (a 403 or
+    transport failure). That is a separate fact from a malformed ID and from
+    stale scan health - without it, a source whose IDs are provably
+    unreachable can render as WORKING off a stale-but-healthy scan row.
     """
     health_row = health_row or {}
     last_status = str(health_row.get("last_status") or "")
@@ -82,7 +87,7 @@ def source_state(
 
     state, action = _classify(
         slug, supported, enabled, api_key_required, api_key_set, with_id,
-        last_status, hstate, http_status, id_suspect, has_run,
+        last_status, hstate, http_status, id_suspect, id_blocked, has_run,
     )
     return {
         "slug": slug,
@@ -100,7 +105,7 @@ def source_state(
 
 def _classify(
     slug, supported, enabled, api_key_required, api_key_set, with_id,
-    last_status, hstate, http_status, id_suspect, has_run,
+    last_status, hstate, http_status, id_suspect, id_blocked, has_run,
 ):
     if not supported:
         return NOT_IMPLEMENTED, ""
@@ -111,7 +116,7 @@ def _classify(
         return NEEDS_API_KEY, "Add a free API key"
     if with_id == 0:
         return NEEDS_ID, "Add product IDs"
-    if last_status == "BLOCKED" or http_status in (403, 429):
+    if last_status == "BLOCKED" or http_status in (403, 429) or id_blocked:
         action = "Back off; retries automatically"
         if slug == "target":
             action = "Back off; if it persists, RedSky key may be rotated (set TARGET_API_KEY)"
@@ -170,6 +175,7 @@ def confidence_report(
     coverage: dict[str, Any],
     health_rows: list[dict[str, Any]],
     id_suspect_by_slug: dict[str, bool] | None = None,
+    id_blocked_by_slug: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-retailer confidence from already-computed payloads.
 
@@ -179,6 +185,7 @@ def confidence_report(
     """
     health_by_slug = {row.get("slug"): row for row in health_rows}
     id_suspect_by_slug = id_suspect_by_slug or {}
+    id_blocked_by_slug = id_blocked_by_slug or {}
     rows: list[dict[str, Any]] = []
     for r in coverage.get("retailers", []):
         slug = r["slug"]
@@ -194,6 +201,7 @@ def confidence_report(
                 total=int(r.get("total") or 0),
                 health_row=health_by_slug.get(slug),
                 id_suspect=bool(id_suspect_by_slug.get(slug)),
+                id_blocked=bool(id_blocked_by_slug.get(slug)),
             )
             | {"name": r.get("name", slug)}
         )

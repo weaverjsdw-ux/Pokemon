@@ -6,10 +6,16 @@ import yaml
 from scanner.config import Config, RetailerCfg
 from scanner.notify import StockAlert
 from scanner.retailers.base import StockResult, Store
-from scanner import web
+from scanner import provenance, web
 
 
 def _write_fixture_files(tmp_path, monkeypatch):
+    # The catalog is redirected below, but add_id/save_product_id also write the
+    # provenance sidecar. Without this the suite mutates the real
+    # data/id_provenance.json on every run (fake "booster.*" keys).
+    monkeypatch.setattr(
+        provenance, "PROVENANCE_PATH", tmp_path / "id_provenance.json"
+    )
     for name in (
         "EBAY_BROWSE_API_TOKEN",
         "EBAY_OAUTH_TOKEN",

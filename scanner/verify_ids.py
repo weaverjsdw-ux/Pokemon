@@ -241,7 +241,16 @@ def verify_one(
                 f"resolves, but {fmt_reason} - verify it is the right product",
             )
         if rstatus in (BLOCKED, ERROR, NO_KEY):
-            return _verdict(slug, field, product_key, value, SUSPECT_FORMAT, fmt_reason)
+            # An unreachable source is not a malformed ID. The network outcome
+            # is the load-bearing fact and must survive; the format concern
+            # rides along in the detail so it is not lost while the source is
+            # down. Reporting SUSPECT_FORMAT here said "your data is wrong"
+            # when the truth was "we cannot reach the source" - two different
+            # problems with two different owners.
+            return _verdict(
+                slug, field, product_key, value, rstatus,
+                f"{rdetail}; format unverified ({fmt_reason})",
+            )
     return _verdict(slug, field, product_key, value, rstatus, rdetail)
 
 
@@ -255,6 +264,112 @@ def _verdict(
         "value": value,
         "status": status,
         "detail": detail,
+    }
+
+
+# --- block-sweep classification ---------------------------------------------
+# Ported from the LEGGO fetcher's entitlement-sweep classifier (commit a802ed0,
+# "403 sweep is ONE named event now"). Same shape, same discipline: a whole-
+# source block is ONE named event rather than N independent flakes, told apart
+# by what still answers, reading status fields exclusively so no identifier or
+# key can leak into the report. The two labels differ from LEGGO's because the
+# domain does: LEGGO shares one credential across surfaces (entitlement- vs
+# credential-shaped), while each retailer here is a separate source, so the
+# discriminating question is whether ANY other retailer still answers.
+
+_ANSWERED = frozenset({CONFIRMED, AMBIGUOUS, NOT_FOUND})   # the source responded
+_UNREACHABLE = frozenset({BLOCKED, ERROR})                 # it did not
+# NO_KEY / UNCHECKED / SUSPECT_FORMAT are neutral: never attempted over the
+# network, so they are evidence of nothing either way.
+
+
+def classify_block_sweep(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Name a whole-source block as ONE event, or return None.
+
+    Returns None unless at least one retailer had EVERY network-attempted row
+    come back unreachable AND at least one of those carried an explicit 403 - a
+    partial failure is an ordinary bad run that the per-row verdicts already
+    cover, and a non-403 outage is a different event that must not wear this
+    label.
+
+    ``source_shaped``      some other retailer answered -> the block is that
+                           retailer's (bot protection / WAF). Fixing it needs a
+                           different fetch strategy, NOT edits to the IDs.
+    ``environment_shaped`` nothing answered across MULTIPLE attempted sources
+                           -> suspect this machine's connectivity before
+                           touching any catalog data.
+    ``scope_limited``      only one source was attempted at all (e.g. a
+                           ``--retailer`` run), so source-side and
+                           environment-side cannot be told apart from this
+                           evidence. Claiming either would be an artifact of
+                           the scope, not a finding.
+    """
+    by_slug: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        by_slug.setdefault(r.get("slug", "?"), []).append(r)
+
+    blocked_sources, healthy_evidence = [], []
+    for slug, rows in by_slug.items():
+        considered = [r for r in rows if r.get("status") in _ANSWERED | _UNREACHABLE]
+        if any(r.get("status") in _ANSWERED for r in rows):
+            healthy_evidence.append(slug)
+        if not considered:
+            continue
+        if all(r.get("status") in _UNREACHABLE for r in considered) and any(
+            "403" in str(r.get("detail") or "") for r in considered
+        ):
+            blocked_sources.append(slug)
+
+    if not blocked_sources:
+        return None
+
+    attempted_sources = sum(
+        1 for rows in by_slug.values()
+        if any(r.get("status") in _ANSWERED | _UNREACHABLE for r in rows)
+    )
+    blocked_sources.sort()
+    healthy_evidence.sort()
+    blocked_rows = sum(len(by_slug[s]) for s in blocked_sources)
+    named = ", ".join(blocked_sources)
+
+    if healthy_evidence:
+        classification = "source_shaped"
+        warning = (
+            f"BLOCK SWEEP, source-shaped: every network-attempted row for "
+            f"{named} came back unreachable ({blocked_rows} rows, at least one "
+            f"explicit 403), while {', '.join(healthy_evidence)} answered from "
+            f"this same machine - one provider-side block on {named}, not "
+            f"{blocked_rows} bad identifiers. Operator action: this needs a "
+            f"different fetch strategy for {named}; do NOT edit catalog IDs or "
+            f"widen a format rule on this evidence."
+        )
+    elif attempted_sources < 2:
+        classification = "scope_limited"
+        warning = (
+            f"BLOCK SWEEP, scope-limited: every network-attempted row "
+            f"({blocked_rows} rows across {named}) came back unreachable, but "
+            f"{named} was the only source this run attempted - that cannot tell "
+            f"a {named}-side block apart from a local connectivity failure. "
+            f"Operator action: re-run without the retailer filter to classify; "
+            f"do NOT edit catalog IDs on this evidence."
+        )
+    else:
+        classification = "environment_shaped"
+        warning = (
+            f"BLOCK SWEEP, environment-shaped: every network-attempted row "
+            f"({blocked_rows} rows across {named}) came back unreachable and NO "
+            f"source answered from this machine - suspect local connectivity "
+            f"before the data. Operator action: confirm this machine can reach "
+            f"the internet; do NOT edit catalog IDs on this evidence."
+        )
+
+    return {
+        "event": "block_sweep",
+        "classification": classification,
+        "blocked_sources": blocked_sources,
+        "blocked_rows": blocked_rows,
+        "healthy_evidence": healthy_evidence,
+        "warning": warning,
     }
 
 
@@ -367,6 +482,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(results, indent=2))
     else:
         print(format_report(results))
+
+    # Additive, exactly as the LEGGO port is: one named warning when a whole
+    # source is blocked, so N unreachable rows are not read as N bad IDs. It
+    # deliberately changes no verdict and no exit code.
+    sweep = classify_block_sweep(results)
+    if sweep and not args.json:
+        print()
+        print(sweep["warning"])
+
     suspect = sum(1 for r in results if r["status"] in provenance.SUSPECT_STATUSES)
     return 1 if suspect else 0
 

@@ -156,6 +156,10 @@ def _product_payload(
             id_suspect = any(
                 provenance.is_suspect(entry) for entry in id_provenance.values()
             )
+            id_blocked = any(
+                (entry or {}).get("status") in (provenance.BLOCKED, provenance.ERROR)
+                for entry in id_provenance.values()
+            )
             rcfg = cfg.retailers.get(slug, cfg_mod.RetailerCfg())
             supported = bool(getattr(cls, "supported", True))
             missing_api_key = _api_key_missing(cls, rcfg)
@@ -188,6 +192,7 @@ def _product_payload(
                     "ids": ids,
                     "idProvenance": id_provenance,
                     "idSuspect": id_suspect,
+                    "idBlocked": id_blocked,
                     "active": active,
                     "missingApiKey": missing_api_key,
                     "blockedReason": blocked_reason,
@@ -292,13 +297,24 @@ def _id_suspect_by_slug(products: list[dict[str, Any]]) -> dict[str, bool]:
     return suspect
 
 
+def _id_blocked_by_slug(products: list[dict[str, Any]]) -> dict[str, bool]:
+    """Per-retailer: does any selected product carry a verified-UNREACHABLE ID?"""
+    blocked: dict[str, bool] = {}
+    for product in products:
+        for entry in product.get("retailers", []):
+            if entry.get("idBlocked"):
+                blocked[entry["slug"]] = True
+    return blocked
+
+
 def _confidence_payload(
     coverage: dict[str, Any],
     health_rows: list[dict[str, Any]],
     products: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     return confidence_mod.confidence_report(
-        coverage, health_rows, _id_suspect_by_slug(products)
+        coverage, health_rows, _id_suspect_by_slug(products),
+        _id_blocked_by_slug(products),
     )
 
 
@@ -638,6 +654,7 @@ def _stock_board_payload(
     confidence_rows = confidence_mod.confidence_report(
         coverage_mod.coverage_report(cfg), _health_payload(),
         _id_suspect_by_slug(product_payload),
+        _id_blocked_by_slug(product_payload),
     )
     confidence_by_slug = {row["slug"]: row for row in confidence_rows}
     if store_diagnostics is None:
