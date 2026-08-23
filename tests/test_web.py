@@ -558,3 +558,107 @@ def test_scan_once_payload_captures_scanner_alert(monkeypatch):
     assert runner["lastScanAt"] is not None
     assert runner["stockBoard"][0]["locations"][0]["inStockCount"] == 1
     assert runner["lastResults"][0]["status"] == "IN_STOCK"
+
+
+def _write_config(tmp_path, *, bestbuy_enabled: bool) -> None:
+    """Write a real config.yaml; bestbuy_enabled with no key is an invalid config."""
+    (tmp_path / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "locations": {"home": "1 Home St", "work": "2 Work Ave"},
+                "route_radius_miles": 4,
+                "routing": {"engine": "osrm", "google_api_key": ""},
+                "retailers": {
+                    "target": {"enabled": True},
+                    "walmart": {"enabled": True},
+                    "costco": {"enabled": False},
+                    "samsclub": {"enabled": False},
+                    "bestbuy": {"enabled": bestbuy_enabled, "api_key": ""},
+                    "pokemoncenter": {"enabled": False},
+                    "gamestop": {"enabled": False},
+                },
+                "poll_interval_seconds": 180,
+                "discord_webhook": "",
+                "ntfy_topic": "",
+                "products": "all_sealed",
+                "market": {"preferred": True, "api_key": "live-key"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_status_payload_skips_resale_refresh_when_config_has_errors(tmp_path, monkeypatch):
+    """A config error must refuse the billed refresh, like every other network path.
+
+    `_prepare_scan` raises, `safe_demo_payload` returns errors, and `_should_autostart`
+    declines when `config_errors` is non-empty. Rendering the dashboard is the only
+    path that reached the network anyway -- and with `market.preferred` + an api_key
+    that network is PokemonPriceTracker, which bills per request. The UI in this state
+    reports "not scanning", so the spend is both unannounced and unattributable."""
+    _write_fixture_files(tmp_path, monkeypatch)
+    _write_config(tmp_path, bestbuy_enabled=True)
+    monkeypatch.setattr(web, "_health_payload", lambda: [])
+    calls: list[object] = []
+    monkeypatch.setattr(web.RESALE_PRICES, "refresh_due_async", lambda cfg: calls.append(cfg))
+
+    payload = web.status_payload()
+
+    assert payload["errors"], "fixture must produce a config error"
+    assert payload["ok"] is False
+    assert calls == [], "config errors must not kick a billed resale refresh"
+
+
+def test_status_payload_still_refreshes_resale_when_config_is_valid(tmp_path, monkeypatch):
+    """Positive control: the refresh must survive for a healthy config."""
+    _write_fixture_files(tmp_path, monkeypatch)
+    _write_config(tmp_path, bestbuy_enabled=False)
+    monkeypatch.setattr(web, "_health_payload", lambda: [])
+    calls: list[object] = []
+    monkeypatch.setattr(web.RESALE_PRICES, "refresh_due_async", lambda cfg: calls.append(cfg))
+
+    payload = web.status_payload()
+
+    assert payload["errors"] == []
+    assert len(calls) == 1, "a valid config must still refresh resale prices"
+
+
+def test_status_payload_skips_resale_refresh_for_a_non_api_key_error(tmp_path, monkeypatch):
+    """The gate must key off `config_errors` generally, not the bestbuy/api_key branch
+    specifically. poll_interval_seconds below the 60s floor is a config_errors() hit
+    that has nothing to do with retailer api keys."""
+    _write_fixture_files(tmp_path, monkeypatch)
+    _write_config(tmp_path, bestbuy_enabled=False)
+    cfg_path = tmp_path / "config.yaml"
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    raw["poll_interval_seconds"] = 30
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    monkeypatch.setattr(web, "_health_payload", lambda: [])
+    calls: list[object] = []
+    monkeypatch.setattr(web.RESALE_PRICES, "refresh_due_async", lambda cfg: calls.append(cfg))
+
+    payload = web.status_payload()
+
+    assert payload["errors"], "fixture must produce a non-api-key config error"
+    assert not any("api_key" in e for e in payload["errors"]), "this must be the poll-interval error, not the api-key one"
+    assert calls == [], "a non-api-key config error must also refuse the billed resale refresh"
+
+
+def test_save_config_payload_refreshes_resale_once_the_fix_lands(tmp_path, monkeypatch):
+    """Production-caller parity: `save_config_payload` (the real /api/config POST path)
+    re-reads config.yaml from disk and calls `status_payload()` for `currentStatus`.
+    That re-read goes through a YAML round-trip (`yaml.safe_dump` -> `yaml.safe_load`)
+    that is not exercised by calling `status_payload()` directly. An operator who fixes
+    a broken config in the UI must see the refresh resume in the same response, not on
+    a later poll."""
+    _write_fixture_files(tmp_path, monkeypatch)
+    _write_config(tmp_path, bestbuy_enabled=True)  # starts broken: bestbuy enabled, no key
+    monkeypatch.setattr(web, "_health_payload", lambda: [])
+    calls: list[object] = []
+    monkeypatch.setattr(web.RESALE_PRICES, "refresh_due_async", lambda cfg: calls.append(cfg))
+
+    result = web.save_config_payload({"retailers": {"bestbuy": {"enabled": False}}})
+
+    assert result["ok"] is True, result
+    assert result["currentStatus"]["errors"] == []
+    assert len(calls) == 1, "fixing the config via the real save path must resume the refresh immediately"

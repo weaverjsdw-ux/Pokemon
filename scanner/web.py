@@ -384,7 +384,12 @@ def status_payload() -> dict[str, Any]:
         retailers = _retailer_payload(cfg)
         resale_payload = RESALE_PRICES.snapshot(cfg)
         products = _product_payload(cfg, resale_payload.get("products") or {})
-        if not config_missing:
+        # A config error refuses every other network path (_prepare_scan raises,
+        # safe_demo_payload returns errors, _should_autostart declines). Rendering
+        # the dashboard must refuse too: with market.preferred + an api_key this
+        # refresh bills PokemonPriceTracker per request, and the UI is telling the
+        # operator it is not scanning.
+        if not config_missing and not errors:
             RESALE_PRICES.refresh_due_async(cfg)
         health_rows = _health_payload()
         recent_restocks = _recent_restocks_payload(cfg)
