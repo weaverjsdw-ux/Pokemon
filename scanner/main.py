@@ -1,9 +1,15 @@
 """Scanner entry point.
 
-  python -m scanner                  # run scan loop forever
+No network (safe first run):
+  python -m scanner --check-config   # validate config + catalog
+  python -m scanner --safe-demo      # synthetic stores + OUT rows, no private data sent
+  python -m scanner.discovery.pipeline --dry-run   # discovery pipeline, every source offline
+
+Live network:
+  python -m scanner --dry-run        # route + store plan without polling stock; NOT
+                                     #   network-free: live geocoding, routing, store finders
   python -m scanner --once           # single pass, then exit
-  python -m scanner --dry-run        # print plan (route + stores) without polling
-  python -m scanner --check-config   # validate config + catalog, no network
+  python -m scanner                  # run scan loop forever
 """
 from __future__ import annotations
 
@@ -31,11 +37,23 @@ from .route import get_polyline
 from .state import State
 
 
-def config_errors(cfg: cfg_mod.Config) -> list[str]:
-    errors: list[str] = []
+# Findings that make --safe-demo meaningless. The demo never calls a retailer,
+# geocoder, router, or stock endpoint, so every other finding (a missing API
+# key, an unsupported or ID-less enabled retailer, a short poll interval) is
+# printed as a warning instead of stopping it. The scan loop, --check-config,
+# and the web UI still treat ALL findings as errors via config_errors().
+SAFE_DEMO_FATAL = frozenset({"unknown_retailer", "routing_engine", "route_radius", "catalog"})
+
+
+def _config_findings(cfg: cfg_mod.Config) -> list[tuple[str, str]]:
+    """(category, message) for every config problem, in config_errors() order."""
+    findings: list[tuple[str, str]] = []
     unknown = [s for s in cfg.retailers if s not in RETAILER_REGISTRY]
     if unknown:
-        errors.append(f"config.yaml references unknown retailers: {', '.join(unknown)}")
+        findings.append((
+            "unknown_retailer",
+            f"config.yaml references unknown retailers: {', '.join(unknown)}",
+        ))
 
     unsupported_enabled = []
     for slug, rcfg in cfg.retailers.items():
@@ -46,26 +64,28 @@ def config_errors(cfg: cfg_mod.Config) -> list[str]:
             reason = getattr(RClass, "unsupported_reason", "") or "not implemented"
             unsupported_enabled.append(f"{slug} ({reason})")
         if getattr(RClass, "api_key_required", False) and not rcfg.api_key.strip():
-            errors.append(
-                f"config.yaml enables {slug}, but retailers.{slug}.api_key is required"
-            )
+            findings.append((
+                "credential",
+                f"config.yaml enables {slug}, but retailers.{slug}.api_key is required",
+            ))
     if unsupported_enabled:
-        errors.append(
-            "config.yaml enables unsupported retailers: " + "; ".join(unsupported_enabled)
-        )
+        findings.append((
+            "unsupported_retailer",
+            "config.yaml enables unsupported retailers: " + "; ".join(unsupported_enabled),
+        ))
 
     if cfg.routing_engine not in {"osrm", "google"}:
-        errors.append("config.yaml: routing.engine must be 'osrm' or 'google'")
+        findings.append(("routing_engine", "config.yaml: routing.engine must be 'osrm' or 'google'"))
     if cfg.route_radius_miles <= 0:
-        errors.append("config.yaml: route_radius_miles must be greater than 0")
+        findings.append(("route_radius", "config.yaml: route_radius_miles must be greater than 0"))
     if cfg.poll_interval_seconds < 60:
-        errors.append("config.yaml: poll_interval_seconds must be at least 60")
+        findings.append(("poll_interval", "config.yaml: poll_interval_seconds must be at least 60"))
 
     try:
         selected = cfg_mod.selected_products(cfg)
     except SystemExit as exc:
-        errors.append(str(exc))
-        return errors
+        findings.append(("catalog", str(exc)))
+        return findings
 
     for slug, rcfg in cfg.retailers.items():
         if not rcfg.enabled or slug not in RETAILER_REGISTRY:
@@ -78,11 +98,16 @@ def config_errors(cfg: cfg_mod.Config) -> list[str]:
             any(str(product.get(field) or "").strip() for field in fields)
             for product in selected.values()
         ):
-            errors.append(
+            findings.append((
+                "retailer_ids",
                 f"config.yaml enables {slug}, but selected products have no "
-                f"{'/'.join(fields)} values"
-            )
-    return errors
+                f"{'/'.join(fields)} values",
+            ))
+    return findings
+
+
+def config_errors(cfg: cfg_mod.Config) -> list[str]:
+    return [message for _category, message in _config_findings(cfg)]
 
 
 def build_corridor(cfg: cfg_mod.Config):
@@ -536,7 +561,13 @@ def check_config(cfg: cfg_mod.Config) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="single pass then exit")
-    parser.add_argument("--dry-run", action="store_true", help="print plan only, no stock checks")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the route + store plan without stock checks. NOT network-free: "
+             "makes live geocoding (Nominatim), routing (OSRM/Google), and retailer "
+             "store-finder calls. For a network-free check use --check-config or --safe-demo",
+    )
     parser.add_argument(
         "--safe-demo",
         action="store_true",
@@ -550,15 +581,21 @@ def main() -> int:
     if args.check_config:
         return check_config(cfg)
 
-    errors = config_errors(cfg)
-    if errors:
-        raise SystemExit("\n".join(errors))
-
     if args.safe_demo:
+        findings = _config_findings(cfg)
+        fatal = [message for category, message in findings if category in SAFE_DEMO_FATAL]
+        if fatal:
+            raise SystemExit("\n".join(fatal))
+        warnings = [message for category, message in findings if category not in SAFE_DEMO_FATAL]
         stores_by_retailer, diagnostics = safe_demo_stores(cfg)
         results = safe_demo_results(cfg, stores_by_retailer)
         report = coverage_mod.coverage_report(cfg)
         print("safe demo: no geocoding, routing, store, or stock network calls")
+        if warnings:
+            print("config warnings (not needed by the safe demo; the scanner and "
+                  "--check-config still fail on these):")
+            for warning in warnings:
+                print(f"  ! {warning}")
         print(
             f"active coverage: {report['score']}% "
             f"({report['actionableProducts']}/{report['totalProducts']} products actionable)"
@@ -573,6 +610,10 @@ def main() -> int:
                 print(f"  {store.label()}  ({store.distance_miles:.2f} mi from route)")
         print(f"\nsynthetic inventory rows: {len(results)}")
         return 0
+
+    errors = config_errors(cfg)
+    if errors:
+        raise SystemExit("\n".join(errors))
 
     enabled_slugs = enabled_retailer_slugs(cfg)
     needs_route = any(not RETAILER_REGISTRY[slug].online_only for slug in enabled_slugs)

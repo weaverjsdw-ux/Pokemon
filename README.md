@@ -89,13 +89,44 @@ Discord notifications can be slow to fire on phones if the app is backgrounded. 
 
 ### 5. Run
 
-Sanity-check the install first (no network calls — confirms `config.yaml` parses and the product catalog loads):
+#### Network-free first run
+
+Start with these three commands. None of them makes a network call.
+
+Sanity-check the install (confirms `config.yaml` parses and the product catalog
+loads, and prints the coverage score; exits non-zero on config errors such as a
+retailer enabled without its required API key):
 
 ```bash
 python -m scanner --check-config
 ```
 
-Then dry run — confirms geocoding, routing, and store discovery without polling stock:
+Verify the CLI and dashboard wiring without sending your home/work addresses to
+any geocoder, router, or retailer endpoint:
+
+```bash
+python -m scanner --safe-demo
+```
+
+Safe demo uses synthetic stores and out-of-stock rows. It is not a live stock
+check; it exists so you can validate coverage, board layout, source labels, and
+the UI without transmitting private location data. Config problems the demo does
+not depend on (a missing retailer API key, for example) print as warnings instead
+of stopping it; `--check-config` and the live scanner still treat them as errors.
+
+Exercise the `/poke` discovery pipeline with every network stage disabled (no
+board, manifest, or dashboard is written, and no alert is sent):
+
+```bash
+python -m scanner.discovery.pipeline --dry-run
+```
+
+#### Live-network commands
+
+`python -m scanner --dry-run` is **not** network-free. It skips stock polling,
+but it geocodes your home and work addresses (Nominatim), computes the route
+(OSRM or Google), and queries retailer store finders to confirm which stores
+fall inside your corridor:
 
 ```bash
 python -m scanner --dry-run
@@ -110,18 +141,6 @@ target: 3 stores in corridor
 
 walmart (online-only)
 ```
-
-If you want to verify the CLI and dashboard wiring without sending your
-home/work addresses to any geocoder, router, or retailer endpoint, use the
-local-only safe demo:
-
-```bash
-python -m scanner --safe-demo
-```
-
-Safe demo uses synthetic stores and out-of-stock rows. It is not a live stock
-check; it exists so you can validate coverage, board layout, source labels, and
-the UI without transmitting private location data.
 
 If that looks right, kick off the real loop:
 

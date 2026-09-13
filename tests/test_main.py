@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -240,6 +241,159 @@ def test_main_safe_demo_skips_route_setup(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "safe demo: no geocoding" in out
     assert "walmart (online-only demo)" in out
+
+
+# ---------------------------------------------------------------------------
+# --safe-demo calls no retailer, so a missing credential warns instead of blocking
+# ---------------------------------------------------------------------------
+
+
+def _keyless_bestbuy_cfg():
+    """bestbuy enabled with no api_key: the shape that blocked --safe-demo."""
+    return _cfg(
+        retailers={
+            "walmart": RetailerCfg(enabled=True),
+            "bestbuy": RetailerCfg(enabled=True),
+        },
+        products={"foo": {"name": "Foo", "walmart_item_id": "2", "bestbuy_sku": "12345"}},
+    )
+
+
+def test_main_safe_demo_runs_and_warns_on_keyless_api_key_retailer(monkeypatch, capsys):
+    cfg = _keyless_bestbuy_cfg()
+    assert any("bestbuy" in e and "api_key" in e for e in config_errors(cfg))
+
+    monkeypatch.setattr(sys, "argv", ["scanner", "--safe-demo"])
+    monkeypatch.setattr("scanner.main.cfg_mod.load", lambda: cfg)
+    monkeypatch.setattr(
+        "scanner.main.build_corridor",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("route setup should not run")),
+    )
+
+    assert main() == 0
+    out = capsys.readouterr().out
+    assert "safe demo: no geocoding" in out
+    assert "config warnings" in out
+    assert "config.yaml enables bestbuy, but retailers.bestbuy.api_key is required" in out
+    assert "walmart (online-only demo)" in out
+    assert "synthetic inventory rows:" in out
+
+
+def test_check_config_still_fails_on_config_the_safe_demo_tolerates(monkeypatch, capsys):
+    cfg = _keyless_bestbuy_cfg()
+    monkeypatch.setattr(sys, "argv", ["scanner", "--check-config"])
+    monkeypatch.setattr("scanner.main.cfg_mod.load", lambda: cfg)
+
+    assert main() == 1
+    assert "retailers.bestbuy.api_key is required" in capsys.readouterr().out
+
+
+def test_scan_path_still_refuses_config_the_safe_demo_tolerates(monkeypatch):
+    cfg = _keyless_bestbuy_cfg()
+    monkeypatch.setattr(sys, "argv", ["scanner", "--dry-run"])
+    monkeypatch.setattr("scanner.main.cfg_mod.load", lambda: cfg)
+    monkeypatch.setattr(
+        "scanner.main.build_corridor",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("gate must refuse before route setup")),
+    )
+
+    with pytest.raises(SystemExit, match="retailers.bestbuy.api_key is required"):
+        main()
+
+
+@pytest.mark.parametrize(
+    "overrides, needle",
+    [
+        ({"retailers": {"not_a_retailer": RetailerCfg(enabled=True)}}, "unknown retailers"),
+        ({"routing_engine": "bad"}, "routing.engine"),
+        ({"route_radius_miles": 0}, "route_radius_miles"),
+        ({"products_filter": ["missing_key"]}, "not in catalog"),
+    ],
+)
+def test_main_safe_demo_still_fails_when_the_demo_would_be_meaningless(
+    monkeypatch, overrides, needle
+):
+    cfg = _keyless_bestbuy_cfg()
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    monkeypatch.setattr(sys, "argv", ["scanner", "--safe-demo"])
+    monkeypatch.setattr("scanner.main.cfg_mod.load", lambda: cfg)
+
+    with pytest.raises(SystemExit, match=needle):
+        main()
+
+
+# ---------------------------------------------------------------------------
+# --dry-run is labeled live-network, and the label is pinned to the truth
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_help_says_it_is_not_network_free(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["scanner", "--help"])
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 0
+    options = " ".join(capsys.readouterr().out.split()).split("options:", 1)[1]
+    dry_run_help = options.split("--dry-run", 1)[1].split("--safe-demo", 1)[0]
+    assert "NOT network-free" in dry_run_help
+    assert "geocoding" in dry_run_help and "routing" in dry_run_help
+
+
+def test_main_dry_run_really_geocodes_and_routes(monkeypatch, capsys):
+    """Pins the fact behind the --dry-run label: its plan is built from live
+    geocoding + routing. Both seams are spies and requests is fenced off, so
+    nothing leaves the machine. If --dry-run is ever made offline, this test
+    and the label change together."""
+    import requests
+
+    cfg = _cfg(products={"foo": {"name": "Foo", "target_tcin": "1"}})
+    geocoded: list[str] = []
+    routed: list[tuple] = []
+    network: list[str] = []
+
+    def spy_geocode(address):
+        geocoded.append(address)
+        return (39.0, -86.0)
+
+    def spy_polyline(origin, destination, engine, google_api_key):
+        routed.append((origin, destination, engine))
+        return [origin, destination]
+
+    def no_network(self, method, url, *args, **kwargs):
+        network.append(url)
+        raise AssertionError(f"real network attempted: {method} {url}")
+
+    monkeypatch.setattr(sys, "argv", ["scanner", "--dry-run"])
+    monkeypatch.setattr("scanner.main.cfg_mod.load", lambda: cfg)
+    monkeypatch.setattr("scanner.main.geocode", spy_geocode)
+    monkeypatch.setattr("scanner.main.get_polyline", spy_polyline)
+    monkeypatch.setattr(
+        "scanner.main.discover_stores",
+        lambda cfg, home, work, polyline: {"target": []},
+    )
+    monkeypatch.setattr(requests.Session, "request", no_network)
+
+    assert main() == 0
+    assert geocoded == ["1 Home St", "2 Work Ave"]
+    assert [engine for _origin, _destination, engine in routed] == ["osrm", "osrm"]
+    assert network == []
+
+
+def test_readme_network_free_first_run_excludes_scanner_dry_run():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    run_section = readme.split("### 5. Run", 1)[1].split("\n### ", 1)[0]
+    network_free = run_section.split("#### Network-free first run", 1)[1].split("\n#### ", 1)[0]
+
+    for command in (
+        "python -m scanner --check-config",
+        "python -m scanner --safe-demo",
+        "python -m scanner.discovery.pipeline --dry-run",
+    ):
+        assert command in network_free
+    assert "python -m scanner --dry-run" not in network_free
+    assert "`python -m scanner --dry-run` is **not** network-free" in run_section
 
 
 # ---------------------------------------------------------------------------
