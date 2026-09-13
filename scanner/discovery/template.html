@@ -19,6 +19,9 @@
   .badge-steal { background:#196c2e; color:#fff; }
   .badge-warn { background:#9e6a03; color:#fff; }
   .badge-est { background:#30363d; color:#c9d1d9; }
+  .badge-unconfirmed { background:transparent; color:#8b949e; border:1px dashed #6e7681; font-weight:400; }
+  .unconfirmed { color:#d29922; font-size:.75rem; margin-left:.3rem; }
+  .stale-warning { margin:.5rem 0; padding:.4rem .6rem; background:#5a1e02; border:1px solid #da3633; border-radius:4px; color:#ffdcd7; font-weight:700; }
   .lens { font-size:.7rem; border:1px solid #30363d; border-radius:3px; padding:0 .25rem; margin-left:.25rem; }
   .muted { color:#8b949e; font-size:.85rem; }
   footer { padding:1.5rem; color:#8b949e; font-size:.8rem; border-top:1px solid #30363d; }
@@ -28,6 +31,7 @@
 <header>
   <div><strong>POKE DEALS — {{EVENT_TITLE}}</strong></div>
   <div class="muted">Last updated: {{LAST_UPDATED}} · % off vs verified market, not MSRP · sweep {{SWEEP_ID}}</div>
+  <!-- INJECT: STALENESS -->
   <nav><!-- INJECT: NAV --></nav>
 </header>
 <main>

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -173,3 +174,81 @@ def test_render_drops_javascript_uri_from_href():
     evil["promo_codes"][0]["source_url"] = "javascript:alert(document.cookie)"
     html = render_sweep(evil)
     assert "javascript:alert" not in html
+
+
+# --- dashboard honesty: unconfirmed-stock STEAL/BUY rows + render-time staleness ---
+
+def _rows_for(html, item):
+    """Every rendered <tr> whose item cell is exactly `item` (a STEAL renders in
+    Top Steals and in its category section; a buyable one in Buyable now too)."""
+    return [row for row in re.findall(r"<tr data-source-url=.*?</tr>", html, re.DOTALL)
+            if row.split("<td>", 1)[1].startswith(item + "<")]
+
+
+def _header(html):
+    return html.split("<main>", 1)[0]
+
+
+def test_unconfirmed_stock_steal_rows_render_weakened_confirmed_row_does_not():
+    html = render_sweep(SWEEP, now=date(2026, 6, 27))
+    for item in ("Destined Rivals Elite Trainer Box", "Paldean Fates Elite Trainer Box",
+                 "Crown Zenith Elite Trainer Box"):          # STEAL, stock unknown
+        rows = _rows_for(html, item)
+        assert len(rows) == 2
+        for row in rows:
+            assert 'class="badge badge-steal badge-unconfirmed"' in row
+            assert "(unconfirmed stock)" in row
+    rows = _rows_for(html, "Prismatic Evolutions Elite Trainer Box")   # STEAL, in_stock
+    assert len(rows) == 3
+    for row in rows:
+        assert 'class="badge badge-steal"' in row
+        assert "badge-unconfirmed" not in row
+        assert "unconfirmed stock" not in row
+
+
+def test_buy_verdict_without_confirmed_stock_is_muted_and_qualified():
+    verdict = "BUY · +$90.94 net, 170% ROI"
+    unknown = _render_with(_stocked_row(item="Unknown BUY ETB", stock_status="unknown",
+                                        stock_evidence="", buy_url="", stock_checked_at="",
+                                        stock_method="", scanner_verdict=verdict))
+    row = _rows_for(unknown, "Unknown BUY ETB")[0]
+    assert "(unconfirmed stock)" in row
+    assert f'<span class="muted">{verdict}</span>' in row
+
+    out = _render_with(_stocked_row(item="Gone ETB", stock_status="out_of_stock",
+                                    badges=["STEAL"], buy_url=""))
+    assert "(out of stock)" in _rows_for(out, "Gone ETB")[0]
+
+    confirmed = _render_with(_stocked_row(item="Stocked BUY ETB", scanner_verdict=verdict))
+    for row in _rows_for(confirmed, "Stocked BUY ETB"):
+        assert "unconfirmed" not in row
+        assert f"<td>{verdict}</td>" in row
+
+
+def test_stale_sweep_header_warns_with_day_count():
+    html = render_sweep(SWEEP, now=datetime(2026, 8, 1, 23, 30))   # fixture swept 2026-06-27
+    assert 'class="stale-warning"' in _header(html)
+    assert "35 days old" in _header(html)
+    assert "<!-- INJECT:" not in html
+
+
+def test_same_day_sweep_header_has_no_staleness_warning():
+    html = render_sweep(SWEEP, now=date(2026, 6, 27))
+    assert 'class="stale-warning"' not in _header(html)
+    assert "days old" not in _header(html) and "day old" not in _header(html)
+    assert "<!-- INJECT:" not in html
+
+
+def test_recent_sweep_shows_age_without_escalating():
+    html = render_sweep(SWEEP, now=date(2026, 6, 28))
+    assert "Sweep is 1 day old." in _header(html)
+    assert 'class="stale-warning"' not in _header(html)
+
+
+def test_undatable_sweep_makes_no_age_claim():
+    swp = json.loads(json.dumps(SWEEP))
+    swp["captured_window"] = "sometime this summer"
+    swp["sweep_id"] = "manual-now"
+    html = render_sweep(swp, now=date(2026, 9, 12))
+    assert 'class="stale-warning"' not in _header(html)
+    assert "old." not in _header(html)

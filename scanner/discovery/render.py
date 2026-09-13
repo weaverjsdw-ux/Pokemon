@@ -9,12 +9,19 @@ import html as html_lib
 import json
 import re
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .schema import assert_sweep, row_from_dict
 
 TEMPLATE_PATH = Path(__file__).with_name("template.html")
+
+# Dashboard freshness is the render-time age of the SWEEP itself. It is not comp
+# staleness (poke.staleness_days / opportunity.stale_after_days age cached market
+# comps) and deliberately shares no knob with it.
+STALE_AFTER_DAYS = 3
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _esc(value) -> str:
@@ -35,11 +42,18 @@ def _safe_href(url) -> str:
     return _esc(url) if scheme in ("http", "https") else ""
 
 
-def _badges_html(badges: list[str]) -> str:
+def _badges_html(badges: list[str], *, stock_confirmed: bool = True) -> str:
+    """A STEAL badge on a row without verified positive stock renders desaturated
+    (badge-unconfirmed) so it cannot outrank the Stock cell. No class here may
+    carry a 'stock-' token: golden.py's buyable-now belt matches it."""
     cls = {"STEAL": "badge-steal", "WARN": "badge-warn", "EST": "badge-est"}
-    return "".join(
-        f'<span class="badge {cls.get(b, "badge-est")}">{_esc(b)}</span>' for b in badges
-    )
+    spans = []
+    for b in badges:
+        klass = cls.get(b, "badge-est")
+        if b == "STEAL" and not stock_confirmed:
+            klass += " badge-unconfirmed"
+        spans.append(f'<span class="badge {klass}">{_esc(b)}</span>')
+    return "".join(spans)
 
 
 def _lens_html(tags: list[str]) -> str:
@@ -80,17 +94,31 @@ def _deal_row_html(d: dict) -> str:
     comp_html = f'<span class="orig">${_esc(comp)}</span>' if comp is not None else ""
     pct = d.get("pct_off")
     pct_html = f"{_esc(pct)}%" if pct is not None else ""
+    status = str(d.get("stock_status") or "unknown")
+    confirmed = status in _POSITIVE_STOCK
+    badges = d.get("badges", [])
+    verdict = d.get("scanner_verdict", "")
+    verdict_html = _esc(verdict)
+    buy_verdict = str(verdict).split(" ", 1)[0] == "BUY"
+    # A loud STEAL badge or BUY verdict on a row without verified positive stock
+    # is qualified inline, so a reader scanning for green cannot skip the Stock cell.
+    marker = ""
+    if not confirmed and ("STEAL" in badges or buy_verdict):
+        note = "out of stock" if status == "out_of_stock" else "unconfirmed stock"
+        marker = f'<span class="unconfirmed">({note})</span>'
+        if buy_verdict:
+            verdict_html = f'<span class="muted">{verdict_html}</span>'
     return (
         f'<tr data-source-url="{_safe_href(d.get("source_url",""))}" '
         f'data-captured-at="{_esc(d.get("captured_at",""))}">'
         f'<td>{_esc(d.get("item",""))}{_lens_html(d.get("lens_tags",[]))}'
-        f'{_badges_html(d.get("badges",[]))}</td>'
+        f'{_badges_html(badges, stock_confirmed=confirmed)}{marker}</td>'
         f'<td class="deal-price">${_esc(d.get("deal_price",""))}</td>'
         f'<td>{comp_html}</td><td>{pct_html}</td>'
         f'<td><a href="{_safe_href(d.get("source_url",""))}">{_esc(d.get("retailer",""))}</a> '
         f'<span class="muted">{_esc(d.get("captured_at",""))}</span></td>'
         f'<td>{_stock_html(d)}</td>'
-        f'<td>{_esc(d.get("scanner_verdict",""))}</td></tr>'
+        f'<td>{verdict_html}</td></tr>'
     )
 
 
@@ -109,7 +137,49 @@ def _category_key(d: dict) -> str:
     return str(d.get("category") or d.get("asset_class") or "other")
 
 
-def render_sweep(sweep: dict, template: str | None = None) -> str:
+def _today() -> date:
+    return date.today()
+
+
+def _sweep_date(sweep: dict) -> date | None:
+    """Latest ISO date in captured_window, else in sweep_id. None when neither
+    parses: no source, no age claim."""
+    for field in ("captured_window", "sweep_id"):
+        dates = []
+        for token in _ISO_DATE_RE.findall(str(sweep.get(field) or "")):
+            try:
+                dates.append(date.fromisoformat(token))
+            except ValueError:
+                continue
+        if dates:
+            return max(dates)
+    return None
+
+
+def _staleness_html(sweep: dict, now: date | datetime) -> str:
+    """Header age line. A same-day or undatable sweep says nothing; from
+    STALE_AFTER_DAYS on, the line escalates to a warning naming the day count."""
+    swept = _sweep_date(sweep)
+    if swept is None:
+        return ""
+    today = now.date() if isinstance(now, datetime) else now
+    age = (today - swept).days
+    if age < 1:
+        return ""
+    if age < STALE_AFTER_DAYS:
+        unit = "day" if age == 1 else "days"
+        return f'<div class="muted">Sweep is {age} {unit} old.</div>'
+    return (
+        f'<div class="stale-warning">⚠ STALE: this sweep is {age} days old '
+        f'(swept {swept.isoformat()}, rendered {today.isoformat()}). '
+        "Prices and stock below are not current; re-run the sweep before acting.</div>"
+    )
+
+
+def render_sweep(sweep: dict, template: str | None = None, *,
+                 now: date | datetime | None = None) -> str:
+    """``now`` is the render clock for the header staleness line; it defaults to
+    today and exists so tests are deterministic."""
     deals = sweep.get("deals", [])
     assert_sweep([row_from_dict(d) for d in deals])  # STOP gate before render
 
@@ -191,6 +261,7 @@ def render_sweep(sweep: dict, template: str | None = None) -> str:
     for k, v in replacements.items():
         out = out.replace(k, v)
     injects = {
+        "<!-- INJECT: STALENESS -->": _staleness_html(sweep, _today() if now is None else now),
         "<!-- INJECT: NAV -->": nav_html,
         "<!-- INJECT: BUYABLE_NOW -->": _table(buyable),
         "<!-- INJECT: WATCHLIST -->": wl_html,
