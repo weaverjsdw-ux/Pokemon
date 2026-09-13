@@ -741,3 +741,98 @@ def test_slickdeals_mixed_batch_manifest_reconciles(tmp_path):
     assert counts["unverifiable"] == 2               # drift + dead redirect
     assert len(notifier.calls) == 1
     assert notifier.calls[0][0].buy_url == SD_MERCHANT
+
+
+# --- verify-stage dedupe by resolved merchant destination ---------------------
+
+from urllib.parse import parse_qs, urlparse  # noqa: E402
+
+AMAZON_ASIN_URL = "https://www.amazon.com/gp/product/B0GRCDKMSW"
+
+
+def _click_chain_get(merchants, page_html):
+    """Counting fake http_get in the live Slickdeals shape: thread page ->
+    featured /click CTA -> 302 to the merchant -> merchant page. `merchants`
+    maps listing id -> merchant URL. Returns (get, calls)."""
+    calls: list[str] = []
+
+    def get(url, **kwargs):
+        calls.append(url)
+        parsed = urlparse(url)
+        if parsed.netloc == "slickdeals.net" and parsed.path.startswith("/f/"):
+            listing_id = parsed.path.split("/")[2].split("-")[0]
+            cta = (f'<a data-role="seeDealButton" '
+                   f'href="https://slickdeals.net/click?lno={listing_id}">Get Deal</a>')
+            return SimpleNamespace(status_code=200, text=cta, headers={}, url=url)
+        if parsed.netloc == "slickdeals.net" and parsed.path == "/click":
+            listing_id = parse_qs(parsed.query)["lno"][0]
+            return SimpleNamespace(status_code=302, text="", url=url,
+                                   headers={"Location": merchants[listing_id]})
+        return SimpleNamespace(status_code=200, text=page_html, headers={}, url=url)
+
+    return get, calls
+
+
+def _thread_candidate(listing_id, price=49.99):
+    return CandidateDeal(
+        source="slickdeals", listing_id=listing_id, item_name="Fake ETB sealed",
+        price=price, shipping=None, url=f"https://slickdeals.net/f/{listing_id}-fake-etb",
+        retailer="Amazon", seen_at=CHECKED, evidence_excerpt=f"Fake ETB | ${price}",
+        matched_product_key="fake_etb", matched_set="FakeSet")
+
+
+def _run_live_verifier(tmp_path, candidates, http_get):
+    return pipeline.run_once(
+        _cfg(), sources=[FakeSource("slickdeals", candidates)], verifier=None,
+        comp_lookup=lambda c, p: _comp_row(), notifier=FakeNotifier(),
+        state=State(db_path=tmp_path / "s.db"), catalog=dict(CATALOG),
+        now_ts=1000, now_dt=NOON, http_get=http_get)
+
+
+def _merchant_gets(calls):
+    return [url for url in calls if urlparse(url).netloc != "slickdeals.net"]
+
+
+def test_two_threads_resolving_to_one_destination_spend_one_merchant_page_get(tmp_path):
+    """2026-09-11: threads 19893813 and 19787559 both resolved to ASIN B0GRCDKMSW
+    and each spent its own merchant-page GET. Dedupe saves that GET and only that
+    GET: the destination is unknown until each thread GET + /click hop has run."""
+    get, calls = _click_chain_get(
+        {"19893813": AMAZON_ASIN_URL, "19787559": AMAZON_ASIN_URL}, _sd_merchant_html())
+    m = _run_live_verifier(
+        tmp_path, [_thread_candidate("19893813"), _thread_candidate("19787559")], get)
+
+    assert _merchant_gets(calls) == [AMAZON_ASIN_URL]           # exactly one merchant GET
+    assert len([u for u in calls if "/f/" in u]) == 2           # each thread still fetched
+    assert len([u for u in calls if "/click" in u]) == 2        # each hop still spent
+    assert [o["terminal"] for o in m["outcomes"]] == ["alerted", "alerted"]
+    first, second = m["board"]["deals"]
+    for field in ("stock_status", "deal_price", "buy_url"):
+        assert first[field] == second[field]                    # one verdict, fanned out
+    assert first["stock_status"] == "in_stock"
+    assert not first["stock_method"].endswith("+shared_page")
+    assert second["stock_method"].endswith("+shared_page")      # the audit trail says so
+
+
+@pytest.mark.parametrize("url_a, url_b", [
+    (AMAZON_ASIN_URL, "https://www.amazon.com/gp/product/B0DIFFRENT"),
+    # same redirector host + path, different product in the query: must NOT merge
+    ("https://goto.walmart.com/c/2189989/612734/9383?u=https%3A%2F%2Fwww.walmart.com%2Fip%2Fa%2F111",
+     "https://goto.walmart.com/c/2189989/612734/9383?u=https%3A%2F%2Fwww.walmart.com%2Fip%2Fb%2F222"),
+])
+def test_distinct_destinations_each_get_their_own_merchant_page_get(tmp_path, url_a, url_b):
+    get, calls = _click_chain_get({"1001": url_a, "1002": url_b}, _sd_merchant_html())
+    m = _run_live_verifier(tmp_path, [_thread_candidate("1001"), _thread_candidate("1002")], get)
+
+    assert _merchant_gets(calls) == [url_a, url_b]
+    assert not any(d["stock_method"].endswith("+shared_page") for d in m["board"]["deals"])
+
+
+def test_destination_key_merges_listing_identity_not_tracking_noise():
+    key = pipeline.destination_key
+    assert key("https://www.amazon.com/gp/product/B0GRCDKMSW?tag=sd-20") == key(
+        "https://amazon.com/Mega-Lucario-ex/dp/B0GRCDKMSW/ref=sr_1_1?th=1")
+    assert key("https://www.ebay.com/itm/127963442067?_trkparms=x") == key(
+        "https://www.ebay.com/itm/first-partner-collection/127963442067")
+    assert key("https://www.ebay.com/itm/127963442067") != key(
+        "https://www.ebay.com/itm/188586400630")

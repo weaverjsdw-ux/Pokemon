@@ -29,12 +29,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from .. import config as cfg_mod
 from .. import main as main_mod
@@ -47,6 +49,7 @@ from ..state import State
 from . import golden as golden_mod
 from . import ledger as ledger_mod
 from . import render as render_mod
+from . import resolve as resolve_mod
 from . import schema, score
 from . import sweep as sweep_mod
 from . import verify as verify_mod
@@ -127,6 +130,72 @@ def _dry_run_verifier(candidate: CandidateDeal) -> StockVerification:
         buy_url="", checked_at=verify_mod._now_iso(), source=candidate.source,
         method="none", evidence="",
         degraded_reason="dry-run: purchasability verification skipped (no network)")
+
+
+# Resolved-destination identity for verify-stage dedupe. Amazon collapses to the
+# ASIN and eBay to the item id, so tracking query strings and title slugs never
+# split one listing in two. Every other host keeps host + path + query: an
+# affiliate redirector such as goto.walmart.com/c/<ids>?u=<product url> carries
+# the product only in its query, so host + path alone would merge two different
+# products and hand one listing's verdict to the other. Under-merging costs one
+# GET; over-merging reports the wrong listing, so ties go to under-merging.
+_ASIN_PATH_RE = re.compile(r"/(?:dp|gp/product|gp/aw/d)/([A-Za-z0-9]{10})(?=/|$)")
+_EBAY_ITEM_PATH_RE = re.compile(r"^/itm/(?:[^/]+/)?(\d{6,})/?$")
+
+
+def destination_key(url: str) -> str:
+    parsed = urlparse((url or "").strip())
+    host = parsed.netloc.lower().split("@")[-1].split(":")[0]
+    host = host[4:] if host.startswith("www.") else host
+    path = parsed.path or "/"
+    if host == "amazon.com" or host.endswith(".amazon.com"):
+        asin = _ASIN_PATH_RE.search(path)
+        if asin:
+            return f"amazon.com/asin/{asin.group(1).upper()}"
+    if host == "ebay.com" or host.endswith(".ebay.com"):
+        item = _EBAY_ITEM_PATH_RE.match(path)
+        if item:
+            return f"ebay.com/itm/{item.group(1)}"
+    return f"{host}{path}?{parsed.query}" if parsed.query else f"{host}{path}"
+
+
+class _MerchantPageMemo:
+    """Verify-stage getter for one run: each resolved merchant destination is
+    fetched at most once, however many candidates resolve to it.
+
+    Slickdeals-host requests (the thread page and its /click hop) pass straight
+    through: the destination is unknown until they have run, so a duplicate still
+    spends its own thread GET and hop and saves exactly one GET, the merchant
+    page. Only the fetched page is shared; verify_page still classifies every
+    candidate against its OWN expected price and keeps its own audit trail."""
+
+    def __init__(self, http_get: Callable | None = None):
+        self._http_get = http_get
+        self._pages: dict[str, tuple[str, Any, Exception | None]] = {}
+        self.shared_fetched_at = ""
+
+    def start_candidate(self) -> None:
+        self.shared_fetched_at = ""
+
+    def __call__(self, url: str, **kwargs: Any):
+        get = self._http_get or retailer_http.get   # resolved per call, as the verifier does
+        if not resolve_mod.safe_merchant_url(url):
+            return get(url, **kwargs)
+        key = destination_key(url)
+        if key in self._pages:
+            fetched_at, resp, exc = self._pages[key]
+            self.shared_fetched_at = fetched_at
+            if exc is not None:
+                raise exc
+            return resp
+        fetched_at = verify_mod._now_iso()
+        try:
+            resp = get(url, **kwargs)
+        except Exception as exc:
+            self._pages[key] = (fetched_at, None, exc)
+            raise
+        self._pages[key] = (fetched_at, resp, None)
+        return resp
 
 
 def default_comp_lookup(cfg: Any) -> CompLookup:
@@ -362,12 +431,18 @@ def run_once(
     else:
         source_instances = list(sources)
 
+    page_memo: _MerchantPageMemo | None = None
     if verifier is None:
         # dry-run uses a network-free verifier so zero-network is structural, not
         # incidental on the live resolver happening not to fetch. A live run
         # threads any injected http_get into the verifier so an instrumented
-        # caller stays hermetic (not just the DISCOVER stage).
-        verifier = _dry_run_verifier if dry_run else default_verifier(cfg, http_get=http_get)
+        # caller stays hermetic (not just the DISCOVER stage), through a per-run
+        # memo that fetches each resolved merchant destination once.
+        if dry_run:
+            verifier = _dry_run_verifier
+        else:
+            page_memo = _MerchantPageMemo(http_get)
+            verifier = default_verifier(cfg, http_get=page_memo)
     if comp_lookup is None:
         # the default comp path touches the network; in --dry-run it is replaced
         # with a network-free stub so zero-network is structural, not incidental.
@@ -431,7 +506,15 @@ def run_once(
             state.record_listing(c.source, c.listing_id, c.price, "live", ts=now_ts)
             if ledger_path is not None:
                 _append_listing(ledger_path, c, captured_at)
+        if page_memo is not None:
+            page_memo.start_candidate()
         v = verifier(c)
+        if page_memo is not None and page_memo.shared_fetched_at:
+            # This candidate's merchant page was fetched for an earlier candidate
+            # with the same destination: carry the real fetch time and mark the
+            # method, so the audit trail never implies a second, fresher look.
+            v = replace(v, checked_at=page_memo.shared_fetched_at,
+                        method=f"{v.method}+shared_page")
         bucket, reason = _classify(cfg, c, v, comp_lookup, catalog, board_rows, state,
                                    notifier, now_ts, quiet, captured_at, dry_run)
         counts[bucket] += 1
