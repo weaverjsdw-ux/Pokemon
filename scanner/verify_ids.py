@@ -84,7 +84,7 @@ def _nonempty_check(value: str) -> tuple[bool, str]:
 
 
 FORMAT_CHECKS: dict[str, Callable[[str], tuple[bool, str]]] = {
-    "target": _digit_len_check(7, 9, "Target TCIN"),
+    "target": _digit_len_check(7, 10, "Target TCIN"),
     "walmart": _digit_len_check(6, 12, "Walmart item id"),
     "bestbuy": _digit_len_check(6, 8, "Best Buy SKU"),
     "costco": _digit_len_check(6, 12, "Costco item number"),

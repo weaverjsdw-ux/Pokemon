@@ -9,6 +9,11 @@
     "status": "NO_KEY",
     "verifiedAt": 1787260040
   },
+  "destined_rivals_booster_bundle.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/625670",
+    "status": "UNCHECKED"
+  },
   "destined_rivals_booster_bundle.target_tcin": {
     "detail": "HTTP 403: blocked or rate-limited; retry later",
     "status": "BLOCKED",
@@ -19,10 +24,20 @@
     "status": "NO_KEY",
     "verifiedAt": 1787260040
   },
+  "destined_rivals_etb.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/624676",
+    "status": "UNCHECKED"
+  },
   "journey_together_booster_bundle.bestbuy_sku": {
     "detail": "Best Buy API key required to verify SKUs",
     "status": "NO_KEY",
     "verifiedAt": 1787260040
+  },
+  "journey_together_booster_bundle.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/610953",
+    "status": "UNCHECKED"
   },
   "journey_together_booster_bundle.target_tcin": {
     "detail": "HTTP 403: blocked or rate-limited; retry later",
@@ -33,6 +48,11 @@
     "detail": "Best Buy API key required to verify SKUs",
     "status": "NO_KEY",
     "verifiedAt": 1787260040
+  },
+  "journey_together_etb.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/610930",
+    "status": "UNCHECKED"
   },
   "journey_together_etb.target_tcin": {
     "detail": "HTTP 403: blocked or rate-limited; retry later",
@@ -119,6 +139,11 @@
     "status": "NO_KEY",
     "verifiedAt": 1787260040
   },
+  "prismatic_evolutions_booster_bundle.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/600518",
+    "status": "UNCHECKED"
+  },
   "prismatic_evolutions_booster_bundle.target_tcin": {
     "detail": "HTTP 403: blocked or rate-limited; retry later",
     "status": "BLOCKED",
@@ -129,10 +154,16 @@
     "status": "NO_KEY",
     "verifiedAt": 1787260040
   },
+  "prismatic_evolutions_etb.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/593355",
+    "status": "UNCHECKED"
+  },
   "prismatic_evolutions_etb.target_tcin": {
-    "detail": "HTTP 403: blocked or rate-limited; retry later; format unverified (Target TCIN is usually 7-9 digits, got 10)",
-    "status": "BLOCKED",
-    "verifiedAt": 1787260040
+    "detail": "product_key=prismatic_evolutions_etb | catalog_path=data/products.yaml | field=target_tcin | observed_value=1011206804 | verdict=VALID | canonical_tcin=1011206804 | seller_class=TARGET_FIRST_PARTY | source_url=https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-prismatic-evolutions-elite-trainer-box/-/A-1011206804 | source_retrieved_date=2026-08-13 | catalog_extract_method=direct_local_read | compared_at=2026-09-02T12:37:19.4877849-04:00 | note=staged extractor reference was absent; local catalog value was read directly",
+    "sourceUrl": "https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-prismatic-evolutions-elite-trainer-box/-/A-1011206804",
+    "status": "CONFIRMED",
+    "verifiedAt": 1788367050
   },
   "prismatic_evolutions_etb.walmart_item_id": {
     "detail": "Walmart product page resolved",
@@ -143,6 +174,11 @@
     "detail": "Best Buy API key required to verify SKUs",
     "status": "NO_KEY",
     "verifiedAt": 1787260040
+  },
+  "prismatic_evolutions_surprise_box.ppt_id": {
+    "detail": "Missing provenance metadata reconciled 2026-09-09 from existing local evidence. Catalog ID and exact product name match data/poke/2026-07-03-sealed.json (SHA256 0df7d5fbd42f06b96e2ffa2714ce23148762d955e15b101374f05192224b9e38), captured 2026-07-03, and docs/poke/ppt-id-seeding.md. Historical source retained only; no fresh provider verification, price refresh, paid lookup or verification timestamp is claimed.",
+    "sourceUrl": "https://www.tcgplayer.com/product/593466",
+    "status": "UNCHECKED"
   },
   "prismatic_evolutions_surprise_box.target_tcin": {
     "detail": "HTTP 403: blocked or rate-limited; retry later",

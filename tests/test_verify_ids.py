@@ -30,10 +30,10 @@ def _cfg(products, retailers=None):
     )
 
 
-def test_offline_flags_malformed_target_tcin():
-    # 10-digit TCIN is unusual (real ones are 7-9 digits).
+def test_offline_accepts_verified_10_digit_target_tcin():
+    # Target's first-party listing for this product publishes this 10-digit TCIN.
     v = verify_ids.verify_one("target", "p", "1011206804", {}, online=False)
-    assert v["status"] == provenance.SUSPECT_FORMAT
+    assert v["status"] == provenance.UNCHECKED
 
 
 def test_offline_ok_format_is_unchecked():
@@ -66,9 +66,9 @@ def test_bestbuy_without_key_is_no_key():
 
 
 def test_bad_format_but_resolves_is_ambiguous():
-    # 10-digit Target TCIN that nevertheless resolves -> eyeball it.
-    get = lambda url, **kw: FakeResp(200, {"data": {"product": {"tcin": "1011206804"}}})
-    v = verify_ids.verify_one("target", "p", "1011206804", {}, online=True, get=get)
+    # An 11-digit Target TCIN that nevertheless resolves -> eyeball it.
+    get = lambda url, **kw: FakeResp(200, {"data": {"product": {"tcin": "10112068045"}}})
+    v = verify_ids.verify_one("target", "p", "10112068045", {}, online=True, get=get)
     assert v["status"] == provenance.AMBIGUOUS
 
 
@@ -86,13 +86,13 @@ def test_verify_catalog_writes_provenance(tmp_path):
     assert entry["verifiedAt"]
 
 
-def test_verify_catalog_offline_catches_real_malformed_tcin(tmp_path):
+def test_verify_catalog_offline_accepts_verified_10_digit_tcin(tmp_path):
     path = tmp_path / "prov.json"
     cfg = _cfg({"prism": {"name": "Prism", "target_tcin": "1011206804"}})
 
     results = verify_ids.verify_catalog(cfg, online=False, path=path)
 
-    assert results[0]["status"] == provenance.SUSPECT_FORMAT
+    assert results[0]["status"] == provenance.UNCHECKED
 
 
 # --- Defect A: an unreachable source is not a malformed ID -------------------
@@ -109,9 +109,9 @@ def test_blocked_source_is_not_reported_as_malformed_id():
 
 def test_blocked_verdict_still_carries_the_format_concern():
     get = lambda url, **kw: FakeResp(403)
-    v = verify_ids.verify_one("target", "p", "1011206804", {}, online=True, get=get)
+    v = verify_ids.verify_one("target", "p", "10112068045", {}, online=True, get=get)
     assert "403" in v["detail"]
-    assert "7-9 digits" in v["detail"]
+    assert "7-10 digits" in v["detail"]
 
 
 def test_no_key_is_not_reported_as_malformed_id():

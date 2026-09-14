@@ -66,6 +66,26 @@ def test_expired_cards_are_never_candidates():
     assert all(c.listing_id not in {"19704582"} for c in cands)   # known expired card
 
 
+def test_additional_card_attributes_preserve_live_candidates_and_expiry():
+    # September 10's public search inserts data-uniqueid before data-threadid.
+    # Attributes are metadata, not a reason to silently lose every card.
+    changed = POPULATED.replace(' data-threadid=', ' data-uniqueid="observed-layout" data-threadid=')
+    adapter, cands = _discover(text=changed)
+    assert adapter.state == confidence.WORKING
+    assert {c.listing_id: c.price for c in cands} == {
+        "19710354": 49.99, "19650840": 27.95,
+    }
+    assert all(c.listing_id not in {"19704582"} for c in cands)
+
+
+def test_thread_id_on_a_child_is_not_a_card_identity():
+    # An unrelated parent/child must not become a priced discovery card.
+    changed = POPULATED.replace(' data-threadid=', '><span data-threadid=')
+    adapter, cands = _discover(text=changed)
+    assert cands == []
+    assert adapter.state == confidence.PARSER_SUSPECT
+
+
 def test_empty_real_page_yields_zero_rows_and_parser_suspect():
     # the standing query should never return zero results — zero parsed cards
     # on HTTP 200 means parser drift, flagged, never crashed

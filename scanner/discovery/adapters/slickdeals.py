@@ -24,7 +24,7 @@ DEFAULT_QUERY = "pokemon tcg"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-_CARD_RE = re.compile(r'<div class="dealCardListView([^"]*)" data-threadid="(\d+)"')
+_CARD_RE = re.compile(r'<div class="dealCardListView([^"]*)"[^>]*\sdata-threadid="(\d+)"')
 _TITLE_RE = re.compile(r'class="dealCardListView__title[^"]*"[^>]*title="([^"]+)"')
 _PRICE_RE = re.compile(r'dealCardListView__finalPrice" title="\$?([\d,]+(?:\.\d+)?)"')
 _STORE_RE = re.compile(r'dealCardListView__store"[^>]*>([^<]+)<')

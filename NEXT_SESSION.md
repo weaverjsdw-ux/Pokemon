@@ -1,28 +1,42 @@
-# NEXT SESSION — Pokémon deal-intelligence (new brainstorm)
+# NEXT SESSION — Pokémon discovery: resume the built pipeline
 
-Port the **GUN DEALS `/gun`** AI deal-research pipeline to the Pokémon resale engine. This is a **fresh brainstorm** (its own spec → plan → build). Memory `[[pokemon-ai-driven-deal-research]]` + `[[pokemon-resale-engine-phase1]]` auto-recall the context.
+Reconciled against the working tree on 2026-09-05. The former instruction to port
+a discovery pipeline from scratch is superseded by the implementation already
+in `scanner/discovery/`. This card describes code inspected locally; it does not
+claim a new live retailer run or authorize spend, alerts, or activation.
 
-## Open the session
-New session, then:
+## Read the existing path first
+
+- `scanner/discovery/pipeline.py`: one-shot discovery → verification → comparison
+  and verdict → deduplication → board/manifest → alert decision. Stages accept
+  injected dependencies for offline tests.
+- `scanner/discovery/adapters/`: source adapters and their registered slugs.
+- `scanner/discovery/candidates.py`: catalog, watched-set, and wildcard candidates
+  share one normalized record and the existing title matcher.
+- `scanner/discovery/verify.py`: same-listing stock and price evidence.
+- `tests/test_poke_pipeline.py`: the existing behavioral proof for the full path.
+
+The pipeline accounts for every candidate in a terminal bucket, including
+`unverifiable` and `no_comp`. Missing comparison evidence must remain visible;
+it does not establish bad value. A verified purchase alert is a stricter outcome
+than retaining a discovery candidate.
+
+## The next implementation question is narrower
+
+`pipeline.default_verifier()` currently routes Slickdeals through its merchant
+resolution/verification path. Other sources explicitly return unverifiable
+until a same-listing check is supplied. Inspect that exact remaining seam and
+current source readiness before proposing an additional adapter or a new engine.
+Existing code alone does not prove that a source is accessible today.
+
+Use `/pokebuild` for scoped development. Start by preserving the current dirty
+work, reading `CLAUDE.md` and the program roadmap it names, and running the
+existing offline pipeline tests:
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q tests/test_poke_pipeline.py
 ```
-/superpowers:brainstorming port the GUN DEALS AI deal-research pipeline to my Pokemon resale engine
-```
 
-## What to reuse from the gun build (proven 2026-06-27)
-The gun program (`OneDrive\Desktop\GUN DEALS\`) is the reference implementation. Lift its **spine**, re-cast for TCG:
-- **Pipeline:** discover → research → score → verify → persist → render an HTML dashboard.
-- **Price-accuracy discipline (load-bearing):** every price carries source URL + capture date; estimates badged EST; "% off" vs **verified market**, never inflated; **never fabricate**; stale sources excluded.
-- **Acquisition reality:** big sites Cloudflare-block plain fetch → **Playwright** clears aggregators; editorial curators + WebSearch fill gaps. Expect the same for TCG retailers.
-- **Regression subsystem:** append-only price ledger, watchlist continuity, golden test, prompt-durability hash + audit gate.
-- **Multi-lens scoring** (gun used Collector/Shooter/Builder/Flipper) → re-cast for TCG (e.g., Collector / Player / Investor / Flipper).
-
-## Key questions that brainstorm must resolve
-1. **Marketplaces/sources:** TCGplayer, eBay (sold/completed), Cardmarket, COMC, local? Which are fetchable vs blocked?
-2. **Comp source for "market price":** TCGplayer Market, eBay sold median, PSA APR for graded?
-3. **Graded (PSA/CGC/BGS) vs raw**, and **sealed product vs singles** — different valuation models; pick scope for v1.
-4. **Scope vs the existing `Pokemon-main` scanner:** does this become the Phase-1 *deal-intelligence* layer, or a sibling? (See `docs/superpowers/plans/2026-06-18-phase1-deal-intelligence.md`.)
-5. **Deliverable:** dashboard like the gun one? Tie into the existing resale engine's outputs?
-
-## References
-- Gun reference: `OneDrive\Desktop\GUN DEALS\DESIGN.md`, `OPENER.md`, `template.html`.
-- This repo's existing plan: `docs/superpowers/plans/2026-06-18-phase1-deal-intelligence.md` (reframed hobby-funded-resale; implementation was gated).
+An attended live-source test, paid lookup, notification, or scheduled activation
+needs the operator's specific authorization. Price provenance, exact identity,
+and the existing credit limits remain governed by `CLAUDE.md` and `DOCTRINE.md`.
