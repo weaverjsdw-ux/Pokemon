@@ -1,0 +1,44 @@
+{
+  "sweep_id": "2026-07-03-sealed",
+  "captured_at": "2026-07-03",
+  "counts": {
+    "scanned": 22,
+    "comped": 13,
+    "no_comp": 9,
+    "no_msrp": 0,
+    "no_source": 0
+  },
+  "badges": {
+    "EST": 6,
+    "STEAL": 7
+  },
+  "sources": [
+    {
+      "name": "PokemonPriceTracker",
+      "category": "comp",
+      "tier": "api",
+      "status": "used",
+      "note": "7 comps"
+    },
+    {
+      "name": "PriceCharting market fallback",
+      "category": "comp",
+      "tier": "api",
+      "status": "used",
+      "note": "6 comps"
+    },
+    {
+      "name": "no_comp",
+      "category": "comp",
+      "tier": "n/a",
+      "status": "skipped",
+      "note": "9 products had no usable comp"
+    }
+  ],
+  "credits_consumed": 7,
+  "golden_failures": [],
+  "stock_states": {
+    "PARSER_SUSPECT": 1,
+    "UNKNOWN_NO_ALERT": 12
+  }
+}
