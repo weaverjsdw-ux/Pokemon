@@ -38,6 +38,7 @@ class PokeCfg:
     buy_basis: str = "msrp"       # sealed-board deal-price basis ("observed" is a future hook)
     daily_credit_cap: int = 90    # PPT credits/run guard; past this the sweep uses the resale fallback
     independent_sources: bool = False  # Phase F: allow CLI live PriceCharting/TCGplayer fetch (0 PPT credits)
+    singles_board: bool = False   # feed data/poke/assets.yaml into discovery (raw/graded); off = sealed-only board
     tcgcsv: bool = False           # TCGCSV foundation T1: allow CLI live TCGCSV fetch (0 credits, keyless)
 
 
@@ -256,6 +257,7 @@ def from_mapping(raw: dict[str, Any]) -> Config:
             daily_credit_cap=int(poke_raw.get("daily_credit_cap", 90)),
             independent_sources=bool(poke_raw.get("independent_sources", False)),
             tcgcsv=bool(poke_raw.get("tcgcsv", False)),
+            singles_board=bool(poke_raw.get("singles_board", False)),
         )
     except (TypeError, ValueError):
         raise SystemExit("config.yaml: poke.min_rows / poke.staleness_days / poke.daily_credit_cap must be integers.")

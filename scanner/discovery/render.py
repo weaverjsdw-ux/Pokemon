@@ -133,6 +133,46 @@ def _table(rows: list[dict]) -> str:
     )
 
 
+def _asset_spec(w: dict) -> str:
+    """'raw NM' / 'PSA 10' — what distinguishes this asset from the same card in
+    another state. The distinction IS the price, so it is never dropped."""
+    if str(w.get("asset_class") or "") == "graded":
+        return " ".join(p for p in (w.get("grader"), w.get("grade")) if p)
+    return " ".join(p for p in ("raw", w.get("condition")) if p)
+
+
+def _asset_watch_row_html(w: dict) -> str:
+    estimate = w.get("estimate")
+    # No comp -> say so in words. A dash would read as zero or as "unknown yet".
+    comp_cell = (f'${estimate:,.2f}' if isinstance(estimate, (int, float))
+                 else '<span class="muted">no verified source</span>')
+    src = w.get("source_url") or ""
+    src_cell = f'<a href="{_safe_href(src)}">src</a>' if src else ""
+    return (
+        f'<tr><td>{_esc(w.get("item", ""))}'
+        f'{" #" + _esc(w.get("card_number", "")) if w.get("card_number") else ""}</td>'
+        f'<td>{_esc(_asset_spec(w))}</td>'
+        f'<td>{_esc(w.get("set", ""))}</td>'
+        f'<td>{comp_cell}</td>'
+        f'<td>{_esc(w.get("confidence", "none"))}</td>'
+        f'<td>{_esc(w.get("trade_type", ""))}</td>'
+        f'<td>{_esc(w.get("decision", "WATCH"))}</td>'
+        f'<td>{src_cell}</td></tr>'
+    )
+
+
+def _asset_watch_table(watch: list[dict]) -> str:
+    if not watch:
+        return '<div class="muted">No singles in the catalog.</div>'
+    body = "".join(_asset_watch_row_html(w) for w in watch)
+    return (
+        "<table><thead><tr><th>Card</th><th>Spec</th><th>Set</th><th>Market</th>"
+        "<th>Confidence</th><th>Trade type</th><th>Decision</th><th>Src</th>"
+        "</tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+    )
+
+
 def _category_key(d: dict) -> str:
     return str(d.get("category") or d.get("asset_class") or "other")
 
@@ -208,6 +248,18 @@ def render_sweep(sweep: dict, template: str | None = None, *,
         cat_sections.append(
             f'<section id="{anchor}"><h2>{_esc(key)}</h2>{_table(cats[key])}</section>'
         )
+
+    # Singles watch: catalog-sourced raw/graded assets. Rendered as its own
+    # section, never merged into the deal tables — these rows carry a market comp
+    # and NO entry price (no MSRP, no buy wire for singles), so a "% off" column
+    # would be a number nobody can act on. Appended only when the sweep carries
+    # the key, so a sealed-only board renders exactly as it did before.
+    asset_watch = sweep.get("asset_watch")
+    if asset_watch is not None:
+        cat_nav.append("singles-watch")
+        cat_sections.append(
+            '<section id="singles-watch"><h2>Singles watch (raw / graded)</h2>'
+            f'{_asset_watch_table(asset_watch)}</section>')
 
     nav_ids = ["freshness", "buyable-now", "watchlist", "top-steals", *cat_nav,
                "promo-codes", "bundled-offers", "watch-out", "sources"]

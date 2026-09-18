@@ -23,7 +23,9 @@ from .. import main as main_mod
 from .. import market as market_mod
 from .. import resale
 from ..comps import engine as comps_engine
+from ..poke_api import history as history_mod
 from ..retailers import ALL as RETAILERS_ALL
+from . import assets_feed
 from . import golden as golden_mod
 from . import ledger as ledger_mod
 from . import render as render_mod
@@ -100,6 +102,7 @@ def build_sealed_sweep(
     sweep_id: str,
     captured_at: str,
     stock_verifier: StockVerifier | None = None,
+    asset_watch: list[dict] | None = None,
 ) -> dict:
     products = cfg_mod.selected_products(cfg)
     rows: list[schema.DealRow] = []
@@ -180,6 +183,14 @@ def build_sealed_sweep(
     }
     if stock_verifier is not None:
         sweep["stock_states"] = stock_states   # terminal-state tally for the manifest
+    if asset_watch is not None:
+        # Singles ride alongside the sealed deals, never inside them: a raw/graded
+        # asset has no MSRP and no verified-entry buy wire, so it has no deal price
+        # to compare a comp against. Putting one in "deals" would mean inventing
+        # that price. Absent when the gate is off -> the sealed dict is unchanged.
+        sweep["asset_watch"] = asset_watch
+        # counts stays the sealed tally under BOTH gate states; the singles
+        # coverage tally rides on the manifest, where nothing reads it as sealed.
     return sweep
 
 
@@ -281,11 +292,23 @@ def main(argv: list[str] | None = None,
             return verify_mod.verify_catalog_product(
                 _cfg, key, product, expected_price=expected_price)
 
+    poke_dir = root / "data" / "poke"
+
+    # Singles feed (gated, default off). Read-first off the append-only ledger:
+    # offline, 0 PPT credits, no live fetch — an asset with no persisted comp
+    # surfaces as an honest catalog gap rather than triggering a lookup.
+    assets, assets_error = assets_feed.load_feed_assets(cfg)
+    asset_watch = None
+    if assets_error:
+        print(f"ASSET CATALOG: not fed ({assets_error})")
+    elif assets:
+        observations = history_mod.read_ledger(poke_dir / "price_history.jsonl").observations
+        asset_watch = assets_feed.build_asset_watch(assets, observations)
+
     sweep = build_sealed_sweep(cfg, lookup,
                                event=args.event, sweep_id=sweep_id, captured_at=today,
-                               stock_verifier=stock_verifier)
+                               stock_verifier=stock_verifier, asset_watch=asset_watch)
 
-    poke_dir = root / "data" / "poke"
     poke_dir.mkdir(parents=True, exist_ok=True)
     sweep_path = poke_dir / f"{sweep_id}.json"
     sweep_path.write_text(json.dumps(sweep, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -305,6 +328,8 @@ def main(argv: list[str] | None = None,
     }
     if "stock_states" in sweep:
         manifest["stock_states"] = sweep["stock_states"]
+    if "asset_watch" in sweep:
+        manifest["asset_watch"] = assets_feed.watch_counts(sweep["asset_watch"])
     (poke_dir / f"{sweep_id}.manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -330,6 +355,10 @@ def main(argv: list[str] | None = None,
     if "stock_states" in sweep:
         summary = ", ".join(f"{k}={n}" for k, n in sorted(sweep["stock_states"].items()))
         print(f"stock: {summary or 'no rows verified'}")
+    if "asset_watch" in sweep:
+        aw = assets_feed.watch_counts(sweep["asset_watch"])
+        print(f"singles: assets={aw['assets']} comped={aw['comped']} "
+              f"catalog_gap={aw['catalog_gap']} (WATCH only, 0 credits)")
     print(f"dashboard: {dash_path}")
     return 0
 

@@ -44,8 +44,10 @@ from .. import market as market_mod
 from .. import resale
 from ..comps import engine as comps_engine
 from ..notify import DealAlert, Notifier
+from ..poke_api import history as history_mod
 from ..retailers import http as retailer_http
 from ..state import State
+from . import assets_feed
 from . import golden as golden_mod
 from . import ledger as ledger_mod
 from . import render as render_mod
@@ -216,6 +218,15 @@ def default_comp_lookup(cfg: Any) -> CompLookup:
         if product is None:
             return {"status": "no_match",
                     "detail": "non-catalog candidate; no ad-hoc comp in this build"}
+        if product.get("asset_class"):
+            # A single's comp is read-first off the append-only ledger: offline,
+            # 0 credits, and it degrades to an honest no-comp rather than
+            # reaching for a live source mid-run.
+            if "obs" not in box:
+                box["obs"] = history_mod.read_ledger(
+                    cfg_mod.ROOT / "data" / "poke" / "price_history.jsonl").observations
+            return assets_feed.asset_comp(
+                box["obs"], candidate.matched_product_key or "", product)
         try:
             return _client().estimate(candidate.matched_product_key, product,
                                       int(time.time()))
@@ -240,10 +251,12 @@ def _build_row(cfg: Any, c: CandidateDeal, v: StockVerification, product: dict |
     price_conf, source_url, derivation, detail = sweep_mod._provenance(comp_row, comp_conf)
     if not source_url:
         return None  # unattributable comp -> no board row (counted as no_comp upstream)
+    is_asset = bool(product and product.get("asset_class"))
     row = schema.DealRow(
         item=c.item_name,
         asset_class=c.asset_class or "sealed",
-        category=sweep_mod._category(product) if product else "discovered",
+        category=(assets_feed.SINGLES_CATEGORY if is_asset
+                  else sweep_mod._category(product) if product else "discovered"),
         deal_price=v.verified_price,
         market_comp=comp,
         retailer=c.retailer or v.source,
@@ -264,6 +277,14 @@ def _build_row(cfg: Any, c: CandidateDeal, v: StockVerification, product: dict |
         stock_checked_at=v.checked_at,
         stock_method=v.method,
     )
+    if is_asset:
+        # STOP gate: a graded row needs grade+grader and a raw row needs
+        # condition. They come off the matched asset, never off the listing
+        # title — the title is what we matched, not a source of truth.
+        row.grade = str(product.get("grade") or "")
+        row.grader = str(product.get("grader") or "")
+        row.condition = str(product.get("condition") or "")
+        row.variant = row.variant or str(product.get("card_number") or "")
     row.badges = score.assign_badges(row, cfg)
     row.lens_tags = score.lens_tags(row, cfg)
     row.scanner_verdict = main_mod.verdict_for_alert(
@@ -305,9 +326,32 @@ def _append_listing(path: Path, c: CandidateDeal, capture_date: str) -> None:
 
 # ------------------------------------------------------------ per-candidate
 
+def _match_asset_candidate(c: CandidateDeal, assets: dict) -> CandidateDeal:
+    """Attach a raw/graded asset to a candidate the sealed catalog did not match.
+
+    An already-matched (Ring 1) candidate is returned untouched — sealed wins, so
+    turning the feed on can never change a sealed disposition. An unmatched title
+    with no single unambiguous asset is also returned untouched (honest Ring 2/3),
+    because raw NM and PSA 10 of one card are different money."""
+    if c.matched_product_key:
+        return c
+    asset_key = assets_feed.match_asset(c.item_name, assets)
+    if asset_key is None:
+        return c
+    asset = assets[asset_key]
+    return replace(
+        c,
+        matched_product_key=asset_key,
+        matched_set=str(asset.get("set") or "") or c.matched_set,
+        asset_class=str(asset.get("asset_class") or "raw"),
+        variant=c.variant or str(asset.get("card_number") or ""),
+    )
+
+
 def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: CompLookup,
               catalog: dict, board_rows: list, state: Any, notifier: Any,
-              now_ts: int, quiet: bool, captured_at: str, dry_run: bool) -> tuple[str, str]:
+              now_ts: int, quiet: bool, captured_at: str, dry_run: bool,
+              assets: dict | None = None) -> tuple[str, str]:
     """Return (terminal bucket, human reason) for one candidate. Every path
     yields a reason so the manifest records an honest per-candidate disposition."""
     # 1) VERIFY outcome
@@ -328,6 +372,10 @@ def _classify(cfg: Any, c: CandidateDeal, v: StockVerification, comp_lookup: Com
     # 3) COMP (PPT-free); no usable comp -> no_comp. A comp source that raises
     # never errors the run (sweep's "one comp failure just skips + counts" doctrine).
     product = catalog.get(c.matched_product_key) if c.matched_product_key else None
+    if product is None and assets and c.matched_product_key:
+        # Singles live in their own catalog; the sealed one is never widened, so
+        # sealed matching and every sealed adapter see exactly what they saw.
+        product = assets.get(c.matched_product_key)
     try:
         comp_row = comp_lookup(c, product) or {}
     except Exception:
@@ -397,6 +445,7 @@ def run_once(
     notifier: Any = None,
     state: Any = None,
     catalog: dict | None = None,
+    assets: dict | None = None,
     source_slugs: list[str] | None = None,
     registry: dict | None = None,
     now_ts: int | None = None,
@@ -413,6 +462,9 @@ def run_once(
     now_dt = datetime.now() if now_dt is None else now_dt
     registry = ADAPTER_REGISTRY if registry is None else registry
     catalog = cfg_mod.selected_products(cfg) if catalog is None else catalog
+    assets_error = ""
+    if assets is None:
+        assets, assets_error = assets_feed.load_feed_assets(cfg)
     set_watch = list(getattr(cfg.discovery, "set_watch", []))
     captured_at = captured_at or date.today().isoformat()
     sweep_id = f"{captured_at}-{event}"
@@ -496,6 +548,13 @@ def run_once(
         seen.add(key)
         candidates.append(c)
 
+    # Singles match pass. Runs only on candidates the SEALED catalog did not
+    # claim, so a sealed match can never be displaced by an asset and sealed
+    # dispositions are untouched. The adapters were never handed the asset
+    # catalog: they discover exactly what they discovered before.
+    if assets:
+        candidates = [_match_asset_candidate(c, assets) for c in candidates]
+
     quiet = _in_quiet_hours(now_dt, cfg.alerts.quiet_hours)
     counts = {b: 0 for b in TERMINAL_BUCKETS}
     board_rows: list[schema.DealRow] = []
@@ -516,7 +575,8 @@ def run_once(
             v = replace(v, checked_at=page_memo.shared_fetched_at,
                         method=f"{v.method}+shared_page")
         bucket, reason = _classify(cfg, c, v, comp_lookup, catalog, board_rows, state,
-                                   notifier, now_ts, quiet, captured_at, dry_run)
+                                   notifier, now_ts, quiet, captured_at, dry_run,
+                                   assets=assets)
         counts[bucket] += 1
         outcomes.append({"source": c.source, "listing_id": c.listing_id,
                          "terminal": bucket, "reason": reason})
@@ -539,6 +599,12 @@ def run_once(
         "candidates": len(candidates), "counts": counts,
         "sources": source_reports, "outcomes": outcomes, "board": board,
     }
+    if assets:
+        manifest["assets_fed"] = len(assets)
+    if assets_error:
+        # Contained, never raised: a malformed assets.yaml must not take the
+        # sealed pipeline down, and it must not vanish either.
+        manifest["assets_error"] = assets_error
     # invariant: no silent drops
     assert sum(counts.values()) == len(candidates) == len(outcomes), \
         "manifest counts must reconcile"
