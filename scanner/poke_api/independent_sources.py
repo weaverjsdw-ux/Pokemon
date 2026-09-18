@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+# imported bare (not `import html`) — a local `html` name is already used below
+from html import unescape as _unescape
 from typing import Any
 
 import requests
@@ -66,7 +68,11 @@ def pricecharting_page_number_from_html(body: str) -> str | None:
     for pat in (r"<h1[^>]*>(.*?)</h1>", r"<title[^>]*>(.*?)</title>"):
         m = re.search(pat, body, flags=re.I | re.S)
         if m:
-            num = re.search(r"#\s*(\d+)", m.group(1))
+            # Unescape FIRST: an apostrophe in the card name renders as `&#39;` (or
+            # `&#039;`/`&apos;`), and its digits precede the real `#NNN` — matching the
+            # raw HTML returns "39" for every apostrophe-named card, which then trips
+            # the wrong-slug guard and suppresses an otherwise correct comp.
+            num = re.search(r"#\s*(\d+)", _unescape(m.group(1)))
             if num:
                 return num.group(1)
     return None

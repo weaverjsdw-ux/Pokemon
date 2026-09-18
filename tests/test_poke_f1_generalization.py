@@ -66,6 +66,30 @@ def test_page_number_none_when_absent():
     assert indep.pricecharting_page_number_from_html("<div>no product name</div>") is None
 
 
+def test_page_number_ignores_html_escaped_apostrophe():
+    """An apostrophe in the card name renders as the entity ``&#39;``, whose digits
+    sit BEFORE the real card number — the number must come from ``#231``, never ``39``.
+    Regression: unfixed, every apostrophe-named card (a large share of modern SV chase
+    cards) tripped the wrong-slug guard and recorded nothing despite a correct slug."""
+    h1 = ("<h1 class='chart_title'>Team Rocket&#39;s Mewtwo ex #231 "
+          "Pokemon Destined Rivals</h1>")
+    assert indep.pricecharting_page_number_from_html(h1) == "231"
+    # the same entity in a <title> fallback, and the named form
+    title = "<title>Cynthia&#039;s Garchomp ex #232 Prices | Pokemon Destined Rivals</title>"
+    assert indep.pricecharting_page_number_from_html(title) == "232"
+    assert indep.pricecharting_page_number_from_html(
+        "<h1>Lillie&apos;s Clefairy ex #184 Pokemon Journey Together</h1>") == "184"
+
+
+def test_escaped_apostrophe_page_does_not_trip_wrong_slug_guard():
+    """End-to-end of the same defect at the boundary that actually suppressed comps."""
+    asset = {"card_number": "231"}
+    page_number = indep.pricecharting_page_number_from_html(
+        "<h1>Team Rocket&#39;s Mewtwo ex #231 Pokemon Destined Rivals</h1>")
+    mismatch, reason = indep._slug_number_mismatch(asset, page_number)
+    assert mismatch is False, reason
+
+
 # ---------------------------------------------------- wrong-slug guard (record boundary)
 
 CHARIZARD_ASSET = {"asset_key": "charizard_ex_199_151_raw_nm", "asset_class": "raw",
