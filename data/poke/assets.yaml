@@ -159,3 +159,500 @@ leafeon_ex_144_raw_nm:
   condition: "NM"
   tcgplayer_id: "610499"   # Leafeon ex - 144/131 (TCGCSV productId, group 23821); double-verified live 2026-07-10 (T1 gate-pass, 5th sample)
   tcgcsv_group_id: 23821   # SV: Prismatic Evolutions (TCGCSV group)
+
+# =================================================================================
+# Set-coverage extension (2026-09-17) — the four Pokémon sets the sealed lane already
+# tracks in data/products.yaml that had ZERO singles coverage: Crown Zenith, Destined
+# Rivals, Journey Together, Paldean Fates. Purpose is price EVIDENCE: the comp path is
+# already built, it just had almost nothing to run on (5 distinct cards / 3 sets).
+#
+# Selection rule (not vibes): each set's products were enumerated from its TCGCSV group
+# (the authoritative, keyless, 0-credit product list), filtered to priced singles with a
+# single unambiguous subTypeName (the "clean single Holofoil subtype" precedent set by
+# sylveon_ex_156_raw_nm), then sampled across the set's own price regime — chase / mid /
+# low-tier — so the catalog measures more than one price band.
+#
+# Each card is tagged `famous` or `obscure` on its first row: entity familiarity is a
+# stratification axis any future evaluation would need, and it costs nothing to record now.
+#
+# Every id below was verified live 2026-09-17: tcgplayer_id + tcgcsv_group_id come from
+# the group's own /products response (the group stamped is the one that actually returned
+# the productId — Crown Zenith spans TWO groups, 17688 main and 17689 Galarian Gallery);
+# a pricecharting_slug is written ONLY where the path resolved 200 with the full six-cell
+# #price_data layout. Where it did not, the field is OMITTED — an honest `none` comp, per
+# the header rule above. Market prices in comments are TCGCSV marketPrice on 2026-09-17,
+# recorded as selection provenance (tier evidence), NOT as a comp.
+#
+# KNOWN PARSER INTERACTION (pre-existing, NOT worked around here): cards whose name
+# contains an apostrophe render it as `&#39;` in the PriceCharting page <h1>/<title>, so
+# pricecharting_page_number_from_html() returns "39" instead of the real card number. The
+# F.1 wrong-slug guard (_slug_number_mismatch) then sees 39 != the asset card_number and
+# records nothing. The slugs below ARE correct (h1 confirmed by hand); the suppression is
+# a false negative in the parser, not a bad mapping. Affected here: Team Rocket's Mewtwo
+# ex 231, Cynthia's Garchomp ex 232, Lillie's Clefairy ex 184. Every set therefore also
+# carries apostrophe-free cards that resolve today. Reported, not fixed — scanner/ logic
+# is out of this change's scope.
+# =================================================================================
+
+# --------------------------------------------------------------- Crown Zenith (SWSH)
+# Two TCGCSV groups: 17688 (main set) and 17689 (Galarian Gallery subset). The GG subset
+# carries the set's value; the stamped group is per-card, whichever returned the productId.
+
+# famous — chase; TCGCSV marketPrice $311.93 (2026-09-17), the set's top single.
+giratina_vstar_gg69_cz_raw_nm:
+  asset_class: raw
+  name: "Giratina VSTAR GG69"
+  set: "Crown Zenith"
+  card_number: "GG69"
+  condition: "NM"
+  tcgplayer_id: "478100"   # Giratina VSTAR (Secret) - GG69/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  tcgcsv_group_id: 17689   # SWSH: Crown Zenith: Galarian Gallery (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/giratina-vstar-GG69"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+giratina_vstar_gg69_cz_psa10:
+  asset_class: graded
+  name: "Giratina VSTAR GG69"
+  set: "Crown Zenith"
+  card_number: "GG69"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "478100"   # Giratina VSTAR (Secret) - GG69/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/giratina-vstar-GG69"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+giratina_vstar_gg69_cz_psa9:
+  asset_class: graded
+  name: "Giratina VSTAR GG69"
+  set: "Crown Zenith"
+  card_number: "GG69"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/giratina-vstar-GG69"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+# famous — chase; TCGCSV marketPrice $260.04 (2026-09-17).
+mewtwo_vstar_gg44_cz_raw_nm:
+  asset_class: raw
+  name: "Mewtwo VSTAR GG44"
+  set: "Crown Zenith"
+  card_number: "GG44"
+  condition: "NM"
+  tcgplayer_id: "477057"   # Mewtwo VSTAR - GG44/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  tcgcsv_group_id: 17689   # SWSH: Crown Zenith: Galarian Gallery (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/mewtwo-vstar-GG44"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+mewtwo_vstar_gg44_cz_psa10:
+  asset_class: graded
+  name: "Mewtwo VSTAR GG44"
+  set: "Crown Zenith"
+  card_number: "GG44"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "477057"   # Mewtwo VSTAR - GG44/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/mewtwo-vstar-GG44"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+mewtwo_vstar_gg44_cz_psa9:
+  asset_class: graded
+  name: "Mewtwo VSTAR GG44"
+  set: "Crown Zenith"
+  card_number: "GG44"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/mewtwo-vstar-GG44"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+# famous — mid-tier; TCGCSV marketPrice $49.10 (2026-09-17). MAIN group (17688), not GG.
+pikachu_160_cz_raw_nm:
+  asset_class: raw
+  name: "Pikachu 160"
+  set: "Crown Zenith"
+  card_number: "160"
+  condition: "NM"
+  tcgplayer_id: "478103"   # Pikachu (Secret) - 160/159 (TCGCSV productId, group 17688); verified live 2026-09-17
+  tcgcsv_group_id: 17688   # SWSH: Crown Zenith (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith/pikachu-160"  # 200 + six-cell #price_data, page #160; verified live 2026-09-17
+
+pikachu_160_cz_psa10:
+  asset_class: graded
+  name: "Pikachu 160"
+  set: "Crown Zenith"
+  card_number: "160"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "478103"   # Pikachu (Secret) - 160/159 (TCGCSV productId, group 17688); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith/pikachu-160"  # 200 + six-cell #price_data, page #160; verified live 2026-09-17
+
+pikachu_160_cz_psa9:
+  asset_class: graded
+  name: "Pikachu 160"
+  set: "Crown Zenith"
+  card_number: "160"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-crown-zenith/pikachu-160"  # 200 + six-cell #price_data, page #160; verified live 2026-09-17
+
+# obscure — low-tier / liquid; TCGCSV marketPrice $5.80 (2026-09-17).
+duskull_gg28_cz_raw_nm:
+  asset_class: raw
+  name: "Duskull GG28"
+  set: "Crown Zenith"
+  card_number: "GG28"
+  condition: "NM"
+  tcgplayer_id: "478047"   # Duskull - GG28/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  tcgcsv_group_id: 17689   # SWSH: Crown Zenith: Galarian Gallery (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/duskull-GG28"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+duskull_gg28_cz_psa10:
+  asset_class: graded
+  name: "Duskull GG28"
+  set: "Crown Zenith"
+  card_number: "GG28"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "478047"   # Duskull - GG28/GG70 (TCGCSV productId, group 17689); verified live 2026-09-17
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/duskull-GG28"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+duskull_gg28_cz_psa9:
+  asset_class: graded
+  name: "Duskull GG28"
+  set: "Crown Zenith"
+  card_number: "GG28"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-crown-zenith-galarian-gallery/duskull-GG28"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+# ------------------------------------------------------------- Destined Rivals (SV10)
+
+# famous — chase; TCGCSV marketPrice $440.61 (2026-09-17), the set's top single.
+# Apostrophe name -> F.1 page-number guard false-negative (see header note); slug is correct.
+team_rockets_mewtwo_ex_231_dr_raw_nm:
+  asset_class: raw
+  name: "Team Rocket's Mewtwo ex 231"
+  set: "Destined Rivals"
+  card_number: "231"
+  condition: "NM"
+  tcgplayer_id: "633031"   # Team Rocket's Mewtwo ex - 231/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  tcgcsv_group_id: 24269   # SV10: Destined Rivals (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/team-rockets-mewtwo-ex-231"  # 200 + six-cell #price_data, h1 "#231"; verified live 2026-09-17
+
+team_rockets_mewtwo_ex_231_dr_psa10:
+  asset_class: graded
+  name: "Team Rocket's Mewtwo ex 231"
+  set: "Destined Rivals"
+  card_number: "231"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "633031"   # Team Rocket's Mewtwo ex - 231/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/team-rockets-mewtwo-ex-231"  # 200 + six-cell #price_data, h1 "#231"; verified live 2026-09-17
+
+team_rockets_mewtwo_ex_231_dr_psa9:
+  asset_class: graded
+  name: "Team Rocket's Mewtwo ex 231"
+  set: "Destined Rivals"
+  card_number: "231"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-destined-rivals/team-rockets-mewtwo-ex-231"  # 200 + six-cell #price_data, h1 "#231"; verified live 2026-09-17
+
+# famous — chase; TCGCSV marketPrice $224.52 (2026-09-17). Apostrophe name (see header note).
+cynthias_garchomp_ex_232_dr_raw_nm:
+  asset_class: raw
+  name: "Cynthia's Garchomp ex 232"
+  set: "Destined Rivals"
+  card_number: "232"
+  condition: "NM"
+  tcgplayer_id: "633032"   # Cynthia's Garchomp ex - 232/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  tcgcsv_group_id: 24269   # SV10: Destined Rivals (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/cynthias-garchomp-ex-232"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+cynthias_garchomp_ex_232_dr_psa10:
+  asset_class: graded
+  name: "Cynthia's Garchomp ex 232"
+  set: "Destined Rivals"
+  card_number: "232"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "633032"   # Cynthia's Garchomp ex - 232/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/cynthias-garchomp-ex-232"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+cynthias_garchomp_ex_232_dr_psa9:
+  asset_class: graded
+  name: "Cynthia's Garchomp ex 232"
+  set: "Destined Rivals"
+  card_number: "232"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-destined-rivals/cynthias-garchomp-ex-232"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+# obscure — mid-tier; TCGCSV marketPrice $20.01 (2026-09-17). Apostrophe-free: resolves today.
+yanmega_ex_228_dr_raw_nm:
+  asset_class: raw
+  name: "Yanmega ex 228"
+  set: "Destined Rivals"
+  card_number: "228"
+  condition: "NM"
+  tcgplayer_id: "633028"   # Yanmega ex - 228/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  tcgcsv_group_id: 24269   # SV10: Destined Rivals (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/yanmega-ex-228"  # 200 + six-cell #price_data, page #228; verified live 2026-09-17
+
+yanmega_ex_228_dr_psa10:
+  asset_class: graded
+  name: "Yanmega ex 228"
+  set: "Destined Rivals"
+  card_number: "228"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "633028"   # Yanmega ex - 228/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/yanmega-ex-228"  # 200 + six-cell #price_data, page #228; verified live 2026-09-17
+
+yanmega_ex_228_dr_psa9:
+  asset_class: graded
+  name: "Yanmega ex 228"
+  set: "Destined Rivals"
+  card_number: "228"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-destined-rivals/yanmega-ex-228"  # 200 + six-cell #price_data, page #228; verified live 2026-09-17
+
+# obscure — low-tier / liquid; TCGCSV marketPrice $3.55 (2026-09-17). Apostrophe-free.
+electrike_196_dr_raw_nm:
+  asset_class: raw
+  name: "Electrike 196"
+  set: "Destined Rivals"
+  card_number: "196"
+  condition: "NM"
+  tcgplayer_id: "632996"   # Electrike - 196/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  tcgcsv_group_id: 24269   # SV10: Destined Rivals (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/electrike-196"  # 200 + six-cell #price_data, page #196; verified live 2026-09-17
+
+electrike_196_dr_psa10:
+  asset_class: graded
+  name: "Electrike 196"
+  set: "Destined Rivals"
+  card_number: "196"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "632996"   # Electrike - 196/182 (TCGCSV productId, group 24269); verified live 2026-09-17
+  pricecharting_slug: "pokemon-destined-rivals/electrike-196"  # 200 + six-cell #price_data, page #196; verified live 2026-09-17
+
+electrike_196_dr_psa9:
+  asset_class: graded
+  name: "Electrike 196"
+  set: "Destined Rivals"
+  card_number: "196"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-destined-rivals/electrike-196"  # 200 + six-cell #price_data, page #196; verified live 2026-09-17
+
+# ------------------------------------------------------------ Journey Together (SV09)
+
+# famous — chase; TCGCSV marketPrice $101.70 (2026-09-17). Apostrophe name (see header note).
+lillies_clefairy_ex_184_jt_raw_nm:
+  asset_class: raw
+  name: "Lillie's Clefairy ex 184"
+  set: "Journey Together"
+  card_number: "184"
+  condition: "NM"
+  tcgplayer_id: "623611"   # Lillie's Clefairy ex - 184/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+  tcgcsv_group_id: 24073   # SV09: Journey Together (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-journey-together/lillies-clefairy-ex-184"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+lillies_clefairy_ex_184_jt_psa10:
+  asset_class: graded
+  name: "Lillie's Clefairy ex 184"
+  set: "Journey Together"
+  card_number: "184"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "623611"   # Lillie's Clefairy ex - 184/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+  pricecharting_slug: "pokemon-journey-together/lillies-clefairy-ex-184"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+lillies_clefairy_ex_184_jt_psa9:
+  asset_class: graded
+  name: "Lillie's Clefairy ex 184"
+  set: "Journey Together"
+  card_number: "184"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-journey-together/lillies-clefairy-ex-184"  # 200 + six-cell #price_data; verified live 2026-09-17
+
+# famous — mid-tier; TCGCSV marketPrice $20.64 (2026-09-17). Apostrophe-free: resolves today.
+articuno_161_jt_raw_nm:
+  asset_class: raw
+  name: "Articuno 161"
+  set: "Journey Together"
+  card_number: "161"
+  condition: "NM"
+  tcgplayer_id: "623588"   # Articuno - 161/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+  tcgcsv_group_id: 24073   # SV09: Journey Together (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-journey-together/articuno-161"  # 200 + six-cell #price_data, page #161; verified live 2026-09-17
+
+articuno_161_jt_psa10:
+  asset_class: graded
+  name: "Articuno 161"
+  set: "Journey Together"
+  card_number: "161"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "623588"   # Articuno - 161/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+  pricecharting_slug: "pokemon-journey-together/articuno-161"  # 200 + six-cell #price_data, page #161; verified live 2026-09-17
+
+articuno_161_jt_psa9:
+  asset_class: graded
+  name: "Articuno 161"
+  set: "Journey Together"
+  card_number: "161"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-journey-together/articuno-161"  # 200 + six-cell #price_data, page #161; verified live 2026-09-17
+
+# obscure — low-tier / liquid; TCGCSV marketPrice $0.88 (2026-09-17).
+# pricecharting_slug deliberately OMITTED: pokemon-journey-together/mamoswine-ex-174 resolves
+# 200 and is the right card (h1 "Mamoswine ex #174") but exposes only FIVE priced cells, not
+# the six-cell layout this file's verification bar requires -> honest none, never a guess.
+mamoswine_ex_174_jt_raw_nm:
+  asset_class: raw
+  name: "Mamoswine ex 174"
+  set: "Journey Together"
+  card_number: "174"
+  condition: "NM"
+  tcgplayer_id: "623601"   # Mamoswine ex - 174/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+  tcgcsv_group_id: 24073   # SV09: Journey Together (TCGCSV group); verified live 2026-09-17
+
+mamoswine_ex_174_jt_psa10:
+  asset_class: graded
+  name: "Mamoswine ex 174"
+  set: "Journey Together"
+  card_number: "174"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "623601"   # Mamoswine ex - 174/159 (TCGCSV productId, group 24073); verified live 2026-09-17
+
+mamoswine_ex_174_jt_psa9:
+  asset_class: graded
+  name: "Mamoswine ex 174"
+  set: "Journey Together"
+  card_number: "174"
+  grader: "PSA"
+  grade: "9"
+  # no verified exact source for the PSA-9 path -> honest none (estimate: null / confidence: none)
+
+# --------------------------------------------------------------- Paldean Fates (SV4.5)
+
+# famous — chase; TCGCSV marketPrice $872.26 (2026-09-17), the set's top single.
+mew_ex_232_paf_raw_nm:
+  asset_class: raw
+  name: "Mew ex 232"
+  set: "Paldean Fates"
+  card_number: "232"
+  condition: "NM"
+  tcgplayer_id: "534919"   # Mew ex - 232/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  tcgcsv_group_id: 23353   # SV: Paldean Fates (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/mew-ex-232"  # 200 + six-cell #price_data, page #232; verified live 2026-09-17
+
+mew_ex_232_paf_psa10:
+  asset_class: graded
+  name: "Mew ex 232"
+  set: "Paldean Fates"
+  card_number: "232"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "534919"   # Mew ex - 232/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/mew-ex-232"  # 200 + six-cell #price_data, page #232; verified live 2026-09-17
+
+mew_ex_232_paf_psa9:
+  asset_class: graded
+  name: "Mew ex 232"
+  set: "Paldean Fates"
+  card_number: "232"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-paldean-fates/mew-ex-232"  # 200 + six-cell #price_data, page #232; verified live 2026-09-17
+
+# famous — chase; TCGCSV marketPrice $277.46 (2026-09-17). Distinct card from the 151
+# Charizard ex 199 already in this file (different set, different number).
+charizard_ex_234_paf_raw_nm:
+  asset_class: raw
+  name: "Charizard ex 234"
+  set: "Paldean Fates"
+  card_number: "234"
+  condition: "NM"
+  tcgplayer_id: "535090"   # Charizard ex - 234/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  tcgcsv_group_id: 23353   # SV: Paldean Fates (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/charizard-ex-234"  # 200 + six-cell #price_data, page #234; verified live 2026-09-17
+
+charizard_ex_234_paf_psa10:
+  asset_class: graded
+  name: "Charizard ex 234"
+  set: "Paldean Fates"
+  card_number: "234"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "535090"   # Charizard ex - 234/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/charizard-ex-234"  # 200 + six-cell #price_data, page #234; verified live 2026-09-17
+
+charizard_ex_234_paf_psa9:
+  asset_class: graded
+  name: "Charizard ex 234"
+  set: "Paldean Fates"
+  card_number: "234"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-paldean-fates/charizard-ex-234"  # 200 + six-cell #price_data, page #234; verified live 2026-09-17
+
+# famous — mid-tier for this set's regime; TCGCSV marketPrice $172.60 (2026-09-17).
+gardevoir_ex_233_paf_raw_nm:
+  asset_class: raw
+  name: "Gardevoir ex 233"
+  set: "Paldean Fates"
+  card_number: "233"
+  condition: "NM"
+  tcgplayer_id: "535085"   # Gardevoir ex - 233/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  tcgcsv_group_id: 23353   # SV: Paldean Fates (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/gardevoir-ex-233"  # 200 + six-cell #price_data, page #233; verified live 2026-09-17
+
+gardevoir_ex_233_paf_psa10:
+  asset_class: graded
+  name: "Gardevoir ex 233"
+  set: "Paldean Fates"
+  card_number: "233"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "535085"   # Gardevoir ex - 233/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/gardevoir-ex-233"  # 200 + six-cell #price_data, page #233; verified live 2026-09-17
+
+gardevoir_ex_233_paf_psa9:
+  asset_class: graded
+  name: "Gardevoir ex 233"
+  set: "Paldean Fates"
+  card_number: "233"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-paldean-fates/gardevoir-ex-233"  # 200 + six-cell #price_data, page #233; verified live 2026-09-17
+
+# obscure — low-tier / liquid; TCGCSV marketPrice $8.57 (2026-09-17).
+cleffa_150_paf_raw_nm:
+  asset_class: raw
+  name: "Cleffa 150"
+  set: "Paldean Fates"
+  card_number: "150"
+  condition: "NM"
+  tcgplayer_id: "534636"   # Cleffa - 150/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  tcgcsv_group_id: 23353   # SV: Paldean Fates (TCGCSV group); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/cleffa-150"  # 200 + six-cell #price_data, page #150; verified live 2026-09-17
+
+cleffa_150_paf_psa10:
+  asset_class: graded
+  name: "Cleffa 150"
+  set: "Paldean Fates"
+  card_number: "150"
+  grader: "PSA"
+  grade: "10"
+  tcgplayer_id: "534636"   # Cleffa - 150/091 (TCGCSV productId, group 23353); verified live 2026-09-17
+  pricecharting_slug: "pokemon-paldean-fates/cleffa-150"  # 200 + six-cell #price_data, page #150; verified live 2026-09-17
+
+cleffa_150_paf_psa9:
+  asset_class: graded
+  name: "Cleffa 150"
+  set: "Paldean Fates"
+  card_number: "150"
+  grader: "PSA"
+  grade: "9"
+  pricecharting_slug: "pokemon-paldean-fates/cleffa-150"  # 200 + six-cell #price_data, page #150; verified live 2026-09-17
